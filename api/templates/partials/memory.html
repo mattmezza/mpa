@@ -1,14 +1,14 @@
 {# Memory tab partial #}
-<div>
-  {# Memory config section #}
-  <div class="card mb-6" x-data="{
-    dbPath: {{ memory_db_path|default('data/memory.db', true)|tojson }},
-    longTermLimit: {{ memory_long_term_limit|default('50', true)|tojson }},
-    extractionModel: {{ memory_extraction_model|default('claude-haiku-4-5', true)|tojson }},
-    consolidationModel: {{ memory_consolidation_model|default('claude-haiku-4-5', true)|tojson }},
+  <div x-data="{
+    dbPath: {{ memory_db_path|default('data/memory.db', true)|tojson|forceescape }},
+    longTermLimit: {{ memory_long_term_limit|default('50', true)|tojson|forceescape }},
+    extractionModel: {{ memory_extraction_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
+    consolidationModel: {{ memory_consolidation_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
     cfgResult: '',
     cfgOk: false
   }">
+  {# Memory config section #}
+  <div class="card mb-6">
     <h2 class="text-base mb-1">Memory Settings</h2>
     <p class="text-muted text-xs mb-3">Configure memory storage and the models used for extraction and consolidation.</p>
 
