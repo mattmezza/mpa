@@ -110,6 +110,48 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
     return ctx
 
 
+async def _channel_list_context(config_store: ConfigStore) -> dict[str, list[dict[str, str]]]:
+    channels: list[dict[str, str]] = []
+
+    tg_enabled_raw = await config_store.get("channels.telegram.enabled")
+    tg_enabled = str(tg_enabled_raw).lower() == "true"
+    tg_token = await config_store.get("channels.telegram.bot_token")
+    tg_users = await config_store.get("channels.telegram.allowed_user_ids")
+    tg_detail = "Not configured"
+    if tg_token:
+        tg_detail = "Bot token set"
+        if tg_users:
+            tg_detail = f"Bot token set · Users: {tg_users}"
+    channels.append(
+        {
+            "key": "telegram",
+            "label": "Telegram",
+            "enabled": tg_enabled,
+            "detail": tg_detail,
+        }
+    )
+
+    wa_enabled_raw = await config_store.get("channels.whatsapp.enabled")
+    wa_enabled = str(wa_enabled_raw).lower() == "true"
+    wa_bridge = await config_store.get("channels.whatsapp.bridge_url")
+    wa_numbers = await config_store.get("channels.whatsapp.allowed_numbers")
+    wa_detail = "Not configured"
+    if wa_bridge:
+        wa_detail = f"Bridge: {wa_bridge}"
+        if wa_numbers:
+            wa_detail = f"Bridge: {wa_bridge} · Numbers: {wa_numbers}"
+    channels.append(
+        {
+            "key": "whatsapp",
+            "label": "WhatsApp",
+            "enabled": wa_enabled,
+            "detail": wa_detail,
+        }
+    )
+
+    return {"channels": channels}
+
+
 def _render_wizard_step(
     step: str,
     steps: list[str],
@@ -373,6 +415,12 @@ def create_admin_app(
         skills = await store.list_skills()
         return _render_partial("partials/skills.html", skills=skills)
 
+    @app.get("/partials/channels", dependencies=[Depends(auth)])
+    async def partial_channels() -> HTMLResponse:
+        """Channels tab partial."""
+        channel_data = await _channel_list_context(config_store)
+        return _render_partial("partials/channels.html", **channel_data)
+
     @app.get("/partials/memory", dependencies=[Depends(auth)])
     async def partial_memory() -> HTMLResponse:
         """Memory tab partial."""
@@ -412,6 +460,262 @@ def create_admin_app(
         """Log lines partial for HTMX swap."""
         lines = list(_LOG_BUFFER)[-200:]
         return _render_partial("partials/logs_content.html", lines=lines)
+
+    # ── Jobs partial + API ─────────────────────────────────────────────
+
+    async def _persist_jobs_to_config(agent: AgentCore, cs: ConfigStore) -> None:
+        """Persist the current scheduler jobs to config store so they survive restarts."""
+        jobs_data = []
+        for ap_job in agent.scheduler.scheduler.get_jobs():
+            func_name = getattr(ap_job, "func_ref", "") or str(getattr(ap_job, "func", ""))
+            kwargs = ap_job.kwargs or {}
+            trigger = ap_job.trigger
+
+            # Only persist cron jobs (skip one-shot date triggers)
+            if not hasattr(trigger, "fields"):
+                continue
+
+            # Reconstruct cron string
+            parts = []
+            field_order = ["minute", "hour", "day", "month", "day_of_week"]
+            field_map = {f.name: f for f in trigger.fields}
+            for name in field_order:
+                f = field_map.get(name)
+                parts.append(str(f) if f else "*")
+            cron = " ".join(parts)
+
+            if "run_agent_task" in func_name:
+                job_type = "agent"
+                task = kwargs.get("task", "")
+            elif "run_system_command" in func_name:
+                job_type = "system"
+                task = kwargs.get("command", "")
+            elif "run_memory_consolidation" in func_name:
+                job_type = "memory_consolidation"
+                task = ""
+            else:
+                continue
+
+            jobs_data.append(
+                {
+                    "id": ap_job.id,
+                    "cron": cron,
+                    "type": job_type,
+                    "task": task,
+                    "channel": kwargs.get("channel", "telegram"),
+                }
+            )
+
+        await cs.set("scheduler.jobs", json.dumps(jobs_data))
+
+    def _get_jobs_list() -> list[dict]:
+        """Build a list of job dicts from the running scheduler + config store."""
+        agent = agent_state.agent
+        if not agent:
+            return []
+        jobs = []
+        for ap_job in agent.scheduler.scheduler.get_jobs():
+            trigger = ap_job.trigger
+            # Reconstruct cron expression from APScheduler trigger fields
+            cron = ""
+            if hasattr(trigger, "fields"):
+                parts = []
+                field_order = ["minute", "hour", "day", "month", "day_of_week"]
+                field_map = {f.name: f for f in trigger.fields}
+                for name in field_order:
+                    f = field_map.get(name)
+                    parts.append(str(f) if f else "*")
+                cron = " ".join(parts)
+            elif hasattr(trigger, "run_date"):
+                cron = f"once @ {trigger.run_date}"
+
+            # Determine job type and task from the stored function + kwargs
+            func_name = getattr(ap_job, "func_ref", "") or str(getattr(ap_job, "func", ""))
+            kwargs = ap_job.kwargs or {}
+            if "run_agent_task" in func_name:
+                job_type = "agent"
+                task = kwargs.get("task", "")
+            elif "run_system_command" in func_name:
+                job_type = "system"
+                task = kwargs.get("command", "")
+            elif "run_memory_consolidation" in func_name:
+                job_type = "memory_consolidation"
+                task = ""
+            else:
+                job_type = "unknown"
+                task = str(kwargs)
+
+            next_run = ""
+            if ap_job.next_run_time:
+                next_run = ap_job.next_run_time.strftime("%Y-%m-%d %H:%M")
+
+            jobs.append(
+                {
+                    "id": ap_job.id,
+                    "cron": cron,
+                    "type": job_type,
+                    "task": task,
+                    "channel": kwargs.get("channel", "telegram"),
+                    "next_run": next_run,
+                }
+            )
+        return jobs
+
+    @app.get("/partials/jobs", dependencies=[Depends(auth)])
+    async def partial_jobs() -> HTMLResponse:
+        """Jobs tab partial."""
+        jobs = _get_jobs_list()
+        agent_running = agent_state.agent is not None
+        return _render_partial("partials/jobs.html", jobs=jobs, agent_running=agent_running)
+
+    @app.post("/jobs", dependencies=[Depends(auth)])
+    async def upsert_job(request: Request) -> HTMLResponse:
+        """Add or update a scheduled job. Returns refreshed jobs partial."""
+        agent = agent_state.agent
+        if not agent:
+            raise HTTPException(503, "Agent not running")
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+
+        job_id = str(body.get("job_id", "")).strip()
+        cron = str(body.get("cron", "")).strip()
+        job_type = str(body.get("type", "agent")).strip()
+        task = str(body.get("task", "")).strip()
+        channel = str(body.get("channel", "telegram")).strip()
+
+        if not job_id:
+            raise HTTPException(400, "Job ID is required")
+        if not cron:
+            raise HTTPException(400, "Cron schedule is required")
+        if job_type not in ("agent", "system", "memory_consolidation"):
+            raise HTTPException(400, f"Invalid job type: {job_type}")
+        if job_type != "memory_consolidation" and not task:
+            raise HTTPException(400, "Task is required for agent/system jobs")
+
+        from core.scheduler import (
+            _parse_cron,
+            run_agent_task,
+            run_memory_consolidation,
+            run_system_command,
+        )
+
+        try:
+            cron_kwargs = _parse_cron(cron)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+        # Register the job in APScheduler
+        if job_type == "system":
+            agent.scheduler.scheduler.add_job(
+                run_system_command,
+                "cron",
+                id=job_id,
+                kwargs={"command": task},
+                replace_existing=True,
+                **cron_kwargs,
+            )
+        elif job_type == "memory_consolidation":
+            agent.scheduler.scheduler.add_job(
+                run_memory_consolidation,
+                "cron",
+                id=job_id,
+                replace_existing=True,
+                **cron_kwargs,
+            )
+        else:
+            agent.scheduler.scheduler.add_job(
+                run_agent_task,
+                "cron",
+                id=job_id,
+                kwargs={"task": task, "channel": channel},
+                replace_existing=True,
+                **cron_kwargs,
+            )
+
+        log.info("Job %r upserted via admin: %s (%s)", job_id, cron, job_type)
+
+        # Also persist to config store so jobs survive restarts
+        await _persist_jobs_to_config(agent, config_store)
+
+        jobs = _get_jobs_list()
+        return _render_partial("partials/jobs.html", jobs=jobs, agent_running=True)
+
+    @app.post("/jobs/delete", dependencies=[Depends(auth)])
+    async def delete_job(request: Request) -> HTMLResponse:
+        """Delete a scheduled job. Returns refreshed jobs partial."""
+        agent = agent_state.agent
+        if not agent:
+            raise HTTPException(503, "Agent not running")
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+
+        job_id = str(body.get("job_id", "")).strip()
+        if not job_id:
+            raise HTTPException(400, "Missing 'job_id' in request body")
+
+        try:
+            agent.scheduler.scheduler.remove_job(job_id)
+        except Exception:
+            raise HTTPException(404, f"Job not found: {job_id}")
+
+        log.info("Job %r deleted via admin", job_id)
+        await _persist_jobs_to_config(agent, config_store)
+
+        jobs = _get_jobs_list()
+        return _render_partial("partials/jobs.html", jobs=jobs, agent_running=True)
+
+    @app.post("/jobs/run", dependencies=[Depends(auth)])
+    async def run_job_now(request: Request) -> HTMLResponse:
+        """Trigger a job to run immediately. Returns a flash message."""
+        agent = agent_state.agent
+        if not agent:
+            raise HTTPException(503, "Agent not running")
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+
+        job_id = str(body.get("job_id", "")).strip()
+        if not job_id:
+            raise HTTPException(400, "Missing 'job_id' in request body")
+
+        # Find the job in APScheduler
+        ap_job = agent.scheduler.scheduler.get_job(job_id)
+        if not ap_job:
+            raise HTTPException(404, f"Job not found: {job_id}")
+
+        # Run it immediately in the background
+        import asyncio
+
+        func_name = getattr(ap_job, "func_ref", "") or str(getattr(ap_job, "func", ""))
+        kwargs = ap_job.kwargs or {}
+
+        if "run_agent_task" in func_name:
+            from core.scheduler import run_agent_task
+
+            asyncio.create_task(run_agent_task(**kwargs))
+        elif "run_system_command" in func_name:
+            from core.scheduler import run_system_command
+
+            asyncio.create_task(run_system_command(**kwargs))
+        elif "run_memory_consolidation" in func_name:
+            from core.scheduler import run_memory_consolidation
+
+            asyncio.create_task(run_memory_consolidation())
+        else:
+            return HTMLResponse(f'<span class="alert-error">Unknown job function</span>')
+
+        log.info("Job %r triggered manually via admin", job_id)
+        return HTMLResponse(
+            f'<span class="alert-success">Job &quot;{job_id}&quot; triggered — check logs for output</span>'
+        )
 
     # ── Config API ─────────────────────────────────────────────────────
 

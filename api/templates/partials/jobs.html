@@ -1,0 +1,177 @@
+{# Jobs tab partial #}
+<div x-data="jobsTab()">
+  <div class="flex items-center gap-2 mb-4 flex-wrap">
+    <button class="btn btn-sm" hx-get="/partials/jobs" hx-target="#tab-content" hx-swap="innerHTML">
+      Refresh
+    </button>
+    <span class="text-muted text-xs">{{ jobs|length }} job{{ 's' if jobs|length != 1 else '' }}</span>
+    {% if not agent_running %}
+    <span class="badge-off text-[0.65rem]">agent stopped — jobs won't run</span>
+    {% endif %}
+  </div>
+
+  {# Jobs table #}
+  <div class="overflow-x-auto">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="min-w-[120px]">ID</th>
+          <th>Schedule</th>
+          <th>Type</th>
+          <th>Task / Command</th>
+          <th class="w-20">Channel</th>
+          <th class="min-w-[120px]">Next Run</th>
+          <th class="w-28"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+        <tr>
+          <td class="text-xs break-all font-medium">{{ job.id }}</td>
+          <td class="text-xs">
+            <code class="px-1.5 py-0.5 bg-surface-active rounded text-accent text-[0.7rem]">{{ job.cron }}</code>
+          </td>
+          <td class="text-xs">
+            <span class="{% if job.type == 'agent' %}badge-ok{% elif job.type == 'system' %}badge-warn{% else %}badge-off{% endif %}">
+              {{ job.type }}
+            </span>
+          </td>
+          <td class="text-xs break-all" style="max-width: 320px;">
+            <span class="block truncate" title="{{ job.task }}">{{ job.task }}</span>
+          </td>
+          <td class="text-xs">{{ job.channel }}</td>
+          <td class="text-xs text-muted">{{ job.next_run or '—' }}</td>
+          <td class="whitespace-nowrap">
+            <button class="btn btn-sm"
+                    @click="editJob({{ job|tojson|forceescape }})">
+              edit
+            </button>
+            <button class="btn btn-sm ml-0.5" title="Run now"
+                    hx-post="/jobs/run" hx-target="#job-flash" hx-swap="innerHTML"
+                    hx-vals='{"job_id": {{ job.id|tojson }} }'>
+              &triangleright;
+            </button>
+            <button class="btn-danger btn-sm ml-0.5"
+                    hx-post="/jobs/delete" hx-target="#tab-content" hx-swap="innerHTML"
+                    hx-vals='{"job_id": {{ job.id|tojson }} }'
+                    hx-confirm="Delete job &quot;{{ job.id }}&quot;?">
+              x
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not jobs %}
+        <tr><td colspan="7" class="text-muted text-xs text-center py-4">No jobs configured</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {# Flash area for run-now feedback #}
+  <div id="job-flash" class="mt-3"></div>
+
+  {# Add / edit job form #}
+  <h3 class="text-xs text-muted uppercase tracking-wider mt-5 mb-2" x-text="editing ? 'Edit job' : 'Add new job'">Add new job</h3>
+  <form hx-post="/jobs" hx-target="#tab-content" hx-swap="innerHTML" @submit="resetForm()">
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div>
+        <label class="label">Job ID</label>
+        <input type="text" class="input-sm" name="job_id" x-model="form.id"
+               placeholder="morning-briefing" required
+               :readonly="editing" :class="editing && 'opacity-60 cursor-not-allowed'">
+        <span class="hint">Unique identifier (lowercase, dashes ok)</span>
+      </div>
+      <div>
+        <label class="label">Cron Schedule</label>
+        <input type="text" class="input-sm" name="cron" x-model="form.cron"
+               placeholder="0 7 * * *" required>
+        <span class="hint">5-field cron: min hour day month weekday</span>
+      </div>
+      <div>
+        <label class="label">Type</label>
+        <select class="select" name="type" x-model="form.type"
+                style="padding: 0.375rem 2rem 0.375rem 0.5rem; font-size: 0.75rem;">
+          <option value="agent">agent — natural language task</option>
+          <option value="system">system — CLI command</option>
+          <option value="memory_consolidation">memory_consolidation</option>
+        </select>
+      </div>
+      <div>
+        <label class="label">Channel</label>
+        <select class="select" name="channel" x-model="form.channel"
+                style="padding: 0.375rem 2rem 0.375rem 0.5rem; font-size: 0.75rem;">
+          <option value="telegram">telegram</option>
+        </select>
+        <span class="hint">Where to deliver the result</span>
+      </div>
+      <div class="sm:col-span-2">
+        <label class="label" x-text="form.type === 'system' ? 'Command' : 'Task'">Task</label>
+        <textarea class="textarea text-xs" name="task" x-model="form.task" rows="2"
+                  :placeholder="form.type === 'system' ? 'vdirsyncer sync' : 'Check my calendar and send me a morning briefing'"
+                  :required="form.type !== 'memory_consolidation'"></textarea>
+        <span class="hint" x-show="form.type === 'agent'">Natural language instruction for the agent</span>
+        <span class="hint" x-show="form.type === 'system'">Shell command to execute</span>
+        <span class="hint" x-show="form.type === 'memory_consolidation'">No task needed — runs memory consolidation automatically</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 mt-4">
+      <button type="submit" class="btn btn-primary btn-sm">
+        <span x-text="editing ? 'Update Job' : 'Add Job'">Add Job</span>
+      </button>
+      <button type="button" class="btn btn-sm" x-show="editing" @click="cancelEdit()">
+        Cancel
+      </button>
+    </div>
+  </form>
+
+  {# Cron cheat-sheet #}
+  <details class="mt-5">
+    <summary class="text-xs text-muted cursor-pointer hover:text-gray-200 transition-colors">
+      Cron cheat sheet
+    </summary>
+    <div class="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted" style="max-width: 480px;">
+      <code class="text-accent">0 7 * * *</code>    <span>Every day at 07:00</span>
+      <code class="text-accent">*/15 * * * *</code> <span>Every 15 minutes</span>
+      <code class="text-accent">0 9 * * 1-5</code>  <span>Weekdays at 09:00</span>
+      <code class="text-accent">0 0 * * 0</code>    <span>Sunday at midnight</span>
+      <code class="text-accent">30 18 * * *</code>   <span>Every day at 18:30</span>
+      <code class="text-accent">0 */6 * * *</code>   <span>Every 6 hours</span>
+    </div>
+  </details>
+</div>
+
+<script>
+function jobsTab() {
+  return {
+    editing: false,
+    form: {
+      id: '',
+      cron: '',
+      type: 'agent',
+      task: '',
+      channel: 'telegram'
+    },
+    editJob(job) {
+      this.editing = true;
+      this.form.id = job.id;
+      this.form.cron = job.cron;
+      this.form.type = job.type;
+      this.form.task = job.task || '';
+      this.form.channel = job.channel || 'telegram';
+      // scroll to form
+      this.$nextTick(() => {
+        document.querySelector('form[hx-post="/jobs"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    },
+    cancelEdit() {
+      this.editing = false;
+      this.form = { id: '', cron: '', type: 'agent', task: '', channel: 'telegram' };
+    },
+    resetForm() {
+      // reset after successful submit (HTMX will replace the content anyway)
+      this.editing = false;
+      this.form = { id: '', cron: '', type: 'agent', task: '', channel: 'telegram' };
+    }
+  };
+}
+</script>

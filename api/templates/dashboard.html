@@ -53,9 +53,17 @@
             @click="select('skills')">
       Skills
     </button>
+    <button class="tab-link" :class="tab === 'channels' && 'tab-link-active'"
+            @click="select('channels')">
+      Channels
+    </button>
     <button class="tab-link" :class="tab === 'memory' && 'tab-link-active'"
             @click="select('memory')">
       Memory
+    </button>
+    <button class="tab-link" :class="tab === 'jobs' && 'tab-link-active'"
+            @click="select('jobs')">
+      Jobs
     </button>
     <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
             @click="select('logs')">
@@ -94,10 +102,68 @@
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
-    const modal = document.getElementById('agent-modal');
-    if (!modal || modal.style.display !== 'flex') return;
-    closeAgentModal();
+    const agentModal = document.getElementById('agent-modal');
+    if (agentModal && agentModal.style.display === 'flex') {
+      closeAgentModal();
+    }
+    const channelModal = document.getElementById('channel-modal');
+    if (channelModal && channelModal.style.display === 'flex') {
+      closeChannelWizard();
+    }
   });
+
+  function openChannelWizard(channelKey) {
+    const modal = document.getElementById('channel-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    if (channelKey) {
+      loadChannelWizard(channelKey);
+    }
+  }
+
+  function closeChannelWizard() {
+    const modal = document.getElementById('channel-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+  }
+
+  function loadChannelWizard(channelKey) {
+    const body = document.getElementById('channel-wizard-body');
+    if (!body) return;
+    body.innerHTML = '<span class="text-muted text-xs">Loading...</span>';
+    fetch('/channels/wizard?channel=' + encodeURIComponent(channelKey), {
+      headers: {
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      }
+    })
+      .then(r => r.text())
+      .then(html => { body.innerHTML = html; })
+      .catch(e => { body.innerHTML = '<div class="alert-error">' + e.message + '</div>'; });
+  }
+
+  function removeChannel(channelKey) {
+    if (!confirm('Remove ' + channelKey + ' channel configuration?')) return;
+    fetch('/channels/' + encodeURIComponent(channelKey), {
+      method: 'DELETE',
+      headers: {
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      }
+    })
+      .then(r => r.text())
+      .then(html => {
+        document.getElementById('tab-content').innerHTML = html;
+      })
+      .catch(e => alert(e.message));
+  }
+
+  document.addEventListener('click', (event) => {
+    const modal = document.getElementById('channel-modal');
+    if (!modal || modal.style.display !== 'flex') return;
+    if (event.target === modal) {
+      closeChannelWizard();
+    }
+  });
+
 
   function adminTabs() {
     const tabs = {
@@ -105,7 +171,9 @@
       identity: '/partials/identity',
       permissions: '/partials/permissions',
       skills: '/partials/skills',
+      channels: '/partials/channels',
       memory: '/partials/memory',
+      jobs: '/partials/jobs',
       logs: '/partials/logs'
     };
 
