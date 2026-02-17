@@ -494,7 +494,7 @@ class AgentCore:
             log.warning("No channel %r for approval, auto-approving %s", channel, tool_name)
             return True
 
-        request_id, future = self.permissions.create_approval_request()
+        request_id, future = self.permissions.create_approval_request(tool_name, params)
         description = self.permissions.format_approval_message(tool_name, params)
 
         # Send the approval prompt via the channel

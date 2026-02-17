@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
 if TYPE_CHECKING:
@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 # Callback data prefix for approval buttons
 _APPROVE_PREFIX = "perm_approve:"
 _DENY_PREFIX = "perm_deny:"
+_ALWAYS_PREFIX = "perm_always:"
 
 
 class TelegramChannel:
@@ -35,12 +36,16 @@ class TelegramChannel:
     # -- Incoming handlers ---------------------------------------------------
 
     async def _on_text(self, update: Update, context) -> None:
-        user_id = update.effective_user.id
+        user = update.effective_user
+        message = update.message
+        if not user or not message:
+            return
+        user_id = user.id
         if not self._is_allowed(user_id):
             return
 
         response = await self.agent.process(
-            message=update.message.text,
+            message=message.text or "",
             channel="telegram",
             user_id=str(user_id),
         )
@@ -48,18 +53,22 @@ class TelegramChannel:
 
     async def _on_voice(self, update: Update, context) -> None:
         """Handle incoming voice messages: download, transcribe, process, reply."""
-        user_id = update.effective_user.id
+        user = update.effective_user
+        message = update.message
+        if not user or not message:
+            return
+        user_id = user.id
         if not self._is_allowed(user_id):
             return
 
         if not self.voice:
-            await update.message.reply_text(
+            await message.reply_text(
                 "Voice messages are not supported (voice pipeline not configured)."
             )
             return
 
         # Download the voice/audio file
-        voice_msg = update.message.voice or update.message.audio
+        voice_msg = message.voice or message.audio
         if not voice_msg:
             return
 
@@ -71,7 +80,7 @@ class TelegramChannel:
         transcript = await self.voice.transcribe(bytes(audio_bytes))
 
         if not transcript.strip():
-            await update.message.reply_text("(could not transcribe voice message)")
+            await message.reply_text("(could not transcribe voice message)")
             return
 
         log.info("Transcript: %s", transcript[:200])
@@ -87,9 +96,12 @@ class TelegramChannel:
     async def _on_approval_callback(self, update: Update, context) -> None:
         """Handle inline keyboard button presses for permission approvals."""
         query = update.callback_query
+        user = update.effective_user
+        if not query or not user:
+            return
         await query.answer()  # Acknowledge the button press
 
-        user_id = update.effective_user.id
+        user_id = user.id
         if not self._is_allowed(user_id):
             return
 
@@ -98,18 +110,17 @@ class TelegramChannel:
         if data.startswith(_APPROVE_PREFIX):
             request_id = data[len(_APPROVE_PREFIX) :]
             resolved = self.agent.permissions.resolve_approval(request_id, True)
-            if resolved:
-                await query.edit_message_text(query.message.text + "\n\n--- Approved")
-            else:
-                await query.edit_message_text("(approval request expired or already handled)")
+            await self._finalize_approval_response(query, resolved, "Approved")
 
         elif data.startswith(_DENY_PREFIX):
             request_id = data[len(_DENY_PREFIX) :]
             resolved = self.agent.permissions.resolve_approval(request_id, False)
-            if resolved:
-                await query.edit_message_text(query.message.text + "\n\n--- Denied")
-            else:
-                await query.edit_message_text("(approval request expired or already handled)")
+            await self._finalize_approval_response(query, resolved, "Denied")
+
+        elif data.startswith(_ALWAYS_PREFIX):
+            request_id = data[len(_ALWAYS_PREFIX) :]
+            resolved = self.agent.permissions.resolve_approval(request_id, True, always_allow=True)
+            await self._finalize_approval_response(query, resolved, "Always allowed")
 
     # -- Outgoing ------------------------------------------------------------
 
@@ -124,6 +135,9 @@ class TelegramChannel:
                 [
                     InlineKeyboardButton("Approve", callback_data=f"{_APPROVE_PREFIX}{request_id}"),
                     InlineKeyboardButton("Deny", callback_data=f"{_DENY_PREFIX}{request_id}"),
+                    InlineKeyboardButton(
+                        "Always allow", callback_data=f"{_ALWAYS_PREFIX}{request_id}"
+                    ),
                 ]
             ]
         )
@@ -143,7 +157,26 @@ class TelegramChannel:
 
     async def _send_response(self, update: Update, response) -> None:
         """Send an AgentResponse back — voice if present, otherwise text."""
+        message = update.message
+        if not message:
+            return
         if response.voice:
-            await update.message.reply_voice(voice=response.voice)
+            await message.reply_voice(voice=response.voice)
         else:
-            await update.message.reply_text(response.text)
+            await message.reply_text(response.text)
+
+    async def _finalize_approval_response(
+        self, query: CallbackQuery, resolved: bool, label: str
+    ) -> None:
+        if not resolved:
+            await query.edit_message_text("(approval request expired or already handled)")
+            return
+        message = query.message
+        try:
+            text = getattr(message, "text", None) if message else None
+            if text:
+                await query.edit_message_text(text + f"\n\n--- {label}")
+            else:
+                await self.app.bot.send_message(chat_id=query.from_user.id, text=f"{label}.")
+        except Exception:
+            log.exception("Failed to update approval message")

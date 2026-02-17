@@ -11,6 +11,9 @@ import asyncio
 import fnmatch
 import logging
 import uuid
+import sqlite3
+from pathlib import Path
+from typing import TypedDict
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +39,7 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:sqlite3*/app/data/memory.db*UPDATE*": "ALWAYS",
     "run_command:sqlite3*/app/data/memory.db*DELETE*": "ALWAYS",
     "run_command:jq*": "ALWAYS",
+    "run_command:curl*wttr.in*": "ALWAYS",
     "web_search": "ALWAYS",
     # Write operations — ask first
     "send_email": "ASK",
@@ -55,10 +59,49 @@ DEFAULT_RULES: dict[str, str] = {
 class PermissionEngine:
     """Check tool actions against permission rules using glob patterns."""
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: str = "data/agent.db") -> None:
+        self.db_path = db_path
         self.rules: dict[str, str] = dict(DEFAULT_RULES)
-        # Pending approval requests: request_id → asyncio.Future[bool]
-        self._pending: dict[str, asyncio.Future[bool]] = {}
+        self._ready = False
+        # Pending approval requests: request_id → PendingApproval
+        self._pending: dict[str, PendingApproval] = {}
+        self._load_persisted_rules()
+
+    def _ensure_schema(self) -> None:
+        if self._ready:
+            return
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.db_path) as db:
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS permissions ("
+                "pattern TEXT PRIMARY KEY, level TEXT NOT NULL, "
+                "created_at DATETIME DEFAULT (datetime('now'))"
+                ")"
+            )
+        self._ready = True
+
+    def _load_persisted_rules(self) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.db_path) as db:
+            rows = db.execute("SELECT pattern, level FROM permissions").fetchall()
+        for pattern, level in rows:
+            if level in (PermissionLevel.ALWAYS, PermissionLevel.ASK, PermissionLevel.NEVER):
+                self.rules[pattern] = level
+
+    def _persist_rule(self, pattern: str, level: str) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.db_path) as db:
+            db.execute(
+                "INSERT INTO permissions (pattern, level) VALUES (?, ?) "
+                "ON CONFLICT(pattern) DO UPDATE SET level = excluded.level",
+                (pattern, level),
+            )
+            db.commit()
+
+    def _build_match_key(self, tool_name: str, params: dict | None = None) -> str:
+        if tool_name == "run_command" and params and "command" in params:
+            return f"run_command:{params['command']}"
+        return tool_name
 
     def check(self, tool_name: str, params: dict | None = None) -> str:
         """Return the permission level for a tool call.
@@ -67,10 +110,7 @@ class PermissionEngine:
         and checks it against all rules. First match wins, with more
         specific (longer) patterns tried first.
         """
-        if tool_name == "run_command" and params and "command" in params:
-            match_key = f"run_command:{params['command']}"
-        else:
-            match_key = tool_name
+        match_key = self._build_match_key(tool_name, params)
 
         # Sort rules by pattern length descending so more specific rules match first
         for pattern in sorted(self.rules, key=len, reverse=True):
@@ -85,9 +125,23 @@ class PermissionEngine:
         if level not in (PermissionLevel.ALWAYS, PermissionLevel.ASK, PermissionLevel.NEVER):
             raise ValueError(f"Invalid permission level: {level!r}")
         self.rules[pattern] = level
+        self._persist_rule(pattern, level)
         log.info("Permission rule added: %s → %s", pattern, level)
 
-    def create_approval_request(self) -> tuple[str, asyncio.Future[bool]]:
+    def remove_rule(self, pattern: str) -> bool:
+        """Remove a permission rule if it exists."""
+        existed = pattern in self.rules
+        if existed:
+            del self.rules[pattern]
+            self._ensure_schema()
+            with sqlite3.connect(self.db_path) as db:
+                db.execute("DELETE FROM permissions WHERE pattern = ?", (pattern,))
+                db.commit()
+        return existed
+
+    def create_approval_request(
+        self, tool_name: str, params: dict
+    ) -> tuple[str, asyncio.Future[bool]]:
         """Create a pending approval request. Returns (request_id, future).
 
         The caller awaits the future. When the user approves/denies via
@@ -96,16 +150,31 @@ class PermissionEngine:
         request_id = uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
-        self._pending[request_id] = future
+        self._pending[request_id] = {
+            "future": future,
+            "match_key": self._build_match_key(tool_name, params),
+        }
         return request_id, future
 
-    def resolve_approval(self, request_id: str, approved: bool) -> bool:
+    def resolve_approval(self, request_id: str, approved: bool, always_allow: bool = False) -> bool:
         """Resolve a pending approval request. Returns False if not found."""
-        future = self._pending.pop(request_id, None)
-        if future is None or future.done():
+        entry = self._pending.pop(request_id, None)
+        if not entry:
             return False
+        future = entry["future"]
+        if future.done():
+            return False
+        if always_allow:
+            match_key = entry.get("match_key")
+            if isinstance(match_key, str) and match_key not in self.rules:
+                self.add_rule(match_key, PermissionLevel.ALWAYS)
         future.set_result(approved)
         return True
+
+
+class PendingApproval(TypedDict):
+    future: asyncio.Future[bool]
+    match_key: str
 
     def format_approval_message(self, tool_name: str, params: dict) -> str:
         """Format a human-readable approval prompt for a tool call."""
