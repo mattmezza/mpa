@@ -25,6 +25,10 @@
             @click="if (tab !== 'permissions') { tab = 'permissions'; htmx.ajax('GET', '/partials/permissions', {target: '#tab-content', swap: 'innerHTML'}); }">
       Permissions
     </button>
+    <button class="tab-link" :class="tab === 'skills' && 'tab-link-active'"
+            @click="if (tab !== 'skills') { tab = 'skills'; htmx.ajax('GET', '/partials/skills', {target: '#tab-content', swap: 'innerHTML'}); }">
+      Skills
+    </button>
     <button class="tab-link" :class="tab === 'memory' && 'tab-link-active'"
             @click="if (tab !== 'memory') { tab = 'memory'; htmx.ajax('GET', '/partials/memory', {target: '#tab-content', swap: 'innerHTML'}); }">
       Memory

@@ -25,6 +25,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from core.agent import AgentCore
     from core.config_store import ConfigStore
+    from core.skills import SkillsStore
 
 log = logging.getLogger(__name__)
 
@@ -179,6 +180,11 @@ class SetupStepIn(BaseModel):
     values: dict[str, str] = {}
 
 
+class SkillUpsertIn(BaseModel):
+    name: str
+    content: str
+
+
 # ---------------------------------------------------------------------------
 # Auth dependency
 # ---------------------------------------------------------------------------
@@ -328,6 +334,13 @@ def create_admin_app(
         rules = agent.permissions.rules if agent else {}
         return _render_partial("partials/permissions.html", rules=rules)
 
+    @app.get("/partials/skills", dependencies=[Depends(auth)])
+    async def partial_skills() -> HTMLResponse:
+        """Skills tab partial."""
+        store = await _skills_store_from_config(config_store)
+        skills = await store.list_skills()
+        return _render_partial("partials/skills.html", skills=skills)
+
     @app.get("/partials/memory", dependencies=[Depends(auth)])
     async def partial_memory() -> HTMLResponse:
         """Memory tab partial."""
@@ -467,6 +480,52 @@ def create_admin_app(
             del agent.permissions.rules[pattern]
         rules = agent.permissions.rules
         return _render_partial("partials/permissions.html", rules=rules)
+
+    # ── Skills API ────────────────────────────────────────────────────────
+
+    @app.get("/skills", dependencies=[Depends(auth)])
+    async def list_skills() -> dict:
+        store = await _skills_store_from_config(config_store)
+        skills = await store.list_skills()
+        return {"count": len(skills), "skills": skills}
+
+    @app.get("/skills/{name}", dependencies=[Depends(auth)])
+    async def get_skill(name: str) -> dict:
+        store = await _skills_store_from_config(config_store)
+        skill = await store.get_skill(name)
+        if not skill:
+            raise HTTPException(404, f"Skill not found: {name}")
+        return skill
+
+    @app.post("/skills", dependencies=[Depends(auth)])
+    async def upsert_skill(body: SkillUpsertIn) -> HTMLResponse:
+        store = await _skills_store_from_config(config_store)
+        name = body.name.strip()
+        content = body.content.strip()
+        if not name:
+            raise HTTPException(400, "Skill name is required")
+        if not content:
+            raise HTTPException(400, "Skill content is required")
+        await store.upsert_skill(name, content)
+        skills = await store.list_skills()
+        return _render_partial("partials/skills.html", skills=skills)
+
+    @app.post("/skills/delete", dependencies=[Depends(auth)])
+    async def delete_skill(request: Request) -> HTMLResponse:
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise HTTPException(400, "Missing 'name' in request body")
+        store = await _skills_store_from_config(config_store)
+        deleted = await store.delete_skill(name)
+        if not deleted:
+            raise HTTPException(404, f"Skill not found: {name}")
+        skills = await store.list_skills()
+        return _render_partial("partials/skills.html", skills=skills)
 
     # ── Memory API ─────────────────────────────────────────────────────
 
@@ -785,6 +844,14 @@ def create_admin_app(
         return {"ok": False, "error": f"Unknown service: {service}"}
 
     return app, auth
+
+
+async def _skills_store_from_config(config_store: ConfigStore) -> SkillsStore:
+    from core.skills import SkillsStore
+
+    skills_db_path = await config_store.get("agent.skills_db_path") or "data/skills.db"
+    skills_dir = await config_store.get("agent.skills_dir") or "skills/"
+    return SkillsStore(db_path=skills_db_path, seed_dir=skills_dir)
 
 
 # ---------------------------------------------------------------------------

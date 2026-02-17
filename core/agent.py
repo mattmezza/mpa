@@ -8,6 +8,7 @@ import logging
 import shlex
 import uuid
 from datetime import datetime
+from typing import Any, cast
 
 from anthropic import AsyncAnthropic
 from tavily import TavilyClient
@@ -158,6 +159,17 @@ TOOLS = [
         },
     },
     {
+        "name": "load_skill",
+        "description": "Load a named skill document by name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Skill name to load"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
         "name": "schedule_task",
         "description": "Schedule a one-time future task (e.g. a reminder).",
         "input_schema": {
@@ -186,7 +198,10 @@ class AgentCore:
     def __init__(self, config: Config):
         self.config = config
         self.llm = AsyncAnthropic(api_key=config.agent.anthropic_api_key)
-        self.skills = SkillsEngine(config.agent.skills_dir)
+        self.skills = SkillsEngine(
+            db_path=config.agent.skills_db_path,
+            seed_dir=config.agent.skills_dir,
+        )
         self.executor = ToolExecutor()
         self.history = ConversationHistory(
             db_path=config.history.db_path,
@@ -227,7 +242,7 @@ class AgentCore:
             max_tokens=4096,
             system=system,
             messages=messages,
-            tools=TOOLS,
+            tools=cast(Any, TOOLS),
         )
 
         # Agentic loop — keep going while the LLM wants to call tools
@@ -256,7 +271,7 @@ class AgentCore:
                 max_tokens=4096,
                 system=system,
                 messages=messages,
-                tools=TOOLS,
+                tools=cast(Any, TOOLS),
             )
 
         final_text = self._extract_text(response)
@@ -325,6 +340,15 @@ class AgentCore:
         if name == "web_search":
             log.info("Tool call: web_search — %s", params.get("query", ""))
             return await self._tool_web_search(params)
+
+        if name == "load_skill":
+            skill_name = str(params.get("name", "")).strip()
+            if not skill_name:
+                return {"error": "Missing skill name."}
+            content = await self.skills.get_skill_content(skill_name)
+            if not content:
+                return {"error": f"Skill not found: {skill_name}"}
+            return {"name": skill_name, "content": content}
 
         if name == "schedule_task":
             log.info("Tool call: schedule_task — %s", params.get("task", ""))
@@ -540,7 +564,7 @@ class AgentCore:
 
     async def _build_system_prompt(self) -> str:
         cfg = self.config.agent
-        skills_block = self.skills.get_all_skills()
+        skills_index = await self.skills.get_index_block()
         character = cfg.character
         personalia = cfg.personalia
         memories = await self.memory.format_for_prompt()
@@ -559,6 +583,7 @@ Today is {datetime.now().strftime("%A, %B %d, %Y")}. Timezone: {cfg.timezone}.
 
 When you need to perform an action, use the `run_command` tool to execute CLI commands.
 Always use the skill documentation to construct the correct command.
+If you don't have the skill content in context, call `load_skill` with the skill name to load it.
 Parse JSON output when available (himalaya supports -o json, sqlite3 supports -json).
 If a command fails, read the error and try to fix it.
 Never guess at command syntax — always refer to the skill file.
@@ -574,11 +599,11 @@ Before inserting a new long-term memory, check if it already exists to avoid dup
 {memories}
 </memories>"""
 
-        if skills_block:
+        if skills_index:
             prompt += f"""
 
 <available_skills>
-{skills_block}
+{skills_index}
 </available_skills>"""
 
         return prompt

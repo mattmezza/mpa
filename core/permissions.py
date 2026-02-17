@@ -38,6 +38,10 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:sqlite3*/app/data/memory.db*INSERT*": "ALWAYS",
     "run_command:sqlite3*/app/data/memory.db*UPDATE*": "ALWAYS",
     "run_command:sqlite3*/app/data/memory.db*DELETE*": "ALWAYS",
+    "run_command:sqlite3*data/memory.db*SELECT*": "ALWAYS",
+    "run_command:sqlite3*data/memory.db*INSERT*": "ALWAYS",
+    "run_command:sqlite3*data/memory.db*UPDATE*": "ALWAYS",
+    "run_command:sqlite3*data/memory.db*DELETE*": "ALWAYS",
     "run_command:jq*": "ALWAYS",
     "run_command:curl*wttr.in*": "ALWAYS",
     "web_search": "ALWAYS",
@@ -53,6 +57,7 @@ DEFAULT_RULES: dict[str, str] = {
     # Dangerous — never allow
     "run_command:sqlite3*DROP*": "NEVER",
     "run_command:sqlite3*ALTER*": "NEVER",
+    "load_skill": "ALWAYS",
 }
 
 

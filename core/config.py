@@ -41,6 +41,7 @@ class AgentConfig(BaseModel):
     model: str = "claude-sonnet-4-5-20250514"
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
+    skills_db_path: str = "data/skills.db"
     character: str = ""
     personalia: str = ""
 
