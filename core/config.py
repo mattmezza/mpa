@@ -113,6 +113,11 @@ class AdminConfig(BaseModel):
     api_key: str = ""
 
 
+class HistoryConfig(BaseModel):
+    db_path: str = "data/agent.db"
+    max_turns: int = 20
+
+
 class Config(BaseModel):
     agent: AgentConfig = AgentConfig()
     channels: ChannelsConfig = ChannelsConfig()
@@ -120,6 +125,7 @@ class Config(BaseModel):
     voice: VoiceConfig = VoiceConfig()
     scheduler: SchedulerConfig = SchedulerConfig()
     admin: AdminConfig = AdminConfig()
+    history: HistoryConfig = HistoryConfig()
 
 
 def load_config(path: str | Path = "config.yml") -> Config:

@@ -11,6 +11,7 @@ from anthropic import AsyncAnthropic
 
 from core.config import Config
 from core.executor import ToolExecutor
+from core.history import ConversationHistory
 from core.models import AgentResponse
 from core.skills import SkillsEngine
 
@@ -46,12 +47,19 @@ class AgentCore:
         self.llm = AsyncAnthropic(api_key=config.agent.anthropic_api_key)
         self.skills = SkillsEngine(config.agent.skills_dir)
         self.executor = ToolExecutor()
+        self.history = ConversationHistory(
+            db_path=config.history.db_path,
+            max_turns=config.history.max_turns,
+        )
         self.channels: dict = {}
 
     async def process(self, message: str, channel: str, user_id: str) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop."""
         system = self._build_system_prompt()
-        messages = [{"role": "user", "content": message}]
+
+        # Load conversation history and append the new user message
+        history = await self.history.get_messages(channel, user_id)
+        messages = [*history, {"role": "user", "content": message}]
 
         log.info("Processing message from %s/%s: %s", channel, user_id, message[:100])
 
@@ -79,11 +87,12 @@ class AgentCore:
                     )
 
             # Feed tool results back to the LLM
-            messages = [
-                {"role": "user", "content": message},
-                {"role": "assistant", "content": response.content},
-                {"role": "user", "content": tool_results},
-            ]
+            messages.extend(
+                [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": tool_results},
+                ]
+            )
             response = await self.llm.messages.create(
                 model=self.config.agent.model,
                 max_tokens=4096,
@@ -94,6 +103,11 @@ class AgentCore:
 
         final_text = self._extract_text(response)
         log.info("Response: %s", final_text[:200])
+
+        # Persist the turn (user message + final assistant text only)
+        await self.history.add_turn(channel, user_id, "user", message)
+        await self.history.add_turn(channel, user_id, "assistant", final_text)
+
         return AgentResponse(text=final_text)
 
     async def _execute_tool(self, tool_call) -> dict:

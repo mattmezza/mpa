@@ -37,3 +37,7 @@ admin:
   enabled: true
   port: 8000
   api_key: "${ADMIN_API_KEY}"
+
+history:
+  db_path: "data/agent.db"
+  max_turns: 20
