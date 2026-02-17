@@ -1,7 +1,10 @@
-.PHONY: setup install install-dev sync lock lint format test run clean release
+.PHONY: setup install install-dev sync lock lint format test run dev clean release css cssd
 
 PYTHON := uv run python
 UV := uv
+TAILWIND := ./tailwindcss
+CSS_IN := api/static/input.css
+CSS_OUT := api/static/style.css
 
 # First-time setup: create venv, install deps, copy example configs
 setup: install-dev
@@ -41,6 +44,13 @@ test:
 run:
 	$(UV) run python -m core.main
 
+# Run in dev mode: auto-restart agent on code changes + CSS watch
+dev:
+	@trap 'kill 0' EXIT; \
+	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --watch & \
+	$(UV) run watchfiles --filter python 'python -m core.main' api core channels schema skills tools voice & \
+	wait
+
 # Remove venv and caches
 clean:
 	rm -rf .venv __pycache__ .pytest_cache .ruff_cache
@@ -50,3 +60,11 @@ clean:
 release:
 	@test -n "$(name)" || (echo "Usage: make release name=v0.x" && exit 1)
 	@gh release create "$(name)" --generate-notes --latest
+
+# Build minified CSS (production)
+css:
+	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --minify
+
+# Watch CSS files and rebuild on change (development)
+cssd:
+	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --watch

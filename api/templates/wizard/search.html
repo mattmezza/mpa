@@ -1,0 +1,59 @@
+<div class="card" x-data="{ testResult: '', testOk: false, testing: false }">
+  <h2 class="text-base mb-3">Web Search <span class="text-muted font-normal text-xs">(optional)</span></h2>
+
+  <label class="label" for="w-tavily-key">Tavily API Key</label>
+  <input type="password" class="input" id="w-tavily-key" name="tavily_key" placeholder="tvly-...">
+  <p class="hint">Free tier at <a href="https://app.tavily.com" target="_blank">app.tavily.com</a></p>
+
+  <div class="mt-3">
+    <button class="btn" :disabled="testing"
+            @click="
+              testing = true; testResult = '';
+              fetch('/setup/test-connection', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({service: 'tavily', api_key: document.getElementById('w-tavily-key').value})
+              })
+              .then(r => r.json())
+              .then(d => { testOk = d.ok; testResult = d.ok ? 'Search working (' + d.results + ' results)' : d.error; })
+              .catch(e => { testOk = false; testResult = e.message; })
+              .finally(() => { testing = false; })
+            ">
+      <span x-show="testing" class="spinner mr-1"></span>
+      Test connection
+    </button>
+  </div>
+  <template x-if="testResult">
+    <div :class="testOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResult"></div>
+  </template>
+
+  <div class="flex justify-between mt-4">
+    <button class="btn"
+            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+            hx-vals='{"step": "calendar", "values": {}}'>
+      Back
+    </button>
+    <div class="flex gap-2">
+      <button class="btn"
+              hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+              hx-vals='{"step": "admin", "values": {}}'>
+        Skip
+      </button>
+      <button class="btn-primary"
+              @click="
+                const key = document.getElementById('w-tavily-key').value;
+                htmx.ajax('POST', '/setup/step', {
+                  target: '#wizard-step', swap: 'innerHTML',
+                  values: {
+                    step: 'admin',
+                    'values[search.enabled]': key ? 'true' : 'false',
+                    'values[search.api_key]': key,
+                    'values[search.provider]': 'tavily'
+                  }
+                })
+              ">
+        Next
+      </button>
+    </div>
+  </div>
+</div>

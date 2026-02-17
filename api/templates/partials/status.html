@@ -1,0 +1,9 @@
+{# Status bar partial — loaded via HTMX into #status-bar #}
+{% if running %}
+<span class="badge-ok">Running</span>
+{% else %}
+<span class="badge-off">Stopped</span>
+{% endif %}
+<span class="text-muted text-xs">
+  Channels: {{ channels | join(', ') or 'none' }} | Jobs: {{ scheduler_jobs }}
+</span>

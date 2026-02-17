@@ -1,0 +1,26 @@
+{# Logs tab partial #}
+<div x-data="{ autoRefresh: false, interval: null }"
+     x-init="$watch('autoRefresh', val => {
+       if (val) {
+         interval = setInterval(() => htmx.ajax('GET', '/partials/logs-content', {target: '#log-content', swap: 'innerHTML'}), 3000);
+       } else {
+         clearInterval(interval);
+       }
+     })"
+     @htmx:before-cleanup.window="clearInterval(interval)">
+
+  <div class="flex items-center gap-3 mb-4">
+    <button class="btn btn-sm" hx-get="/partials/logs-content" hx-target="#log-content" hx-swap="innerHTML">
+      Refresh
+    </button>
+    <label class="inline-flex items-center gap-1.5 text-xs text-muted cursor-pointer">
+      <input type="checkbox" x-model="autoRefresh"
+             class="rounded border-border bg-surface text-accent focus:ring-accent">
+      Auto-refresh
+    </label>
+  </div>
+
+  <div class="log-viewer" id="log-content"
+       hx-get="/partials/logs-content" hx-trigger="load" hx-swap="innerHTML">
+  </div>
+</div>

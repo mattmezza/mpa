@@ -1,0 +1,56 @@
+<div class="card" x-data="{ testResult: '', testOk: false, testing: false }">
+  <h2 class="text-base mb-3">LLM Provider</h2>
+
+  <label class="label" for="w-api-key">Anthropic API Key</label>
+  <input type="password" class="input" id="w-api-key" name="api_key" placeholder="sk-ant-...">
+  <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a></p>
+
+  <label class="label mt-3" for="w-model">Model</label>
+  <select class="select" id="w-model" name="model">
+    <option value="claude-sonnet-4-5-20250514">Claude Sonnet 4.5</option>
+    <option value="claude-haiku-4-5">Claude Haiku 4.5 (cheaper)</option>
+  </select>
+
+  <div class="mt-3">
+    <button class="btn" :disabled="testing"
+            @click="
+              testing = true; testResult = '';
+              fetch('/setup/test-connection', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({service: 'anthropic', api_key: document.getElementById('w-api-key').value})
+              })
+              .then(r => r.json())
+              .then(d => { testOk = d.ok; testResult = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error; })
+              .catch(e => { testOk = false; testResult = e.message; })
+              .finally(() => { testing = false; })
+            ">
+      <span x-show="testing" class="spinner mr-1"></span>
+      Test connection
+    </button>
+  </div>
+  <template x-if="testResult">
+    <div :class="testOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResult"></div>
+  </template>
+
+  <div class="flex justify-between mt-4">
+    <button class="btn"
+            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+            hx-vals='{"step": "welcome", "values": {}}'>
+      Back
+    </button>
+    <button class="btn-primary"
+            @click="
+              htmx.ajax('POST', '/setup/step', {
+                target: '#wizard-step', swap: 'innerHTML',
+                values: {
+                  step: 'identity',
+                  'values[agent.anthropic_api_key]': document.getElementById('w-api-key').value,
+                  'values[agent.model]': document.getElementById('w-model').value
+                }
+              })
+            ">
+      Next
+    </button>
+  </div>
+</div>

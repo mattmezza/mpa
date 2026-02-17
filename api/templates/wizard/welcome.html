@@ -1,0 +1,21 @@
+<div class="card">
+  <h2 class="text-base mb-3">Welcome</h2>
+  <p class="text-gray-300 mb-3">This wizard will guide you through configuring your personal AI agent.</p>
+  <p class="text-muted text-sm mb-2">You'll set up:</p>
+  <ul class="text-muted text-sm space-y-1 ml-5 list-disc mb-4">
+    <li>LLM provider (Anthropic API key)</li>
+    <li>Agent identity (name, owner, timezone)</li>
+    <li>Telegram bot connection</li>
+    <li>Email accounts (optional)</li>
+    <li>Calendar providers (optional)</li>
+    <li>Web search (optional)</li>
+    <li>Admin API key</li>
+  </ul>
+  <div class="flex justify-end">
+    <button class="btn-primary"
+            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+            hx-vals='{"step": "llm", "values": {}}'>
+      Get started
+    </button>
+  </div>
+</div>

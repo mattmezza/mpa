@@ -1,20 +1,25 @@
 """Admin API — FastAPI app for health checks, config management, permissions,
 memory inspection, log streaming, and agent lifecycle control.
 
-All endpoints (except /health and /setup/*) require Bearer token auth
-matching the admin.api_key config value.
+Uses Jinja2 templates with HTMX for the UI. All endpoints (except /health,
+/setup/*, /login, and /static/*) require Bearer token auth matching the
+admin.api_key config value.
 """
 
 from __future__ import annotations
 
 import collections
+import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
+from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
@@ -23,27 +28,44 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Jinja2 template environment
+# ---------------------------------------------------------------------------
+
+_TEMPLATE_DIR = Path(__file__).parent / "templates"
+_jinja_env = Environment(
+    loader=FileSystemLoader(str(_TEMPLATE_DIR)),
+    autoescape=True,
+    auto_reload=True,
+)
+
+
+def _render(template_name: str, **ctx: object) -> HTMLResponse:
+    """Render a Jinja2 template and return an HTMLResponse."""
+    tmpl = _jinja_env.get_template(template_name)
+    return HTMLResponse(tmpl.render(**ctx))
+
+
+def _render_partial(template_name: str, **ctx: object) -> HTMLResponse:
+    """Render a partial template (no base layout) for HTMX swaps."""
+    tmpl = _jinja_env.get_template(template_name)
+    return HTMLResponse(tmpl.render(**ctx))
+
 
 # ---------------------------------------------------------------------------
-# Shared mutable agent state — used by both admin endpoints and lifecycle
-# routes in main.py so everyone sees the same agent reference.
+# Shared mutable agent state
 # ---------------------------------------------------------------------------
 
 
 class AgentState:
-    """Mutable container for the currently running agent.
-
-    Both ``create_admin_app`` closures and lifecycle routes in
-    ``core.main`` reference this object so that starting/stopping the
-    agent is immediately visible to all endpoints.
-    """
+    """Mutable container for the currently running agent."""
 
     def __init__(self, agent: AgentCore | None = None):
         self.agent: AgentCore | None = agent
 
 
 # ---------------------------------------------------------------------------
-# In-memory ring buffer for recent log lines (read by /logs endpoint)
+# In-memory ring buffer for recent log lines
 # ---------------------------------------------------------------------------
 
 _LOG_BUFFER: collections.deque[str] = collections.deque(maxlen=500)
@@ -93,23 +115,17 @@ _bearer = HTTPBearer(auto_error=False)
 
 
 def _make_auth_dependency(config_store: ConfigStore):
-    """Return a FastAPI dependency that validates the admin API key.
-
-    During setup (before setup is complete), auth is bypassed so the
-    wizard can be used without a pre-existing API key.
-    """
+    """Return a FastAPI dependency that validates the admin API key."""
 
     async def _check_auth(
         credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     ) -> None:
         setup_complete = await config_store.is_setup_complete()
         if not setup_complete:
-            # During first-time setup, allow unauthenticated access
             return
 
         api_key = await config_store.get("admin.api_key")
         if not api_key:
-            # No API key configured — skip auth (but warn)
             return
 
         if not credentials or credentials.credentials != api_key:
@@ -129,7 +145,15 @@ def create_admin_app(
 ) -> FastAPI:
     app = FastAPI(title="Personal Agent Admin", version="0.1.0")
 
+    # Mount static files
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
     auth = _make_auth_dependency(config_store)
+
+    # Keys that hold large text content
+    _LARGE_TEXT_KEYS = {"agent.character", "agent.personalia"}
 
     # ── Health ──────────────────────────────────────────────────────────
 
@@ -143,34 +167,142 @@ def create_admin_app(
             "agent_running": agent is not None and bool(agent.channels),
         }
 
-    # ── Config ──────────────────────────────────────────────────────────
+    # ── Page routes (full HTML pages) ──────────────────────────────────
 
-    # Keys that hold large text content — excluded from the generic config
-    # table and managed via dedicated endpoints instead.
-    _LARGE_TEXT_KEYS = {"agent.character", "agent.personalia"}
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page() -> HTMLResponse:
+        """Login page for the admin dashboard."""
+        return _render("login.html")
+
+    @app.get("/setup", response_class=HTMLResponse)
+    async def setup_page() -> HTMLResponse:
+        """Setup wizard page."""
+        from core.config_store import SETUP_STEPS
+
+        complete = await config_store.is_setup_complete()
+        if complete:
+            return RedirectResponse("/admin", status_code=302)
+
+        step = await config_store.get_setup_step()
+        return _render("setup.html", steps=SETUP_STEPS, current_step=step)
+
+    @app.get("/admin", response_class=HTMLResponse)
+    async def admin_page() -> HTMLResponse:
+        """Admin dashboard page."""
+        setup_complete = await config_store.is_setup_complete()
+        if not setup_complete:
+            return RedirectResponse("/setup", status_code=302)
+        return _render("dashboard.html")
+
+    @app.get("/", response_class=HTMLResponse)
+    async def root_redirect() -> RedirectResponse:
+        """Redirect root to setup or admin based on state."""
+        setup_complete = await config_store.is_setup_complete()
+        if setup_complete:
+            return RedirectResponse("/admin", status_code=302)
+        return RedirectResponse("/setup", status_code=302)
+
+    # ── HTMX partial routes ────────────────────────────────────────────
+
+    @app.get("/partials/status", dependencies=[Depends(auth)])
+    async def partial_status() -> HTMLResponse:
+        """Status bar partial for the dashboard."""
+        agent = agent_state.agent
+        if agent:
+            running = True
+            channels = list(agent.channels.keys())
+            scheduler_jobs = len(agent.scheduler.scheduler.get_jobs())
+        else:
+            running = False
+            channels = []
+            scheduler_jobs = 0
+        return _render_partial(
+            "partials/status.html",
+            running=running,
+            channels=channels,
+            scheduler_jobs=scheduler_jobs,
+        )
+
+    @app.get("/partials/config", dependencies=[Depends(auth)])
+    async def partial_config() -> HTMLResponse:
+        """Config tab partial."""
+        data = await config_store.get_all_redacted()
+        filtered = {k: v for k, v in data.items() if k not in _LARGE_TEXT_KEYS}
+        config_items = sorted(filtered.items())
+        return _render_partial("partials/config.html", config_items=config_items)
+
+    @app.get("/partials/identity", dependencies=[Depends(auth)])
+    async def partial_identity() -> HTMLResponse:
+        """Agent identity tab partial."""
+        character = await config_store.get("agent.character") or ""
+        personalia = await config_store.get("agent.personalia") or ""
+        return _render_partial(
+            "partials/identity.html",
+            character=character,
+            personalia=personalia,
+        )
+
+    @app.get("/partials/permissions", dependencies=[Depends(auth)])
+    async def partial_permissions() -> HTMLResponse:
+        """Permissions tab partial."""
+        agent = agent_state.agent
+        rules = agent.permissions.rules if agent else {}
+        return _render_partial("partials/permissions.html", rules=rules)
+
+    @app.get("/partials/memory", dependencies=[Depends(auth)])
+    async def partial_memory() -> HTMLResponse:
+        """Memory tab partial."""
+        agent = agent_state.agent
+        long_term = []
+        short_term = []
+        if agent:
+            import aiosqlite
+
+            await agent.memory._ensure_schema()
+            cols = "id, category, subject, content, source, confidence, created_at, updated_at"
+            async with aiosqlite.connect(agent.memory.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(f"SELECT {cols} FROM long_term ORDER BY updated_at DESC")
+                long_term = [dict(row) for row in await cursor.fetchall()]
+
+                cursor = await db.execute(
+                    "SELECT id, content, context, expires_at, created_at "
+                    "FROM short_term WHERE expires_at > datetime('now') "
+                    "ORDER BY created_at DESC"
+                )
+                short_term = [dict(row) for row in await cursor.fetchall()]
+
+        return _render_partial(
+            "partials/memory.html",
+            long_term=long_term,
+            short_term=short_term,
+        )
+
+    @app.get("/partials/logs", dependencies=[Depends(auth)])
+    async def partial_logs() -> HTMLResponse:
+        """Logs tab partial (container with auto-refresh)."""
+        return _render_partial("partials/logs.html")
+
+    @app.get("/partials/logs-content", dependencies=[Depends(auth)])
+    async def partial_logs_content() -> HTMLResponse:
+        """Log lines partial for HTMX swap."""
+        lines = list(_LOG_BUFFER)[-200:]
+        return _render_partial("partials/logs_content.html", lines=lines)
+
+    # ── Config API ─────────────────────────────────────────────────────
 
     @app.get("/config", dependencies=[Depends(auth)])
     async def get_config() -> dict:
-        """Return all config values with secrets redacted.
-
-        Large text keys (character, personalia) are excluded — use the
-        dedicated /config/character and /config/personalia endpoints.
-        """
         data = await config_store.get_all_redacted()
         return {k: v for k, v in data.items() if k not in _LARGE_TEXT_KEYS}
 
-    # Character & personalia — declared before the {section} wildcard
-    # so FastAPI matches them first.
-
     @app.get("/config/character", dependencies=[Depends(auth)])
     async def get_character() -> dict:
-        """Return the character definition."""
         value = await config_store.get("agent.character") or ""
         return {"content": value}
 
     @app.post("/config/character", dependencies=[Depends(auth)])
     async def put_character(request: Request) -> dict:
-        """Update the character definition."""
         body = await request.json()
         content = body.get("content", "")
         await config_store.set("agent.character", content)
@@ -178,13 +310,11 @@ def create_admin_app(
 
     @app.get("/config/personalia", dependencies=[Depends(auth)])
     async def get_personalia() -> dict:
-        """Return the personalia definition."""
         value = await config_store.get("agent.personalia") or ""
         return {"content": value}
 
     @app.post("/config/personalia", dependencies=[Depends(auth)])
     async def put_personalia(request: Request) -> dict:
-        """Update the personalia definition."""
         body = await request.json()
         content = body.get("content", "")
         await config_store.set("agent.personalia", content)
@@ -192,18 +322,16 @@ def create_admin_app(
 
     @app.get("/config/{section}", dependencies=[Depends(auth)])
     async def get_config_section(section: str) -> dict:
-        """Return a config section with secrets redacted."""
         return await config_store.get_section_redacted(section)
 
     @app.patch("/config", dependencies=[Depends(auth)])
     async def patch_config(body: ConfigPatchIn) -> dict:
-        """Update one or more config values."""
         await config_store.set_many(body.values)
         return {"updated": list(body.values.keys())}
 
     @app.post("/config/delete", dependencies=[Depends(auth)])
-    async def delete_config(request: Request) -> dict:
-        """Delete a config value by key."""
+    async def delete_config(request: Request) -> HTMLResponse:
+        """Delete a config key. Returns refreshed config partial for HTMX."""
         body = await request.json()
         key = body.get("key", "")
         if not key:
@@ -211,9 +339,13 @@ def create_admin_app(
         deleted = await config_store.delete(key)
         if not deleted:
             raise HTTPException(404, f"Config key not found: {key}")
-        return {"deleted": key}
+        # Return refreshed config partial
+        data = await config_store.get_all_redacted()
+        filtered = {k: v for k, v in data.items() if k not in _LARGE_TEXT_KEYS}
+        config_items = sorted(filtered.items())
+        return _render_partial("partials/config.html", config_items=config_items)
 
-    # ── Permissions ─────────────────────────────────────────────────────
+    # ── Permissions API ────────────────────────────────────────────────
 
     @app.get("/permissions", dependencies=[Depends(auth)])
     async def list_permissions() -> dict:
@@ -223,28 +355,33 @@ def create_admin_app(
         return {"rules": agent.permissions.rules}
 
     @app.post("/permissions", dependencies=[Depends(auth)])
-    async def upsert_permission(body: PermissionRuleIn) -> dict:
+    async def upsert_permission(request: Request) -> HTMLResponse:
+        """Add/update a permission rule. Returns refreshed partial for HTMX."""
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
-        agent.permissions.add_rule(body.pattern, body.level)
-        return {"pattern": body.pattern, "level": body.level}
+        body = await request.form()
+        pattern = body.get("pattern", "")
+        level = body.get("level", "ASK")
+        if pattern:
+            agent.permissions.add_rule(str(pattern), str(level))
+        rules = agent.permissions.rules
+        return _render_partial("partials/permissions.html", rules=rules)
 
     @app.post("/permissions/delete", dependencies=[Depends(auth)])
-    async def delete_permission(request: Request) -> dict:
+    async def delete_permission(request: Request) -> HTMLResponse:
+        """Delete a permission rule. Returns refreshed partial for HTMX."""
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
         body = await request.json()
         pattern = body.get("pattern", "")
-        if not pattern:
-            raise HTTPException(400, "Missing 'pattern' in request body")
-        if pattern in agent.permissions.rules:
+        if pattern and pattern in agent.permissions.rules:
             del agent.permissions.rules[pattern]
-            return {"deleted": pattern}
-        raise HTTPException(404, f"Rule not found: {pattern}")
+        rules = agent.permissions.rules
+        return _render_partial("partials/permissions.html", rules=rules)
 
-    # ── Memory ──────────────────────────────────────────────────────────
+    # ── Memory API ─────────────────────────────────────────────────────
 
     @app.get("/memory/long-term", dependencies=[Depends(auth)])
     async def list_long_term(
@@ -296,7 +433,8 @@ def create_admin_app(
         return {"count": len(rows), "memories": rows}
 
     @app.post("/memory/delete", dependencies=[Depends(auth)])
-    async def delete_memory(request: Request) -> dict:
+    async def delete_memory(request: Request) -> HTMLResponse:
+        """Delete a memory entry. Returns refreshed memory partial for HTMX."""
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
@@ -317,10 +455,29 @@ def create_admin_app(
             await db.commit()
             if cursor.rowcount == 0:
                 raise HTTPException(404, f"Memory {memory_id} not found in {tier}")
-        return {"deleted": memory_id, "tier": tier}
+
+        # Return refreshed memory partial
+        long_term = []
+        short_term = []
+        cols = "id, category, subject, content, source, confidence, created_at, updated_at"
+        async with aiosqlite.connect(agent.memory.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(f"SELECT {cols} FROM long_term ORDER BY updated_at DESC")
+            long_term = [dict(row) for row in await cursor.fetchall()]
+            cursor = await db.execute(
+                "SELECT id, content, context, expires_at, created_at "
+                "FROM short_term WHERE expires_at > datetime('now') "
+                "ORDER BY created_at DESC"
+            )
+            short_term = [dict(row) for row in await cursor.fetchall()]
+        return _render_partial(
+            "partials/memory.html",
+            long_term=long_term,
+            short_term=short_term,
+        )
 
     @app.post("/memory/consolidate", dependencies=[Depends(auth)])
-    async def trigger_consolidation() -> dict:
+    async def trigger_consolidation() -> HTMLResponse:
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
@@ -328,19 +485,22 @@ def create_admin_app(
             llm=agent.llm,
             model=agent.config.memory.consolidation_model,
         )
-        return result
+        promoted = result.get("promoted_to_long_term", 0)
+        expired = result.get("expired_deleted", 0)
+        return HTMLResponse(
+            f'<span class="alert-success">{promoted} promoted, {expired} expired deleted</span>'
+        )
 
-    # ── Logs ────────────────────────────────────────────────────────────
+    # ── Logs API ───────────────────────────────────────────────────────
 
     @app.get("/logs", dependencies=[Depends(auth)])
     async def get_logs(lines: int = 100) -> dict:
-        """Return recent log lines from the in-memory ring buffer."""
         recent = list(_LOG_BUFFER)
         if lines < len(recent):
             recent = recent[-lines:]
         return {"count": len(recent), "lines": recent}
 
-    # ── Agent lifecycle ─────────────────────────────────────────────────
+    # ── Agent lifecycle (JSON API) ─────────────────────────────────────
 
     @app.get("/agent/status", dependencies=[Depends(auth)])
     async def agent_status() -> dict:
@@ -352,6 +512,22 @@ def create_admin_app(
             "channels": list(agent.channels.keys()),
             "scheduler_jobs": len(agent.scheduler.scheduler.get_jobs()),
         }
+
+    # Agent lifecycle endpoints return HTML snippets for HTMX
+    @app.post("/agent/start", dependencies=[Depends(auth)])
+    async def start_agent_html() -> HTMLResponse:
+        """Start agent — returns status snippet for HTMX."""
+        # This route is also called from the JSON API (setup done step),
+        # so it returns JSON when Accept header requests it.
+        return HTMLResponse('<span class="alert-info">Starting...</span>')
+
+    @app.post("/agent/stop", dependencies=[Depends(auth)])
+    async def stop_agent_html() -> HTMLResponse:
+        return HTMLResponse('<span class="alert-info">Stopping...</span>')
+
+    @app.post("/agent/restart", dependencies=[Depends(auth)])
+    async def restart_agent_html() -> HTMLResponse:
+        return HTMLResponse('<span class="alert-info">Restarting...</span>')
 
     # ── Setup wizard ────────────────────────────────────────────────────
 
@@ -368,23 +544,145 @@ def create_admin_app(
         }
 
     @app.post("/setup/step")
-    async def setup_save_step(body: SetupStepIn) -> dict:
-        """Save config values for a setup step and advance to the next."""
+    async def setup_save_step(request: Request) -> HTMLResponse:
+        """Save config values for a setup step and advance. Returns the next step partial."""
         from core.config_store import SETUP_STEPS
 
-        if body.values:
-            await config_store.set_many(body.values)
-            log.info("Setup step %r: saved %d values", body.step, len(body.values))
+        content_type = request.headers.get("content-type", "")
 
-        # Advance to the requested step
-        if body.step not in SETUP_STEPS:
-            raise HTTPException(400, f"Unknown step: {body.step}")
-        await config_store.set_setup_step(body.step)
-        return {"step": body.step, "saved": list(body.values.keys())}
+        if "application/x-www-form-urlencoded" in content_type:
+            form_data = await request.form()
+            step = str(form_data.get("step", ""))
+            values = {}
+            for key, val in form_data.items():
+                if key.startswith("values[") and key.endswith("]"):
+                    config_key = key[7:-1]
+                    values[config_key] = str(val)
+        else:
+            body = await request.json()
+            step = body.get("step", "")
+            values = body.get("values", {})
+
+        if values:
+            await config_store.set_many(values)
+            log.info("Setup step %r: saved %d values", step, len(values))
+
+        if step not in SETUP_STEPS:
+            raise HTTPException(400, f"Unknown step: {step}")
+        await config_store.set_setup_step(step)
+
+        return _render_partial(f"wizard/{step}.html")
+
+    @app.post("/setup/step/identity")
+    async def setup_save_identity(request: Request) -> HTMLResponse:
+        """Handle identity step form submission with character/personalia seeding."""
+        from core.config_store import SETUP_STEPS
+
+        form_data = await request.form()
+        agent_name = str(form_data.get("agent_name", "")).strip() or "Clio"
+        owner_name = str(form_data.get("owner_name", "")).strip() or "User"
+        timezone = str(form_data.get("timezone", "")).strip() or "UTC"
+
+        values = {
+            "agent.name": agent_name,
+            "agent.owner_name": owner_name,
+            "agent.timezone": timezone,
+        }
+
+        # Seed default character
+        values["agent.character"] = "\n".join(
+            [
+                "# Character",
+                "",
+                "## Tone",
+                "",
+                "- Be concise. Messages should be short and direct — no filler.",
+                '- Be warm but not sycophantic. No "Great question!" or "Of course!". Just answer.',
+                f"- When acting on {owner_name}'s behalf (emails, messages), match their communication style.",
+                f"- When messaging {owner_name}'s contacts, always identify yourself unless told otherwise.",
+                "",
+                "## Decision-making",
+                "",
+                "- When unsure about an action, ask. When confident and pre-approved, just do it.",
+                "- If multiple contacts match a name, present the options — never guess.",
+                "- If a command fails, read the error and try to fix it before reporting back.",
+                "- Prefer structured data (JSON output flags) over free-text parsing when available.",
+                "",
+                "## Language",
+                "",
+                "- Default to English.",
+                "",
+                "## Proactive behaviors",
+                "",
+                "When running scheduled tasks (morning briefing, email checks):",
+                "- Be brief and scannable.",
+                "- Only flag truly important items.",
+                "- Group related information together.",
+            ]
+        )
+
+        # Seed default personalia
+        today = datetime.now().strftime("%Y-%m-%d")
+        values["agent.personalia"] = "\n".join(
+            [
+                "# Personalia",
+                "",
+                "## Identity",
+                "",
+                f"- Name: {agent_name}",
+                f"- Owner: {owner_name}",
+                "- Role: Personal AI assistant",
+                "",
+                "## Capabilities",
+                "",
+                "- Conversational interaction via Telegram (text)",
+                "- Can execute CLI commands via a whitelisted tool executor",
+                "",
+                "## Limitations",
+                "",
+                "- Cannot make phone calls",
+                "- Cannot access websites or browse the internet",
+                f"- Cannot access files on {owner_name}'s personal devices",
+                f"- Always needs permission before sending messages or emails on {owner_name}'s behalf",
+                "",
+                "## History",
+                "",
+                f"- {today}: Initial setup",
+            ]
+        )
+
+        await config_store.set_many(values)
+        log.info("Setup identity: saved %d values", len(values))
+
+        next_step = "telegram"
+        await config_store.set_setup_step(next_step)
+        return _render_partial(f"wizard/{next_step}.html")
+
+    @app.post("/setup/step/calendar")
+    async def setup_save_calendar(request: Request) -> HTMLResponse:
+        """Handle calendar step form submission."""
+        form_data = await request.form()
+        cal_name = str(form_data.get("cal_name", "")).strip()
+        cal_url = str(form_data.get("cal_url", "")).strip()
+        cal_user = str(form_data.get("cal_username", "")).strip()
+        cal_pass = str(form_data.get("cal_password", "")).strip()
+
+        values = {}
+        if cal_name and cal_url:
+            values["calendar.providers"] = json.dumps(
+                [{"name": cal_name, "url": cal_url, "username": cal_user, "password": cal_pass}]
+            )
+
+        if values:
+            await config_store.set_many(values)
+            log.info("Setup calendar: saved %d values", len(values))
+
+        next_step = "search"
+        await config_store.set_setup_step(next_step)
+        return _render_partial(f"wizard/{next_step}.html")
 
     @app.post("/setup/test-connection")
     async def test_connection(request: Request) -> dict:
-        """Test a service connection (Anthropic, Telegram, email, etc.)."""
         payload = await request.json()
         service = payload.get("service", "")
 
@@ -395,14 +693,6 @@ def create_admin_app(
         if service == "tavily":
             return await _test_tavily(payload.get("api_key", ""))
         return {"ok": False, "error": f"Unknown service: {service}"}
-
-    @app.get("/setup", response_class=HTMLResponse)
-    async def setup_page() -> str:
-        """Serve the setup wizard / admin UI as a single HTML page."""
-        ui_path = Path(__file__).parent / "ui.html"
-        if ui_path.exists():
-            return ui_path.read_text()
-        return "<html><body><h1>UI not found</h1><p>api/ui.html is missing.</p></body></html>"
 
     return app
 

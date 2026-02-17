@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+/*
+ * MPA Admin — Custom theme
+ * Tailwind CSS v4 with @theme for design tokens
+ */
+
+@theme {
+  --color-surface: #151515;
+  --color-surface-hover: #1a1a1a;
+  --color-surface-active: #222;
+  --color-border: #2a2a2a;
+  --color-border-hover: #444;
+  --color-muted: #888;
+  --color-accent: #6c9;
+  --color-accent-dim: #4a7a5a;
+  --color-danger: #c66;
+  --color-danger-dim: #5a2a2a;
+  --color-warn: #ca6;
+  --color-warn-dim: #6a5a2a;
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Base layer */
+@layer base {
+  body {
+    font-family: var(--font-mono);
+    @apply bg-[#0a0a0a] text-gray-200 text-sm leading-relaxed antialiased;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-semibold;
+  }
+
+  a {
+    @apply text-accent hover:underline;
+  }
+}
+
+/* Shared styles extracted to avoid self-referencing in @apply */
+@layer components {
+  /* Input base shared by .input, .input-sm, .select, .textarea */
+  .input,
+  .input-sm,
+  .select,
+  .textarea {
+    @apply w-full px-3 py-2 bg-surface border border-border text-gray-200 rounded-md
+           text-sm
+           focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent
+           placeholder:text-muted/60 transition-colors;
+    font-family: var(--font-mono);
+  }
+
+  .input-sm {
+    @apply px-2 py-1.5 text-xs;
+  }
+
+  .select {
+    @apply appearance-none cursor-pointer pr-8;
+    background-image: url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M6%208L1%203h10z%22%2F%3E%3C%2Fsvg%3E');
+    background-size: 12px;
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+  }
+
+  .textarea {
+    @apply resize-y;
+    min-height: 4rem;
+  }
+
+  /* Button base shared by all button variants */
+  .btn,
+  .btn-primary,
+  .btn-danger,
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5
+           px-3 py-2 rounded-md text-xs font-medium
+           border border-border bg-surface text-gray-200
+           hover:bg-surface-hover hover:border-border-hover
+           active:bg-surface-active
+           transition-all duration-150
+           cursor-pointer
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply bg-accent-dim border-accent text-white
+           hover:bg-accent hover:text-black;
+  }
+
+  .btn-danger {
+    @apply border-danger/50 text-danger
+           hover:bg-danger hover:text-white hover:border-danger;
+  }
+
+  .btn-ghost {
+    @apply border-transparent bg-transparent
+           hover:bg-surface hover:border-border;
+  }
+
+  .btn-sm {
+    @apply px-2 py-1 text-[0.7rem];
+  }
+
+  .btn-icon {
+    @apply p-1.5 border-transparent bg-transparent
+           hover:bg-surface-hover inline-flex items-center justify-center
+           rounded-md cursor-pointer transition-colors;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-surface border border-border rounded-lg p-5;
+  }
+
+  /* Badges */
+  .badge-ok {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-[0.7rem] font-bold uppercase tracking-wide
+           bg-accent-dim/40 text-accent;
+  }
+
+  .badge-warn {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-[0.7rem] font-bold uppercase tracking-wide
+           bg-warn-dim/40 text-warn;
+  }
+
+  .badge-off {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-[0.7rem] font-bold uppercase tracking-wide
+           bg-surface text-muted;
+  }
+
+  /* Flash messages / alerts */
+  .alert-success {
+    @apply px-3 py-2 rounded-md text-sm border
+           bg-accent-dim/20 text-accent border-accent-dim/40;
+  }
+
+  .alert-error {
+    @apply px-3 py-2 rounded-md text-sm border
+           bg-danger-dim/40 text-danger border-danger/30;
+  }
+
+  .alert-info {
+    @apply px-3 py-2 rounded-md text-sm border
+           bg-surface text-muted border-border;
+  }
+
+  /* Tables */
+  .table {
+    @apply w-full text-sm;
+  }
+
+  .table th {
+    @apply text-left text-muted text-xs uppercase tracking-wider
+           px-3 py-2 border-b border-border font-medium;
+  }
+
+  .table td {
+    @apply px-3 py-2 border-b border-border;
+  }
+
+  .table tbody tr {
+    @apply hover:bg-surface-hover transition-colors;
+  }
+
+  /* Tab navigation */
+  .tab-link {
+    @apply px-4 py-2.5 text-xs font-medium text-muted
+           border-b-2 border-transparent
+           hover:text-gray-200 transition-all cursor-pointer;
+  }
+
+  .tab-link-active {
+    @apply text-accent border-accent;
+  }
+
+  /* Log viewer */
+  .log-viewer {
+    @apply bg-[#050505] border border-border rounded-md p-3
+           h-96 overflow-y-auto text-xs leading-snug
+           whitespace-pre-wrap break-all;
+    font-family: var(--font-mono);
+  }
+
+  /* Hint text */
+  .hint {
+    @apply text-xs text-muted mt-0.5;
+  }
+
+  /* Label */
+  .label {
+    @apply block text-xs text-muted mb-1 font-medium;
+  }
+
+  /* HTMX loading indicator */
+  .htmx-indicator {
+    @apply opacity-0 transition-opacity duration-200;
+  }
+
+  .htmx-request .htmx-indicator,
+  .htmx-request.htmx-indicator {
+    @apply opacity-100;
+  }
+
+  /* Spinner */
+  .spinner {
+    @apply inline-block w-4 h-4 border-2 border-muted/30 border-t-accent rounded-full animate-spin;
+  }
+}

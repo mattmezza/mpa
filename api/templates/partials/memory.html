@@ -1,0 +1,82 @@
+{# Memory tab partial #}
+<div>
+  <div class="flex items-center gap-2 mb-4">
+    <button class="btn btn-sm" hx-get="/partials/memory" hx-target="#tab-content" hx-swap="innerHTML">
+      Refresh
+    </button>
+    <button class="btn btn-sm" hx-post="/memory/consolidate" hx-target="#consolidation-result" hx-swap="innerHTML">
+      Run consolidation
+    </button>
+    <span id="consolidation-result" class="text-xs"></span>
+  </div>
+
+  {# Long-term memories #}
+  <h3 class="text-xs text-muted uppercase tracking-wider mb-2">Long-term</h3>
+  <div class="overflow-x-auto mb-6">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="w-10">ID</th>
+          <th class="w-20">Category</th>
+          <th class="w-24">Subject</th>
+          <th>Content</th>
+          <th class="w-10"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in long_term %}
+        <tr>
+          <td class="text-xs">{{ m.id }}</td>
+          <td class="text-xs">{{ m.category }}</td>
+          <td class="text-xs">{{ m.subject }}</td>
+          <td class="text-xs break-all">{{ m.content }}</td>
+          <td>
+            <button class="btn-danger btn-sm"
+                    hx-post="/memory/delete" hx-target="#tab-content" hx-swap="innerHTML"
+                    hx-vals='{"tier": "long-term", "memory_id": {{ m.id }}}'>
+              x
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not long_term %}
+        <tr><td colspan="5" class="text-muted text-xs text-center py-4">No long-term memories</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {# Short-term memories #}
+  <h3 class="text-xs text-muted uppercase tracking-wider mb-2">Short-term (active)</h3>
+  <div class="overflow-x-auto">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="w-10">ID</th>
+          <th>Content</th>
+          <th class="w-32">Expires</th>
+          <th class="w-10"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in short_term %}
+        <tr>
+          <td class="text-xs">{{ m.id }}</td>
+          <td class="text-xs break-all">{{ m.content }}</td>
+          <td class="text-xs">{{ m.expires_at }}</td>
+          <td>
+            <button class="btn-danger btn-sm"
+                    hx-post="/memory/delete" hx-target="#tab-content" hx-swap="innerHTML"
+                    hx-vals='{"tier": "short-term", "memory_id": {{ m.id }}}'>
+              x
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not short_term %}
+        <tr><td colspan="4" class="text-muted text-xs text-center py-4">No active short-term memories</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>

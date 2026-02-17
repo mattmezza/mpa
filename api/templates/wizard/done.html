@@ -1,0 +1,34 @@
+<div class="card" x-data="{ starting: false, result: '', ok: false }">
+  <h2 class="text-base mb-3">Setup Complete</h2>
+  <p class="text-gray-300 mb-4">Your agent is configured. Start it now or restart the process later.</p>
+
+  <button class="btn-primary" :disabled="starting"
+          @click="
+            starting = true; result = '';
+            const key = localStorage.getItem('admin_api_key') || '';
+            fetch('/agent/start', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + key }
+            })
+            .then(r => r.json())
+            .then(d => {
+              if (d.status === 'started' || d.status === 'already_running') {
+                ok = true;
+                result = 'Agent is running. Channels: ' + (d.channels || []).join(', ');
+                setTimeout(() => { window.location.href = '/admin'; }, 1500);
+              } else {
+                ok = false;
+                result = d.error || d.status;
+              }
+            })
+            .catch(e => { ok = false; result = e.message; })
+            .finally(() => { starting = false; })
+          ">
+    <span x-show="starting" class="spinner mr-1"></span>
+    Start agent
+  </button>
+
+  <template x-if="result">
+    <div :class="ok ? 'alert-success' : 'alert-error'" class="mt-3" x-text="result"></div>
+  </template>
+</div>

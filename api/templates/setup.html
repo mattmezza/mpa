@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Setup — Agent Admin{% endblock %}
+
+{% block body %}
+<div class="max-w-lg mx-auto">
+  <h1 class="text-xl text-accent mb-2">Agent Setup</h1>
+
+  {# Progress dots #}
+  <div class="flex gap-1 mb-6">
+    {% for s in steps %}
+    <div class="w-2.5 h-2.5 rounded-full transition-colors duration-300
+      {% if steps.index(s) < steps.index(current_step) %}bg-accent
+      {% elif s == current_step %}bg-warn
+      {% else %}bg-border{% endif %}"
+      title="{{ s }}"></div>
+    {% endfor %}
+  </div>
+
+  {# Step content — loaded via HTMX partials #}
+  <div id="wizard-step">
+    {% include "wizard/" + current_step + ".html" %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+{# Log content — swapped into #log-content by HTMX #}
+{% for line in lines %}{{ line }}
+{% endfor %}
+<script>
+  // Auto-scroll to bottom after content swap
+  const viewer = document.getElementById('log-content');
+  if (viewer) viewer.scrollTop = viewer.scrollHeight;
+</script>

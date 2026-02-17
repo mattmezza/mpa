@@ -1,0 +1,23 @@
+<div class="card">
+  <h2 class="text-base mb-3">Agent Identity</h2>
+
+  <form id="identity-form" hx-post="/setup/step/identity" hx-target="#wizard-step" hx-swap="innerHTML">
+    <label class="label" for="w-name">Agent name</label>
+    <input type="text" class="input" id="w-name" name="agent_name" value="Clio" placeholder="Jarvis, Friday, ...">
+
+    <label class="label mt-3" for="w-owner">Your name</label>
+    <input type="text" class="input" id="w-owner" name="owner_name" placeholder="Your Name">
+
+    <label class="label mt-3" for="w-tz">Timezone</label>
+    <input type="text" class="input" id="w-tz" name="timezone" value="Europe/Zurich" placeholder="Europe/Zurich">
+
+    <div class="flex justify-between mt-4">
+      <button type="button" class="btn"
+              hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+              hx-vals='{"step": "llm", "values": {}}'>
+        Back
+      </button>
+      <button type="submit" class="btn-primary">Next</button>
+    </div>
+  </form>
+</div>

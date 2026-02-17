@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Login — Agent Admin{% endblock %}
+
+{% block body %}
+<div class="min-h-[80vh] flex items-center justify-center">
+  <div class="w-full max-w-sm">
+    <h1 class="text-xl text-accent mb-6">Agent Admin</h1>
+    <div class="card" x-data="{ error: '' }">
+      <h2 class="text-base mb-4">Authentication</h2>
+      <form @submit.prevent="
+        const key = $refs.apiKey.value;
+        fetch('/health', { headers: { 'Authorization': 'Bearer ' + key } })
+          .then(r => {
+            if (r.ok) {
+              localStorage.setItem('admin_api_key', key);
+              window.location.href = '/admin';
+            } else {
+              error = 'Invalid API key';
+            }
+          })
+          .catch(() => { error = 'Connection failed'; })
+      ">
+        <label class="label" for="auth-key">Admin API Key</label>
+        <input type="password" class="input" id="auth-key" x-ref="apiKey"
+               placeholder="Enter your admin API key" autofocus>
+
+        <template x-if="error">
+          <div class="alert-error mt-3" x-text="error"></div>
+        </template>
+
+        <div class="flex justify-end mt-4">
+          <button type="submit" class="btn-primary">Log in</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

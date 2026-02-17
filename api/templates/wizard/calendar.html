@@ -1,0 +1,35 @@
+<div class="card">
+  <h2 class="text-base mb-3">Calendar <span class="text-muted font-normal text-xs">(optional)</span></h2>
+
+  <form id="calendar-form" hx-post="/setup/step/calendar" hx-target="#wizard-step" hx-swap="innerHTML">
+    <label class="label" for="w-cal-name">Calendar name</label>
+    <input type="text" class="input" id="w-cal-name" name="cal_name" placeholder="google">
+
+    <label class="label mt-3" for="w-cal-url">CalDAV URL</label>
+    <input type="text" class="input" id="w-cal-url" name="cal_url"
+           placeholder="https://apidata.googleusercontent.com/caldav/v2/you@gmail.com/events">
+
+    <label class="label mt-3" for="w-cal-user">Username / email</label>
+    <input type="text" class="input" id="w-cal-user" name="cal_username" placeholder="you@gmail.com">
+
+    <label class="label mt-3" for="w-cal-pass">App password</label>
+    <input type="password" class="input" id="w-cal-pass" name="cal_password" placeholder="xxxx xxxx xxxx xxxx">
+    <p class="hint">Use an App Password, not your regular password</p>
+
+    <div class="flex justify-between mt-4">
+      <button type="button" class="btn"
+              hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+              hx-vals='{"step": "email", "values": {}}'>
+        Back
+      </button>
+      <div class="flex gap-2">
+        <button type="button" class="btn"
+                hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+                hx-vals='{"step": "search", "values": {}}'>
+          Skip
+        </button>
+        <button type="submit" class="btn-primary">Next</button>
+      </div>
+    </div>
+  </form>
+</div>

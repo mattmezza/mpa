@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — Agent Admin{% endblock %}
+
+{% block body %}
+<div>
+  <h1 class="text-xl text-accent mb-2">Agent Admin</h1>
+
+  {# Status bar — loaded via HTMX #}
+  <div id="status-bar" class="flex items-center gap-3 py-2 mb-4 flex-wrap"
+       hx-get="/partials/status" hx-trigger="load" hx-swap="innerHTML">
+    <span class="text-muted text-xs">Loading...</span>
+  </div>
+
+  {# Tab navigation #}
+  <div class="flex border-b border-border mb-4" x-data="{ tab: 'config' }">
+    <button class="tab-link" :class="tab === 'config' && 'tab-link-active'"
+            @click="tab = 'config'" hx-get="/partials/config" hx-target="#tab-content" hx-swap="innerHTML">
+      Config
+    </button>
+    <button class="tab-link" :class="tab === 'identity' && 'tab-link-active'"
+            @click="tab = 'identity'" hx-get="/partials/identity" hx-target="#tab-content" hx-swap="innerHTML">
+      Agent Identity
+    </button>
+    <button class="tab-link" :class="tab === 'permissions' && 'tab-link-active'"
+            @click="tab = 'permissions'" hx-get="/partials/permissions" hx-target="#tab-content" hx-swap="innerHTML">
+      Permissions
+    </button>
+    <button class="tab-link" :class="tab === 'memory' && 'tab-link-active'"
+            @click="tab = 'memory'" hx-get="/partials/memory" hx-target="#tab-content" hx-swap="innerHTML">
+      Memory
+    </button>
+    <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
+            @click="tab = 'logs'" hx-get="/partials/logs" hx-target="#tab-content" hx-swap="innerHTML">
+      Logs
+    </button>
+  </div>
+
+  {# Tab content — initially loads config #}
+  <div id="tab-content" hx-get="/partials/config" hx-trigger="load" hx-swap="innerHTML">
+    <span class="text-muted text-xs">Loading...</span>
+  </div>
+</div>
+{% endblock %}

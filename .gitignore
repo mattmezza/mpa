@@ -33,3 +33,6 @@ data/
 # pytest / ruff
 .pytest_cache/
 .ruff_cache/
+
+# Tailwind CSS standalone CLI binary
+tailwindcss

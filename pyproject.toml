@@ -19,6 +19,7 @@ dependencies = [
     "sqlalchemy",
     "tavily-python",
     "httpx",
+    "jinja2",
 ]
 
 [dependency-groups]

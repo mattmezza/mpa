@@ -1,0 +1,71 @@
+{# Permissions tab partial #}
+<div>
+  <div class="flex items-center gap-2 mb-4">
+    <button class="btn btn-sm" hx-get="/partials/permissions" hx-target="#tab-content" hx-swap="innerHTML">
+      Refresh
+    </button>
+  </div>
+
+  {# Rules table #}
+  <div class="overflow-x-auto">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Pattern</th>
+          <th class="w-24">Level</th>
+          <th class="w-20"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pattern, level in rules.items() %}
+        <tr>
+          <td class="text-xs break-all">{{ pattern }}</td>
+          <td>
+            <span class="{% if level == 'ALWAYS' %}badge-ok{% elif level == 'NEVER' %}badge-off{% else %}badge-warn{% endif %}">
+              {{ level }}
+            </span>
+          </td>
+          <td class="whitespace-nowrap">
+            <button class="btn btn-sm"
+                    @click="
+                      document.getElementById('perm-pattern').value = '{{ pattern }}';
+                      document.getElementById('perm-level').value = '{{ level }}';
+                    ">
+              edit
+            </button>
+            <button class="btn-danger btn-sm ml-0.5"
+                    hx-post="/permissions/delete" hx-target="#tab-content" hx-swap="innerHTML"
+                    hx-vals='{"pattern": "{{ pattern }}"}'>
+              x
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not rules %}
+        <tr><td colspan="3" class="text-muted text-xs text-center py-4">No permission rules configured</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {# Add / update rule #}
+  <h3 class="text-xs text-muted uppercase tracking-wider mt-5 mb-2">Add / update rule</h3>
+  <form hx-post="/permissions" hx-target="#tab-content" hx-swap="innerHTML">
+    <div class="flex gap-2 items-end flex-wrap">
+      <div class="flex-[2] min-w-[200px]">
+        <label class="label">Pattern</label>
+        <input type="text" class="input-sm" name="pattern" id="perm-pattern"
+               placeholder="run_command:himalaya*send*">
+      </div>
+      <div class="flex-1 min-w-[100px]">
+        <label class="label">Level</label>
+        <select class="select" name="level" id="perm-level" style="padding: 0.375rem 2rem 0.375rem 0.5rem; font-size: 0.75rem;">
+          <option>ALWAYS</option>
+          <option selected>ASK</option>
+          <option>NEVER</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-sm">Save</button>
+    </div>
+  </form>
+</div>

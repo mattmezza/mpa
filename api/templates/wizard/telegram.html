@@ -1,0 +1,55 @@
+<div class="card" x-data="{ testResult: '', testOk: false, testing: false }">
+  <h2 class="text-base mb-3">Telegram</h2>
+
+  <label class="label" for="w-tg-token">Bot Token</label>
+  <input type="password" class="input" id="w-tg-token" name="bot_token" placeholder="123456:ABC-DEF...">
+  <p class="hint">Create a bot via <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram</p>
+
+  <label class="label mt-3" for="w-tg-users">Your Telegram User ID</label>
+  <input type="text" class="input" id="w-tg-users" name="user_ids" placeholder="123456789">
+  <p class="hint">Send /start to <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> to find your ID</p>
+
+  <div class="mt-3">
+    <button class="btn" :disabled="testing"
+            @click="
+              testing = true; testResult = '';
+              fetch('/setup/test-connection', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({service: 'telegram', bot_token: document.getElementById('w-tg-token').value})
+              })
+              .then(r => r.json())
+              .then(d => { testOk = d.ok; testResult = d.ok ? 'Connected to @' + (d.bot_username || '') : d.error; })
+              .catch(e => { testOk = false; testResult = e.message; })
+              .finally(() => { testing = false; })
+            ">
+      <span x-show="testing" class="spinner mr-1"></span>
+      Test connection
+    </button>
+  </div>
+  <template x-if="testResult">
+    <div :class="testOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResult"></div>
+  </template>
+
+  <div class="flex justify-between mt-4">
+    <button class="btn"
+            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+            hx-vals='{"step": "identity", "values": {}}'>
+      Back
+    </button>
+    <button class="btn-primary"
+            @click="
+              htmx.ajax('POST', '/setup/step', {
+                target: '#wizard-step', swap: 'innerHTML',
+                values: {
+                  step: 'email',
+                  'values[channels.telegram.enabled]': 'true',
+                  'values[channels.telegram.bot_token]': document.getElementById('w-tg-token').value,
+                  'values[channels.telegram.allowed_user_ids]': document.getElementById('w-tg-users').value
+                }
+              })
+            ">
+      Next
+    </button>
+  </div>
+</div>
