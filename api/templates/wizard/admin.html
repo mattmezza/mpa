@@ -1,4 +1,4 @@
-<div class="card" x-data="{ key: {{ step_ctx.admin_key|default('')|tojson }}, error: '' }">
+<div class="card" x-data="{ key: {{ step_ctx.admin_key|default('')|tojson|e }}, error: '' }">
   <h2 class="text-base mb-3">Admin API Key</h2>
   <p class="text-muted text-sm mb-3">Set a key to protect the admin API. You'll need this to access the dashboard after setup.</p>
 

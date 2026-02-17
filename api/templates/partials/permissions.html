@@ -28,8 +28,8 @@
           <td class="whitespace-nowrap">
             <button class="btn btn-sm"
                     @click="
-                      document.getElementById('perm-pattern').value = {{ pattern|tojson }};
-                      document.getElementById('perm-level').value = {{ level|tojson }};
+                      document.getElementById('perm-pattern').value = {{ pattern|tojson|e }};
+                      document.getElementById('perm-level').value = {{ level|tojson|e }};
                     ">
               edit
             </button>
