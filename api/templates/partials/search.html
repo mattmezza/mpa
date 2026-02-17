@@ -1,14 +1,10 @@
 {# Search tab partial #}
-<div class="space-y-6" x-data="{
-  enabled: {{ enabled|default('false', true)|tojson }},
-  provider: {{ provider|default('tavily', true)|tojson }},
-  apiKey: {{ api_key|default('', true)|tojson }},
-  maxResults: {{ max_results|default('5', true)|tojson }},
-  result: '',
-  resultOk: false,
-  testing: false,
-  testResult: ''
-}">
+<div class="space-y-6" x-data="searchTab(
+  {{ enabled|default('false', true)|tojson|forceescape }},
+  {{ provider|default('tavily', true)|tojson|forceescape }},
+  {{ api_key|default('', true)|tojson|forceescape }},
+  {{ max_results|default('5', true)|tojson|forceescape }}
+)">
   <div class="card">
     <h2 class="text-base mb-1">Web Search</h2>
     <p class="text-muted text-xs mb-4">Configure web search capabilities for the agent. Currently supports Tavily.</p>
@@ -29,7 +25,10 @@
 
       <div>
         <label class="label">API Key</label>
+        <input type="text" class="input-sm" style="max-width:500px; display:none"
+               autocomplete="username" aria-hidden="true" tabindex="-1">
         <input type="password" class="input-sm" style="max-width:500px"
+               autocomplete="new-password"
                x-model="apiKey" placeholder="tvly-...">
       </div>
 
@@ -59,7 +58,10 @@
                   body: JSON.stringify({values: vals})
                 })
                 .then(r => { resultOk = r.ok; return r.json(); })
-                .then(d => { result = resultOk ? 'Search settings saved' : (d.detail || 'Error'); })
+                .then(d => {
+                  result = resultOk ? 'Search settings saved' : (d.detail || 'Error');
+                  if (resultOk && window.showToast) { window.showToast('Search settings saved'); }
+                })
                 .catch(e => { resultOk = false; result = e.message; })
               ">
         Save
@@ -76,8 +78,9 @@
                   body: JSON.stringify({service: 'tavily', api_key: apiKey})
                 })
                 .then(r => r.json())
-                .then(d => { testing = false; testResult = d.ok ? 'Connection OK' : ('Failed: ' + (d.error || 'unknown')); })
-                .catch(e => { testing = false; testResult = 'Error: ' + e.message; })
+                .then(d => { testResult = d.ok ? 'Connection OK' : ('Failed: ' + (d.error || 'unknown')); })
+                .catch(e => { testResult = 'Error: ' + e.message; })
+                .finally(() => { testing = false; })
               ">
         <span x-show="!testing">Test connection</span>
         <span x-show="testing">Testing...</span>
