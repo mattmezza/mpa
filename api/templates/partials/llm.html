@@ -11,7 +11,7 @@
     <h2 class="text-base mb-1">Language Model</h2>
     <p class="text-muted text-xs mb-4">Configure the Anthropic API key and model used by the agent.</p>
 
-    <div class="space-y-3">
+    <form class="space-y-3" @submit.prevent>
       <div>
         <label class="label">API Key</label>
         <input type="password" class="input-sm" style="max-width:500px"
@@ -22,13 +22,16 @@
       <div>
         <label class="label">Model</label>
         <select class="input-sm" style="max-width:500px" x-model="model">
+          <option value="claude-opus-4-6">Claude Opus 4.6</option>
+          <option value="claude-opus-4-5">Claude Opus 4.5</option>
+          <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
           <option value="claude-sonnet-4-5-20250514">Claude Sonnet 4.5</option>
           <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
           <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
         </select>
         <p class="text-muted text-xs mt-1">The model to use for agent conversations. Haiku is faster and cheaper; Sonnet is more capable.</p>
       </div>
-    </div>
+    </form>
 
     <div class="flex items-center gap-2 mt-4">
       <button class="btn-primary btn-sm"
@@ -42,7 +45,10 @@
                   body: JSON.stringify({values: {'agent.anthropic_api_key': apiKey, 'agent.model': model}})
                 })
                 .then(r => { resultOk = r.ok; return r.json(); })
-                .then(d => { result = resultOk ? 'LLM settings saved' : (d.detail || 'Error'); })
+                .then(d => {
+                  result = resultOk ? 'LLM settings saved' : (d.detail || 'Error');
+                  if (resultOk && window.showToast) { window.showToast('LLM settings saved'); }
+                })
                 .catch(e => { resultOk = false; result = e.message; })
               ">
         Save
@@ -59,8 +65,9 @@
                   body: JSON.stringify({service: 'anthropic', api_key: apiKey})
                 })
                 .then(r => r.json())
-                .then(d => { testing = false; testResult = d.ok ? 'Connection OK' : ('Failed: ' + (d.error || 'unknown')); })
-                .catch(e => { testing = false; testResult = 'Error: ' + e.message; })
+                .then(d => { testResult = d.ok ? 'Connection OK' : ('Failed: ' + (d.error || 'unknown')); })
+                .catch(e => { testResult = 'Error: ' + e.message; })
+                .finally(() => { testing = false; })
               ">
         <span x-show="!testing">Test connection</span>
         <span x-show="testing">Testing...</span>

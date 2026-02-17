@@ -12,6 +12,8 @@
 <body class="py-8" style="padding-left: 32px; padding-right: 32px;">
   {% block body %}{% endblock %}
 
+  <div id="toast" style="position: fixed; right: 24px; bottom: 24px; display: none; z-index: 100; max-width: 360px;"></div>
+
   <script>
     // Global: set HTMX auth header from localStorage
     document.body.addEventListener('htmx:configRequest', function(e) {
@@ -20,6 +22,25 @@
         e.detail.headers['Authorization'] = 'Bearer ' + key;
       }
     });
+
+    document.body.addEventListener('htmx:afterSwap', function(e) {
+      if (window.Alpine && e.detail && e.detail.target) {
+        window.Alpine.initTree(e.detail.target);
+      }
+    });
+
+    function showToast(message, ok = true) {
+      const toast = document.getElementById('toast');
+      if (!toast) return;
+      toast.textContent = message;
+      toast.className = ok ? 'alert-success' : 'alert-error';
+      toast.style.display = 'block';
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => {
+        toast.style.display = 'none';
+      }, 2500);
+    }
+    window.showToast = showToast;
 
     // Global: handle 401 by redirecting to auth gate
     document.body.addEventListener('htmx:responseError', function(e) {
