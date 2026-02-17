@@ -21,6 +21,10 @@ RUN uv sync --no-dev --no-install-project
 # Install CLI tools for contacts (khard = CardDAV client, vdirsyncer = sync daemon)
 RUN uv pip install --system khard vdirsyncer[google]
 
+# Create non-root user
+RUN groupadd --gid 10001 mpa && \
+    useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash mpa
+
 # Copy application code
 COPY core/ core/
 COPY channels/ channels/
@@ -30,8 +34,11 @@ COPY voice/ voice/
 COPY api/ api/
 
 # CLI config directories
-RUN mkdir -p /root/.config/himalaya /root/.config/khard /root/.config/vdirsyncer \
-    /root/.local/share/vdirsyncer
+RUN mkdir -p /home/mpa/.config/himalaya /home/mpa/.config/khard /home/mpa/.config/vdirsyncer \
+    /home/mpa/.local/share/vdirsyncer /app/data \
+    && chown -R mpa:mpa /home/mpa /app
+
+USER mpa
 
 EXPOSE 8000
 CMD ["uv", "run", "python", "-m", "core.main"]
