@@ -2,7 +2,8 @@
   <h2 class="text-base mb-3">Web Search <span class="text-muted font-normal text-xs">(optional)</span></h2>
 
   <label class="label" for="w-tavily-key">Tavily API Key</label>
-  <input type="password" class="input" id="w-tavily-key" name="tavily_key" placeholder="tvly-...">
+  <input type="password" class="input" id="w-tavily-key" name="tavily_key" placeholder="tvly-..."
+         value="{{ step_ctx.tavily_key|default('') }}">
   <p class="hint">Free tier at <a href="https://app.tavily.com" target="_blank">app.tavily.com</a></p>
 
   <div class="mt-3">

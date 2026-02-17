@@ -2,11 +2,13 @@
   <h2 class="text-base mb-3">Telegram</h2>
 
   <label class="label" for="w-tg-token">Bot Token</label>
-  <input type="password" class="input" id="w-tg-token" name="bot_token" placeholder="123456:ABC-DEF...">
+  <input type="password" class="input" id="w-tg-token" name="bot_token" placeholder="123456:ABC-DEF..."
+         value="{{ step_ctx.bot_token|default('') }}">
   <p class="hint">Create a bot via <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram</p>
 
   <label class="label mt-3" for="w-tg-users">Your Telegram User ID</label>
-  <input type="text" class="input" id="w-tg-users" name="user_ids" placeholder="123456789">
+  <input type="text" class="input" id="w-tg-users" name="user_ids" placeholder="123456789"
+         value="{{ step_ctx.user_ids|default('') }}">
   <p class="hint">Send /start to <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> to find your ID</p>
 
   <div class="mt-3">

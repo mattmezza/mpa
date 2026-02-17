@@ -38,6 +38,7 @@ _jinja_env = Environment(
     autoescape=True,
     auto_reload=True,
 )
+_jinja_env.globals["step_ctx"] = {}  # default empty dict for wizard templates
 
 
 def _render(template_name: str, **ctx: object) -> HTMLResponse:
@@ -52,9 +53,71 @@ def _render_partial(template_name: str, **ctx: object) -> HTMLResponse:
     return HTMLResponse(tmpl.render(**ctx))
 
 
-def _render_wizard_step(step: str, steps: list[str]) -> HTMLResponse:
+async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str, str]:
+    """Fetch previously-saved config values relevant to a wizard step.
+
+    Returns a flat dict of template variable names to values so that
+    navigating *back* in the wizard pre-populates form fields.
+    """
+    ctx: dict[str, str] = {}
+    if step == "llm":
+        for key, var in (
+            ("agent.anthropic_api_key", "api_key"),
+            ("agent.model", "model"),
+        ):
+            val = await config_store.get(key)
+            if val:
+                ctx[var] = val
+    elif step == "identity":
+        for key, var in (
+            ("agent.name", "agent_name"),
+            ("agent.owner_name", "owner_name"),
+            ("agent.timezone", "timezone"),
+        ):
+            val = await config_store.get(key)
+            if val:
+                ctx[var] = val
+    elif step == "telegram":
+        for key, var in (
+            ("channels.telegram.bot_token", "bot_token"),
+            ("channels.telegram.allowed_user_ids", "user_ids"),
+        ):
+            val = await config_store.get(key)
+            if val:
+                ctx[var] = val
+    elif step == "calendar":
+        raw = await config_store.get("calendar.providers")
+        if raw:
+            try:
+                providers = json.loads(raw)
+                if providers and isinstance(providers, list):
+                    p = providers[0]
+                    ctx["cal_name"] = p.get("name", "")
+                    ctx["cal_url"] = p.get("url", "")
+                    ctx["cal_username"] = p.get("username", "")
+                    ctx["cal_password"] = p.get("password", "")
+            except json.JSONDecodeError, IndexError:
+                pass
+    elif step == "search":
+        val = await config_store.get("search.api_key")
+        if val:
+            ctx["tavily_key"] = val
+    elif step == "admin":
+        val = await config_store.get("admin.api_key")
+        if val:
+            ctx["admin_key"] = val
+    return ctx
+
+
+def _render_wizard_step(
+    step: str,
+    steps: list[str],
+    ctx: dict[str, str] | None = None,
+) -> HTMLResponse:
     """Render a wizard step partial with OOB progress dots update."""
-    step_html = _jinja_env.get_template(f"wizard/{step}.html").render()
+    step_html = _jinja_env.get_template(f"wizard/{step}.html").render(
+        step_ctx=ctx or {},
+    )
     progress_html = _jinja_env.get_template("wizard/progress.html").render(
         steps=steps, current_step=step
     )
@@ -193,7 +256,8 @@ def create_admin_app(
             return RedirectResponse("/admin", status_code=302)
 
         step = await config_store.get_setup_step()
-        return _render("setup.html", steps=SETUP_STEPS, current_step=step)
+        step_ctx = await _wizard_step_context(step, config_store)
+        return _render("setup.html", steps=SETUP_STEPS, current_step=step, step_ctx=step_ctx)
 
     @app.get("/admin", response_class=HTMLResponse)
     async def admin_page() -> HTMLResponse:
@@ -586,7 +650,8 @@ def create_admin_app(
             raise HTTPException(400, f"Unknown step: {step}")
         await config_store.set_setup_step(step)
 
-        return _render_wizard_step(step, SETUP_STEPS)
+        ctx = await _wizard_step_context(step, config_store)
+        return _render_wizard_step(step, SETUP_STEPS, ctx)
 
     @app.post("/setup/step/identity")
     async def setup_save_identity(request: Request) -> HTMLResponse:
@@ -671,7 +736,8 @@ def create_admin_app(
 
         next_step = "telegram"
         await config_store.set_setup_step(next_step)
-        return _render_wizard_step(next_step, SETUP_STEPS)
+        ctx = await _wizard_step_context(next_step, config_store)
+        return _render_wizard_step(next_step, SETUP_STEPS, ctx)
 
     @app.post("/setup/step/calendar")
     async def setup_save_calendar(request: Request) -> HTMLResponse:
@@ -696,7 +762,8 @@ def create_admin_app(
 
         next_step = "search"
         await config_store.set_setup_step(next_step)
-        return _render_wizard_step(next_step, SETUP_STEPS)
+        ctx = await _wizard_step_context(next_step, config_store)
+        return _render_wizard_step(next_step, SETUP_STEPS, ctx)
 
     @app.post("/setup/test-connection")
     async def test_connection(request: Request) -> dict:

@@ -2,13 +2,14 @@
   <h2 class="text-base mb-3">LLM Provider</h2>
 
   <label class="label" for="w-api-key">Anthropic API Key</label>
-  <input type="password" class="input" id="w-api-key" name="api_key" placeholder="sk-ant-...">
+  <input type="password" class="input" id="w-api-key" name="api_key" placeholder="sk-ant-..."
+         value="{{ step_ctx.api_key|default('') }}">
   <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a></p>
 
   <label class="label mt-3" for="w-model">Model</label>
   <select class="select" id="w-model" name="model">
-    <option value="claude-sonnet-4-5-20250514">Claude Sonnet 4.5</option>
-    <option value="claude-haiku-4-5">Claude Haiku 4.5 (cheaper)</option>
+    <option value="claude-sonnet-4-5-20250514" {{ 'selected' if step_ctx.model|default('') == 'claude-sonnet-4-5-20250514' or not step_ctx.model|default('') }}>Claude Sonnet 4.5</option>
+    <option value="claude-haiku-4-5" {{ 'selected' if step_ctx.model|default('') == 'claude-haiku-4-5' }}>Claude Haiku 4.5 (cheaper)</option>
   </select>
 
   <div class="mt-3">

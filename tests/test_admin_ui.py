@@ -27,13 +27,16 @@ class _ConfigStoreStub:
         return self._setup_complete
 
     async def get(self, key: str):
+        # Check explicit data first, then fall back to hardcoded defaults
+        if key in self._data:
+            return self._data[key]
         if key == "admin.api_key":
             return "secret"
         if key == "agent.character":
             return "# Test character"
         if key == "agent.personalia":
             return "# Test personalia"
-        return self._data.get(key)
+        return None
 
     async def get_all_redacted(self) -> dict:
         return {"agent.name": "Clio", "admin.api_key": "se***ret"}
@@ -533,3 +536,162 @@ class TestWizardProgress:
         assert resp.status_code == 200
         assert "wizard-progress" in resp.text
         assert "hx-swap-oob" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Wizard back-navigation pre-population
+# ---------------------------------------------------------------------------
+
+
+def _client_with_config(
+    data: dict[str, str],
+    step: str = "welcome",
+) -> TestClient:
+    """Create a test client whose config store already has saved values."""
+    store = _ConfigStoreStub(setup_complete=False, step=step)
+    store._data.update(data)
+    agent_state = AgentState(agent=None)
+    app, _ = create_admin_app(agent_state, store)
+    return TestClient(app, follow_redirects=False)
+
+
+class TestWizardPrePopulation:
+    def test_llm_step_shows_saved_api_key(self):
+        """Navigating back to LLM step should show the previously saved API key."""
+        client = _client_with_config(
+            {"agent.anthropic_api_key": "sk-ant-test123", "agent.model": "claude-haiku-4-5"},
+            step="identity",
+        )
+        resp = client.post("/setup/step", json={"step": "llm", "values": {}})
+        assert resp.status_code == 200
+        assert "sk-ant-test123" in resp.text
+        assert "claude-haiku-4-5" in resp.text
+
+    def test_identity_step_shows_saved_values(self):
+        """Navigating back to identity step should show saved name, owner, tz."""
+        client = _client_with_config(
+            {
+                "agent.name": "Jarvis",
+                "agent.owner_name": "Tony",
+                "agent.timezone": "America/New_York",
+            },
+            step="telegram",
+        )
+        resp = client.post("/setup/step", json={"step": "identity", "values": {}})
+        assert resp.status_code == 200
+        assert "Jarvis" in resp.text
+        assert "Tony" in resp.text
+        assert "America/New_York" in resp.text
+
+    def test_telegram_step_shows_saved_token_and_ids(self):
+        """Navigating back to telegram step should show saved bot token and user IDs."""
+        client = _client_with_config(
+            {
+                "channels.telegram.bot_token": "123456:ABC-DEF",
+                "channels.telegram.allowed_user_ids": "987654321",
+            },
+            step="email",
+        )
+        resp = client.post("/setup/step", json={"step": "telegram", "values": {}})
+        assert resp.status_code == 200
+        assert "123456:ABC-DEF" in resp.text
+        assert "987654321" in resp.text
+
+    def test_calendar_step_shows_saved_provider(self):
+        """Navigating back to calendar step should unpack and show saved provider."""
+        import json
+
+        client = _client_with_config(
+            {
+                "calendar.providers": json.dumps(
+                    [
+                        {
+                            "name": "google",
+                            "url": "https://cal.example.com",
+                            "username": "me@g.co",
+                            "password": "apppass",
+                        }
+                    ]
+                ),
+            },
+            step="search",
+        )
+        resp = client.post("/setup/step", json={"step": "calendar", "values": {}})
+        assert resp.status_code == 200
+        assert "google" in resp.text
+        assert "https://cal.example.com" in resp.text
+        assert "me@g.co" in resp.text
+        assert "apppass" in resp.text
+
+    def test_search_step_shows_saved_key(self):
+        """Navigating back to search step should show the saved Tavily key."""
+        client = _client_with_config(
+            {"search.api_key": "tvly-testkey999"},
+            step="admin",
+        )
+        resp = client.post("/setup/step", json={"step": "search", "values": {}})
+        assert resp.status_code == 200
+        assert "tvly-testkey999" in resp.text
+
+    def test_admin_step_shows_saved_key(self):
+        """Navigating back to admin step should pre-fill the admin key in Alpine data."""
+        client = _client_with_config(
+            {"admin.api_key": "deadbeef1234"},
+            step="done",
+        )
+        resp = client.post("/setup/step", json={"step": "admin", "values": {}})
+        assert resp.status_code == 200
+        assert "deadbeef1234" in resp.text
+
+    def test_setup_page_initial_load_pre_populates(self):
+        """GET /setup should pre-populate the current step with saved values."""
+        client = _client_with_config(
+            {
+                "agent.anthropic_api_key": "sk-ant-initial",
+                "agent.model": "claude-haiku-4-5",
+            },
+            step="llm",
+        )
+        resp = client.get("/setup")
+        assert resp.status_code == 200
+        assert "sk-ant-initial" in resp.text
+
+    def test_identity_forward_pre_populates_telegram(self):
+        """Submitting identity step should pre-populate telegram with any saved values."""
+        store = _ConfigStoreStub(setup_complete=False, step="identity")
+        store._data["channels.telegram.bot_token"] = "pre-saved-token"
+        store._data["channels.telegram.allowed_user_ids"] = "111222"
+        agent_state = AgentState(agent=None)
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/setup/step/identity",
+            data={"agent_name": "Test", "owner_name": "Owner", "timezone": "UTC"},
+        )
+        assert resp.status_code == 200
+        assert "pre-saved-token" in resp.text
+        assert "111222" in resp.text
+
+    def test_calendar_forward_pre_populates_search(self):
+        """Submitting calendar step should pre-populate search with any saved values."""
+        store = _ConfigStoreStub(setup_complete=False, step="calendar")
+        store._data["search.api_key"] = "tvly-presaved"
+        agent_state = AgentState(agent=None)
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/setup/step/calendar",
+            data={"cal_name": "", "cal_url": ""},
+        )
+        assert resp.status_code == 200
+        assert "tvly-presaved" in resp.text
+
+    def test_empty_config_shows_defaults(self):
+        """With no saved config, identity fields should show defaults (Clio, Europe/Zurich)."""
+        client = _client_with_config({}, step="llm")
+        resp = client.post("/setup/step", json={"step": "identity", "values": {}})
+        assert resp.status_code == 200
+        assert "Clio" in resp.text
+        assert "Europe/Zurich" in resp.text

@@ -3,17 +3,21 @@
 
   <form id="calendar-form" hx-post="/setup/step/calendar" hx-target="#wizard-step" hx-swap="innerHTML">
     <label class="label" for="w-cal-name">Calendar name</label>
-    <input type="text" class="input" id="w-cal-name" name="cal_name" placeholder="google">
+    <input type="text" class="input" id="w-cal-name" name="cal_name" placeholder="google"
+           value="{{ step_ctx.cal_name|default('') }}">
 
     <label class="label mt-3" for="w-cal-url">CalDAV URL</label>
     <input type="text" class="input" id="w-cal-url" name="cal_url"
-           placeholder="https://apidata.googleusercontent.com/caldav/v2/you@gmail.com/events">
+           placeholder="https://apidata.googleusercontent.com/caldav/v2/you@gmail.com/events"
+           value="{{ step_ctx.cal_url|default('') }}">
 
     <label class="label mt-3" for="w-cal-user">Username / email</label>
-    <input type="text" class="input" id="w-cal-user" name="cal_username" placeholder="you@gmail.com">
+    <input type="text" class="input" id="w-cal-user" name="cal_username" placeholder="you@gmail.com"
+           value="{{ step_ctx.cal_username|default('') }}">
 
     <label class="label mt-3" for="w-cal-pass">App password</label>
-    <input type="password" class="input" id="w-cal-pass" name="cal_password" placeholder="xxxx xxxx xxxx xxxx">
+    <input type="password" class="input" id="w-cal-pass" name="cal_password" placeholder="xxxx xxxx xxxx xxxx"
+           value="{{ step_ctx.cal_password|default('') }}">
     <p class="hint">Use an App Password, not your regular password</p>
 
     <div class="flex justify-between mt-4">
