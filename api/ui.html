@@ -334,6 +334,7 @@
           <input type="text" id="cfg-val" placeholder="Jarvis">
         </div>
         <button onclick="updateConfig()">Save</button>
+        <button id="cfg-cancel" class="hidden" onclick="cancelEditConfig()">Cancel</button>
       </div>
       <div id="cfg-result" class="mt"></div>
 
@@ -455,7 +456,11 @@ async function api(method, path, body) {
     showView('auth-gate');
     throw new Error('Unauthorized');
   }
-  return r.json();
+  const data = await r.json();
+  if (!r.ok) {
+    throw new Error(data.detail || `Request failed (${r.status})`);
+  }
+  return data;
 }
 
 // --- Views ---
@@ -748,6 +753,8 @@ async function updateConfig() {
     el('cfg-result').innerHTML = `<div class="test-result test-ok">Updated: ${r.updated?.join(', ')}</div>`;
     el('cfg-key').value = '';
     el('cfg-val').value = '';
+    el('cfg-key').readOnly = false;
+    el('cfg-cancel').classList.add('hidden');
     loadConfig();
   } catch (e) {
     el('cfg-result').innerHTML = `<div class="test-result test-err">${e.message}</div>`;
@@ -756,8 +763,18 @@ async function updateConfig() {
 
 function editConfig(key, value) {
   el('cfg-key').value = key;
+  el('cfg-key').readOnly = true;
   el('cfg-val').value = value;
+  el('cfg-cancel').classList.remove('hidden');
   el('cfg-val').focus();
+}
+
+function cancelEditConfig() {
+  el('cfg-key').value = '';
+  el('cfg-key').readOnly = false;
+  el('cfg-val').value = '';
+  el('cfg-cancel').classList.add('hidden');
+  el('cfg-result').innerHTML = '';
 }
 
 async function deleteConfig(key) {
