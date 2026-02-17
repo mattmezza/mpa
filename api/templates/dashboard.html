@@ -73,6 +73,10 @@
             @click="select('jobs')">
       Jobs
     </button>
+    <button class="tab-link" :class="tab === 'calendars' && 'tab-link-active'"
+            @click="select('calendars')">
+      Calendars
+    </button>
     <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
             @click="select('logs')">
       Logs
@@ -251,6 +255,7 @@
   function adminTabs() {
     const tabs = {
       identity: '/partials/identity',
+      you: '/partials/you',
       llm: '/partials/llm',
       channels: '/partials/channels',
       memory: '/partials/memory',
@@ -258,6 +263,7 @@
       permissions: '/partials/permissions',
       skills: '/partials/skills',
       jobs: '/partials/jobs',
+      calendars: '/partials/calendars',
       logs: '/partials/logs',
       admin: '/partials/admin',
       config: '/partials/config'

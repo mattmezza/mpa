@@ -50,6 +50,7 @@ SECRET_KEYS = frozenset(
         "admin.password_hash",
         "admin.password_salt",
         "search.api_key",
+        "calendar.providers",
     }
 )
 

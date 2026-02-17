@@ -1,0 +1,68 @@
+{# Calendars tab partial #}
+<div x-data='calendarTab({{ providers|tojson }})'>
+  <div class="flex items-center justify-between gap-2 mb-4 flex-wrap">
+    <div>
+      <h3 class="text-xs text-muted uppercase tracking-wider">Calendars</h3>
+      <p class="text-muted text-xs">Connect one or more CalDAV providers so the agent can read and create calendar events.</p>
+    </div>
+    <button class="btn btn-sm" type="button" @click="addProvider()">Add provider</button>
+  </div>
+
+  <div class="grid gap-4">
+    <template x-for="(provider, idx) in providers" :key="provider.id">
+      <div class="card">
+        <div class="flex items-center justify-between gap-2 mb-3">
+          <div>
+            <h4 class="text-sm">Provider <span x-text="idx + 1"></span></h4>
+            <p class="text-muted text-xs">Give each provider a unique name, e.g. google, icloud, work.</p>
+          </div>
+          <button class="btn-danger btn-sm" type="button" @click="removeProvider(idx)">Remove</button>
+        </div>
+
+        <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+          <div>
+            <label class="label">Name</label>
+            <input type="text" class="input-sm" x-model="provider.name" placeholder="google">
+            <p class="text-muted text-xs mt-1">Used in prompts and tooling to pick the calendar.</p>
+          </div>
+          <div>
+            <label class="label">CalDAV URL</label>
+            <input type="text" class="input-sm" x-model="provider.url" placeholder="https://.../caldav/.../events">
+            <p class="text-muted text-xs mt-1">Find this in your provider’s CalDAV settings.</p>
+          </div>
+          <div>
+            <label class="label">Username / email</label>
+            <input type="text" class="input-sm" x-model="provider.username" placeholder="you@example.com">
+            <p class="text-muted text-xs mt-1">Often your email address.</p>
+          </div>
+          <div>
+            <label class="label">App password</label>
+            <input type="password" class="input-sm" x-model="provider.password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+            <p class="text-muted text-xs mt-1">Use an app password, not your main login password.</p>
+          </div>
+        </div>
+
+        <div class="mt-3 text-xs text-muted">
+          <strong>Where to get these values</strong>
+          <ul class="list-disc ml-5 mt-1 space-y-1">
+            <li>Google Calendar: Settings → Integrations → CalDAV URL. Create an App Password in Google Account → Security → App passwords.</li>
+            <li>iCloud: Apple ID → App-Specific Passwords, then use the CalDAV URL from iCloud Calendar settings.</li>
+            <li>Fastmail/Outlook: find CalDAV URL in account settings, use an app password if available.</li>
+          </ul>
+          <div class="mt-2">Tip: if your provider supports multiple calendars, make a separate provider entry for each calendar URL.</div>
+        </div>
+      </div>
+    </template>
+    <template x-if="providers.length === 0">
+      <div class="text-muted text-xs">No calendar providers configured yet.</div>
+    </template>
+  </div>
+
+  <div class="flex items-center gap-2 mt-4">
+    <button class="btn-primary btn-sm" type="button" @click="saveProviders()">Save calendars</button>
+    <span class="text-xs text-muted" x-text="status"></span>
+  </div>
+  <template x-if="result">
+    <div :class="ok ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
+  </template>
+</div>

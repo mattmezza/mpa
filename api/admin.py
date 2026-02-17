@@ -174,6 +174,31 @@ async def _channel_wizard_context(
     return ctx
 
 
+async def _calendar_providers_context(config_store: ConfigStore) -> list[dict[str, str]]:
+    raw = await config_store.get("calendar.providers")
+    if not raw:
+        return []
+    try:
+        providers = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(providers, list):
+        return []
+    cleaned: list[dict[str, str]] = []
+    for p in providers:
+        if not isinstance(p, dict):
+            continue
+        cleaned.append(
+            {
+                "name": str(p.get("name", "")),
+                "url": str(p.get("url", "")),
+                "username": str(p.get("username", "")),
+                "password": str(p.get("password", "")),
+            }
+        )
+    return cleaned
+
+
 def _render_wizard_step(
     step: str,
     steps: list[str],
@@ -255,6 +280,10 @@ class PasswordChangeIn(BaseModel):
     new_password: str
 
 
+class CalendarProvidersIn(BaseModel):
+    providers: list[dict[str, str]]
+
+
 # ---------------------------------------------------------------------------
 # Auth dependency
 # ---------------------------------------------------------------------------
@@ -323,12 +352,21 @@ def create_admin_app(
     _MEMORY_PREFIX = "memory."
     _CHANNEL_PREFIX = "channels."
     _SCHEDULER_PREFIX = "scheduler."
+    _CALENDAR_PREFIX = "calendar."
+    _YOU_PREFIX = "you."
 
     def _is_managed_key(key: str) -> bool:
         """Return True if this key is managed by a dedicated tab (not Config)."""
         if key in _IDENTITY_KEYS or key in _LLM_KEYS:
             return True
-        for prefix in (_SEARCH_PREFIX, _MEMORY_PREFIX, _CHANNEL_PREFIX, _SCHEDULER_PREFIX):
+        for prefix in (
+            _SEARCH_PREFIX,
+            _MEMORY_PREFIX,
+            _CHANNEL_PREFIX,
+            _SCHEDULER_PREFIX,
+            _CALENDAR_PREFIX,
+            _YOU_PREFIX,
+        ):
             if key.startswith(prefix):
                 return True
         return False
@@ -458,6 +496,19 @@ def create_admin_app(
             timezone=timezone,
         )
 
+    @app.get("/partials/you", dependencies=[Depends(auth)])
+    async def partial_you() -> HTMLResponse:
+        """You tab partial — info about the user the assistant serves."""
+        owner_name = await config_store.get("agent.owner_name") or ""
+        timezone = await config_store.get("agent.timezone") or ""
+        you_personalia = await config_store.get("you.personalia") or ""
+        return _render_partial(
+            "partials/you.html",
+            owner_name=owner_name,
+            timezone=timezone,
+            you_personalia=you_personalia,
+        )
+
     @app.get("/partials/permissions", dependencies=[Depends(auth)])
     async def partial_permissions() -> HTMLResponse:
         """Permissions tab partial."""
@@ -477,6 +528,12 @@ def create_admin_app(
         """Channels tab partial."""
         channel_data = await _channel_list_context(config_store)
         return _render_partial("partials/channels.html", **channel_data)
+
+    @app.get("/partials/calendars", dependencies=[Depends(auth)])
+    async def partial_calendars() -> HTMLResponse:
+        """Calendars tab partial."""
+        providers = await _calendar_providers_context(config_store)
+        return _render_partial("partials/calendars.html", providers=providers)
 
     @app.get("/partials/admin", dependencies=[Depends(auth)])
     async def partial_admin() -> HTMLResponse:
@@ -851,6 +908,18 @@ def create_admin_app(
         await config_store.set("agent.personalia", content)
         return {"updated": "agent.personalia"}
 
+    @app.get("/config/you-personalia", dependencies=[Depends(auth)])
+    async def get_you_personalia() -> dict:
+        value = await config_store.get("you.personalia") or ""
+        return {"content": value}
+
+    @app.post("/config/you-personalia", dependencies=[Depends(auth)])
+    async def put_you_personalia(request: Request) -> dict:
+        body = await request.json()
+        content = body.get("content", "")
+        await config_store.set("you.personalia", content)
+        return {"updated": "you.personalia"}
+
     @app.get("/config/{section}", dependencies=[Depends(auth)])
     async def get_config_section(section: str) -> dict:
         return await config_store.get_section_redacted(section)
@@ -890,6 +959,27 @@ def create_admin_app(
         filtered = {k: v for k, v in data.items() if not _is_managed_key(k)}
         config_items = sorted(filtered.items())
         return _render_partial("partials/config.html", config_items=config_items)
+
+    @app.post("/calendar/providers", dependencies=[Depends(auth)])
+    async def save_calendar_providers(body: CalendarProvidersIn) -> dict:
+        providers = []
+        for p in body.providers:
+            name = str(p.get("name", "")).strip()
+            url = str(p.get("url", "")).strip()
+            username = str(p.get("username", "")).strip()
+            password = str(p.get("password", "")).strip()
+            if not any([name, url, username, password]):
+                continue
+            providers.append(
+                {
+                    "name": name,
+                    "url": url,
+                    "username": username,
+                    "password": password,
+                }
+            )
+        await config_store.set("calendar.providers", json.dumps(providers))
+        return {"ok": True}
 
     # ── Permissions API ────────────────────────────────────────────────
 

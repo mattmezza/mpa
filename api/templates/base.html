@@ -68,6 +68,77 @@
     }
     window.searchTab = searchTab;
 
+    function calendarTab(providers) {
+      const list = Array.isArray(providers) ? providers : [];
+      return {
+        providers: list.map((p, idx) => ({
+          id: p.id || String(Date.now() + idx),
+          name: p.name || '',
+          url: p.url || '',
+          username: p.username || '',
+          password: p.password || ''
+        })),
+        status: '',
+        result: '',
+        ok: false,
+        addProvider() {
+          this.providers.push({
+            id: String(Date.now() + Math.random()),
+            name: '',
+            url: '',
+            username: '',
+            password: ''
+          });
+        },
+        removeProvider(index) {
+          this.providers.splice(index, 1);
+        },
+        saveProviders() {
+          this.status = 'Saving...';
+          const cleaned = this.providers
+            .map(p => ({
+              name: (p.name || '').trim(),
+              url: (p.url || '').trim(),
+              username: (p.username || '').trim(),
+              password: (p.password || '').trim()
+            }))
+            .filter(p => p.name || p.url || p.username || p.password);
+          const url = new URL('/calendar/providers', window.location.origin);
+          fetch(url.toString(), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({providers: cleaned})
+          })
+            .then(async r => {
+              const text = await r.text();
+              let data = {};
+              try {
+                data = text ? JSON.parse(text) : {};
+              } catch (err) {
+                data = {error: text || 'Invalid response'};
+              }
+              return {ok: r.ok, data};
+            })
+            .then(({ok, data}) => {
+              this.ok = ok && data.ok;
+              this.result = this.ok ? 'Calendars saved' : (data.error || 'Save failed');
+              this.status = '';
+              if (this.ok && window.showToast) { window.showToast('Calendars saved'); }
+            })
+            .catch(e => {
+              this.ok = false;
+              this.result = e.message || 'Network error';
+              this.status = '';
+            });
+        }
+      };
+    }
+    window.calendarTab = calendarTab;
+
     // Global: handle 401 by redirecting to auth gate
     document.body.addEventListener('htmx:responseError', function(e) {
       if (e.detail.xhr.status === 401) {
