@@ -53,6 +53,12 @@ async def main() -> None:
         # Telegram is now running in the background; no task needed —
         # it hooks into the event loop via its own internal tasks.
 
+    # -- Scheduler --
+    if config.scheduler.jobs:
+        agent.scheduler.load_jobs(config.scheduler)
+        agent.scheduler.start()
+        log.info("Scheduler started with %d jobs", len(config.scheduler.jobs))
+
     # -- Admin API --
     if config.admin.enabled:
         admin_app = create_admin_app(agent)
@@ -89,6 +95,10 @@ async def main() -> None:
 
     # Graceful cleanup
     log.info("Shutting down…")
+
+    # Stop scheduler first (prevents new jobs from firing during shutdown)
+    agent.scheduler.shutdown()
+
     if "telegram" in agent.channels:
         tg = agent.channels["telegram"]
         await tg.app.updater.stop()

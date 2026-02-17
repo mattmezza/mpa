@@ -40,6 +40,18 @@ scheduler:
       cron: "0 7 * * *"
       task: "Give me a morning briefing: weather in Zurich, today's calendar, unread emails summary"
       channel: "telegram"
+    - id: "email_check"
+      cron: "*/15 * * * *"
+      task: "Check for urgent unread emails across all accounts and notify me if any"
+      channel: "telegram"
+    - id: "contact_sync"
+      cron: "*/15 * * * *"
+      task: "vdirsyncer sync"
+      type: "system"
+    - id: "memory_cleanup"
+      cron: "0 */8 * * *"
+      task: "sqlite3 /app/data/memory.db \"DELETE FROM short_term WHERE expires_at < datetime('now');\""
+      type: "system"
 
 admin:
   enabled: true

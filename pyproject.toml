@@ -15,6 +15,8 @@ dependencies = [
     "edge-tts",
     "caldav",
     "python-dotenv",
+    "apscheduler>=3.10,<4",
+    "sqlalchemy",
 ]
 
 [dependency-groups]

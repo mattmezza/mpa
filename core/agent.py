@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shlex
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +17,8 @@ from core.executor import ToolExecutor
 from core.history import ConversationHistory
 from core.memory import MemoryStore
 from core.models import AgentResponse
+from core.permissions import PermissionEngine, PermissionLevel
+from core.scheduler import AgentScheduler
 from core.skills import SkillsEngine
 from voice.pipeline import VoicePipeline
 
@@ -48,7 +52,7 @@ TOOLS = [
             "required": ["command", "purpose"],
         },
     },
-    # Structured tools for write actions (will require permission once the permission engine lands)
+    # Structured tools for write actions (permission-gated via PermissionEngine)
     {
         "name": "send_email",
         "description": "Send a new email on behalf of the user.",
@@ -194,6 +198,8 @@ class AgentCore:
         )
         self.channels: dict = {}
         self.voice: VoicePipeline | None = None
+        self.scheduler = AgentScheduler(config.history.db_path, self)
+        self.permissions = PermissionEngine()
 
     async def process(self, message: str, channel: str, user_id: str) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop."""
@@ -219,7 +225,7 @@ class AgentCore:
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    result = await self._execute_tool(block)
+                    result = await self._execute_tool(block, channel, user_id)
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -262,11 +268,25 @@ class AgentCore:
 
         return AgentResponse(text=final_text, voice=voice_bytes)
 
-    async def _execute_tool(self, tool_call) -> dict:
-        """Dispatch a tool call from the LLM."""
+    async def _execute_tool(self, tool_call, channel: str, user_id: str) -> dict:
+        """Dispatch a tool call from the LLM, with permission checks."""
         name = tool_call.name
         params = tool_call.input
 
+        # --- Permission check ---
+        level = self.permissions.check(name, params)
+
+        if level == PermissionLevel.NEVER:
+            log.warning("Permission DENIED (NEVER): %s — %s", name, params)
+            return {"error": "This action is not allowed."}
+
+        if level == PermissionLevel.ASK and channel != "system":
+            approved = await self._request_approval(name, params, channel, user_id)
+            if not approved:
+                log.info("Permission DENIED (user rejected): %s", name)
+                return {"error": "Action denied by user."}
+
+        # --- Dispatch ---
         if name == "run_command":
             log.info("Tool call: run_command — %s", params.get("purpose", ""))
             return await self.executor.run_command(params["command"])
@@ -289,7 +309,7 @@ class AgentCore:
 
         if name == "schedule_task":
             log.info("Tool call: schedule_task — %s", params.get("task", ""))
-            return {"error": "Scheduler is not configured yet."}
+            return self._tool_schedule_task(params)
 
         return {"error": f"Unknown tool: {name}"}
 
@@ -379,6 +399,68 @@ class AgentCore:
             cmd_parts.append(f"--attendee {_shell_quote(addr)}")
 
         return await self.executor.run_command(" ".join(cmd_parts))
+
+    def _tool_schedule_task(self, params: dict) -> dict:
+        """Schedule a one-shot future task via APScheduler."""
+        task = params["task"]
+        run_at_str = params["run_at"]
+        channel = params.get("channel", "telegram")
+
+        try:
+            run_at = datetime.fromisoformat(run_at_str)
+        except ValueError:
+            return {"error": f"Invalid datetime format: {run_at_str!r}. Use ISO format."}
+
+        job_id = f"oneshot_{uuid.uuid4().hex[:8]}"
+        try:
+            self.scheduler.add_one_shot(job_id, run_at, task, channel)
+            return {
+                "ok": True,
+                "job_id": job_id,
+                "run_at": run_at.isoformat(),
+                "task": task,
+                "channel": channel,
+            }
+        except Exception as exc:
+            return {"error": f"Failed to schedule task: {exc}"}
+
+    async def _request_approval(
+        self, tool_name: str, params: dict, channel: str, user_id: str
+    ) -> bool:
+        """Ask the user for approval via their channel (e.g. Telegram inline keyboard).
+
+        Creates a pending approval future, sends the prompt to the channel,
+        and waits for the user to respond. Returns True if approved.
+        """
+        ch = self.channels.get(channel)
+        if not ch:
+            # No channel available to ask — auto-approve (e.g. admin API)
+            log.warning("No channel %r for approval, auto-approving %s", channel, tool_name)
+            return True
+
+        request_id, future = self.permissions.create_approval_request()
+        description = self.permissions.format_approval_message(tool_name, params)
+
+        # Send the approval prompt via the channel
+        try:
+            await ch.send_approval_request(user_id, request_id, description)
+        except AttributeError:
+            # Channel doesn't support approval requests — auto-approve
+            log.warning("Channel %r doesn't support approvals, auto-approving", channel)
+            self.permissions.resolve_approval(request_id, True)
+            return True
+        except Exception:
+            log.exception("Failed to send approval request")
+            self.permissions.resolve_approval(request_id, True)
+            return True
+
+        # Wait for the user's response (timeout after 2 minutes)
+        try:
+            return await asyncio.wait_for(future, timeout=120)
+        except TimeoutError:
+            log.info("Approval request %s timed out", request_id)
+            self.permissions._pending.pop(request_id, None)
+            return False
 
     async def _build_system_prompt(self) -> str:
         cfg = self.config.agent
