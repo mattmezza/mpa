@@ -262,6 +262,9 @@ class ConfigStore:
     async def seed_if_empty(self, yaml_path: str = "config.yml") -> bool:
         """If the store is empty, import from config.yml + .env.
 
+        Also seeds character/personalia content from their .md files
+        if those files exist and the config keys are not already set.
+
         Returns True if seeding was performed.
         """
         await self._ensure_schema()
@@ -270,22 +273,38 @@ class ConfigStore:
             row = await cursor.fetchone()
             count = row[0] if row else 0
 
-        if count > 0:
-            return False
+        seeded = False
 
-        if Path(yaml_path).exists():
-            imported = await self.import_from_yaml(yaml_path)
-            log.info("Seeded config store from %s (%d keys)", yaml_path, imported)
+        if count == 0:
+            if Path(yaml_path).exists():
+                imported = await self.import_from_yaml(yaml_path)
+                log.info("Seeded config store from %s (%d keys)", yaml_path, imported)
 
-            # If the YAML had meaningful content (e.g. API key is set),
-            # mark setup as complete so the wizard isn't forced on users
-            # who already had a working config.
-            api_key = await self.get("agent.anthropic_api_key")
-            if api_key:
-                await self.set_setup_step("done")
-                log.info("Existing config has API key — marking setup as complete")
+                # If the YAML had meaningful content (e.g. API key is set),
+                # mark setup as complete so the wizard isn't forced on users
+                # who already had a working config.
+                api_key = await self.get("agent.anthropic_api_key")
+                if api_key:
+                    await self.set_setup_step("done")
+                    log.info("Existing config has API key — marking setup as complete")
+            else:
+                log.info("No config.yml found — config store is empty, setup wizard required")
 
-            return True
+            seeded = True
 
-        log.info("No config.yml found — config store is empty, setup wizard required")
-        return False
+        # Seed character/personalia from .md files if not already in the store
+        for key, filename in [
+            ("agent.character", "character.md"),
+            ("agent.personalia", "personalia.md"),
+        ]:
+            existing = await self.get(key)
+            if not existing:
+                path = Path(filename)
+                if path.exists():
+                    content = path.read_text().strip()
+                    if content:
+                        await self.set(key, content)
+                        log.info("Seeded %s from %s", key, filename)
+                        seeded = True
+
+        return seeded

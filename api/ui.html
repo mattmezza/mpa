@@ -176,14 +176,14 @@
         <input type="text" id="w-name" value="Clio" placeholder="Jarvis, Friday, ...">
 
         <label for="w-owner">Your name</label>
-        <input type="text" id="w-owner" placeholder="Matteo">
+        <input type="text" id="w-owner" placeholder="Your Name">
 
         <label for="w-tz">Timezone</label>
         <input type="text" id="w-tz" value="Europe/Zurich" placeholder="Europe/Zurich">
 
         <div class="btn-row right mt">
           <button onclick="wizardBack()">Back</button>
-          <button class="primary" onclick="wizardSave('identity', {'agent.name': el('w-name').value, 'agent.owner_name': el('w-owner').value, 'agent.timezone': el('w-tz').value})">Next</button>
+          <button class="primary" onclick="wizardSaveIdentity()">Next</button>
         </div>
       </div>
     </div>
@@ -309,6 +309,7 @@
 
     <div class="tabs">
       <div class="tab active" data-tab="config" onclick="switchTab('config')">Config</div>
+      <div class="tab" data-tab="character" onclick="switchTab('character')">Character</div>
       <div class="tab" data-tab="permissions" onclick="switchTab('permissions')">Permissions</div>
       <div class="tab" data-tab="memory" onclick="switchTab('memory')">Memory</div>
       <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
@@ -343,6 +344,29 @@
         <button onclick="agentAction('restart')">Restart</button>
       </div>
       <div id="agent-result" class="mt"></div>
+    </div>
+
+    <!-- Character tab -->
+    <div class="tab-panel" data-tab="character">
+      <div class="card">
+        <h2>Character</h2>
+        <p style="color:var(--muted);margin-bottom:0.5rem">Defines <em>how</em> the agent behaves — tone, decision-making style, language rules. Markdown format.</p>
+        <textarea id="char-editor" style="min-height:300px;font-size:0.85rem;line-height:1.5;tab-size:2"></textarea>
+        <div class="btn-row right mt">
+          <button class="primary" onclick="saveCharacter()">Save character</button>
+        </div>
+        <div id="char-result" class="mt"></div>
+      </div>
+
+      <div class="card">
+        <h2>Personalia</h2>
+        <p style="color:var(--muted);margin-bottom:0.5rem">Defines <em>what</em> the agent is — identity, capabilities, limitations, history. Markdown format.</p>
+        <textarea id="pers-editor" style="min-height:300px;font-size:0.85rem;line-height:1.5;tab-size:2"></textarea>
+        <div class="btn-row right mt">
+          <button class="primary" onclick="savePersonalia()">Save personalia</button>
+        </div>
+        <div id="pers-result" class="mt"></div>
+      </div>
     </div>
 
     <!-- Permissions tab -->
@@ -521,6 +545,75 @@ async function wizardSaveCalendar() {
   await wizardSave('calendar', values);
 }
 
+async function wizardSaveIdentity() {
+  const agentName = el('w-name').value.trim() || 'Clio';
+  const ownerName = el('w-owner').value.trim() || 'User';
+
+  const values = {
+    'agent.name': agentName,
+    'agent.owner_name': ownerName,
+    'agent.timezone': el('w-tz').value.trim() || 'UTC',
+  };
+
+  // Seed default character and personalia with the chosen names
+  values['agent.character'] = [
+    '# Character',
+    '',
+    '## Tone',
+    '',
+    '- Be concise. Messages should be short and direct — no filler.',
+    '- Be warm but not sycophantic. No "Great question!" or "Of course!". Just answer.',
+    `- When acting on ${ownerName}'s behalf (emails, messages), match their communication style.`,
+    `- When messaging ${ownerName}'s contacts, always identify yourself unless told otherwise.`,
+    '',
+    '## Decision-making',
+    '',
+    '- When unsure about an action, ask. When confident and pre-approved, just do it.',
+    '- If multiple contacts match a name, present the options — never guess.',
+    '- If a command fails, read the error and try to fix it before reporting back.',
+    '- Prefer structured data (JSON output flags) over free-text parsing when available.',
+    '',
+    '## Language',
+    '',
+    '- Default to English.',
+    '',
+    '## Proactive behaviors',
+    '',
+    'When running scheduled tasks (morning briefing, email checks):',
+    '- Be brief and scannable.',
+    '- Only flag truly important items.',
+    '- Group related information together.',
+  ].join('\n');
+
+  values['agent.personalia'] = [
+    '# Personalia',
+    '',
+    '## Identity',
+    '',
+    `- Name: ${agentName}`,
+    `- Owner: ${ownerName}`,
+    '- Role: Personal AI assistant',
+    '',
+    '## Capabilities',
+    '',
+    '- Conversational interaction via Telegram (text)',
+    '- Can execute CLI commands via a whitelisted tool executor',
+    '',
+    '## Limitations',
+    '',
+    '- Cannot make phone calls',
+    '- Cannot access websites or browse the internet',
+    `- Cannot access files on ${ownerName}'s personal devices`,
+    `- Always needs permission before sending messages or emails on ${ownerName}'s behalf`,
+    '',
+    '## History',
+    '',
+    `- ${new Date().toISOString().slice(0, 10)}: Initial setup`,
+  ].join('\n');
+
+  await wizardSave('identity', values);
+}
+
 async function testConnection(service, params) {
   const target = el(`test-${service}`);
   target.innerHTML = '<span style="color:var(--muted)">Testing...</span>';
@@ -687,6 +780,38 @@ async function agentAction(action) {
   }
 }
 
+// Character & Personalia
+async function loadCharacter() {
+  try {
+    const [charData, persData] = await Promise.all([
+      api('GET', '/config/character'),
+      api('GET', '/config/personalia'),
+    ]);
+    el('char-editor').value = charData.content || '';
+    el('pers-editor').value = persData.content || '';
+    el('char-result').innerHTML = '';
+    el('pers-result').innerHTML = '';
+  } catch {}
+}
+
+async function saveCharacter() {
+  try {
+    await api('PUT', '/config/character', { content: el('char-editor').value });
+    el('char-result').innerHTML = '<div class="test-result test-ok">Character saved</div>';
+  } catch (e) {
+    el('char-result').innerHTML = `<div class="test-result test-err">${e.message}</div>`;
+  }
+}
+
+async function savePersonalia() {
+  try {
+    await api('PUT', '/config/personalia', { content: el('pers-editor').value });
+    el('pers-result').innerHTML = '<div class="test-result test-ok">Personalia saved</div>';
+  } catch (e) {
+    el('pers-result').innerHTML = `<div class="test-result test-err">${e.message}</div>`;
+  }
+}
+
 // Permissions
 async function loadPermissions() {
   try {
@@ -808,12 +933,25 @@ function toggleAutoLogs() {
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === name));
+  if (name === 'character') loadCharacter();
   if (name === 'permissions') loadPermissions();
   if (name === 'memory') loadMemory();
   if (name === 'logs') loadLogs();
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+// Allow Tab key in textareas for markdown editing
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Tab' && e.target.tagName === 'TEXTAREA') {
+    e.preventDefault();
+    const ta = e.target;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    ta.value = ta.value.substring(0, start) + '  ' + ta.value.substring(end);
+    ta.selectionStart = ta.selectionEnd = start + 2;
+  }
+});
 
 init();
 </script>

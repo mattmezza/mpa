@@ -8,7 +8,6 @@ import logging
 import shlex
 import uuid
 from datetime import datetime
-from pathlib import Path
 
 from anthropic import AsyncAnthropic
 from tavily import TavilyClient
@@ -542,8 +541,8 @@ class AgentCore:
     async def _build_system_prompt(self) -> str:
         cfg = self.config.agent
         skills_block = self.skills.get_all_skills()
-        character = self._load_file(cfg.character_file)
-        personalia = self._load_file(cfg.personalia_file)
+        character = cfg.character
+        personalia = cfg.personalia
         memories = await self.memory.format_for_prompt()
 
         prompt = f"""You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.
@@ -583,11 +582,6 @@ Before inserting a new long-term memory, check if it already exists to avoid dup
 </available_skills>"""
 
         return prompt
-
-    def _load_file(self, filename: str) -> str:
-        """Load a top-level markdown file (character.md or personalia.md)."""
-        path = Path(filename)
-        return path.read_text() if path.exists() else ""
 
     def _extract_text(self, response) -> str:
         """Pull the text content out of the LLM response."""

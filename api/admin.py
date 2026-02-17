@@ -145,10 +145,50 @@ def create_admin_app(
 
     # ── Config ──────────────────────────────────────────────────────────
 
+    # Keys that hold large text content — excluded from the generic config
+    # table and managed via dedicated endpoints instead.
+    _LARGE_TEXT_KEYS = {"agent.character", "agent.personalia"}
+
     @app.get("/config", dependencies=[Depends(auth)])
     async def get_config() -> dict:
-        """Return all config values with secrets redacted."""
-        return await config_store.get_all_redacted()
+        """Return all config values with secrets redacted.
+
+        Large text keys (character, personalia) are excluded — use the
+        dedicated /config/character and /config/personalia endpoints.
+        """
+        data = await config_store.get_all_redacted()
+        return {k: v for k, v in data.items() if k not in _LARGE_TEXT_KEYS}
+
+    # Character & personalia — declared before the {section} wildcard
+    # so FastAPI matches them first.
+
+    @app.get("/config/character", dependencies=[Depends(auth)])
+    async def get_character() -> dict:
+        """Return the character definition."""
+        value = await config_store.get("agent.character") or ""
+        return {"content": value}
+
+    @app.put("/config/character", dependencies=[Depends(auth)])
+    async def put_character(request: Request) -> dict:
+        """Update the character definition."""
+        body = await request.json()
+        content = body.get("content", "")
+        await config_store.set("agent.character", content)
+        return {"updated": "agent.character"}
+
+    @app.get("/config/personalia", dependencies=[Depends(auth)])
+    async def get_personalia() -> dict:
+        """Return the personalia definition."""
+        value = await config_store.get("agent.personalia") or ""
+        return {"content": value}
+
+    @app.put("/config/personalia", dependencies=[Depends(auth)])
+    async def put_personalia(request: Request) -> dict:
+        """Update the personalia definition."""
+        body = await request.json()
+        content = body.get("content", "")
+        await config_store.set("agent.personalia", content)
+        return {"updated": "agent.personalia"}
 
     @app.get("/config/{section}", dependencies=[Depends(auth)])
     async def get_config_section(section: str) -> dict:

@@ -154,8 +154,8 @@ Skills, character, personalia, and memories all get injected into the system pro
 
 def _build_system_prompt(self, user_context: str) -> str:
     skills_block = self.skills.get_all_skills()
-    character = self._load_file("character.md")
-    personalia = self._load_file("personalia.md")
+    character = self.config.agent.character
+    personalia = self.config.agent.personalia
     memories = self.memory.format_for_prompt()
 
     return f"""You are {self.config.agent.name}, a personal AI assistant for {self.config.agent.owner_name}.
@@ -187,11 +187,6 @@ Never guess at command syntax — always refer to the skill file.
 You can store and recall memories using the sqlite3 CLI (see the memory skill).
 Proactively remember important facts about the user and their contacts.
 Before inserting a new long-term memory, check if it already exists to avoid duplicates."""
-
-def _load_file(self, filename: str) -> str:
-    """Load a top-level markdown file (character.md or personalia.md)."""
-    path = Path(filename)
-    return path.read_text() if path.exists() else ""
 ```
 
 ### 4.3 The Generic Tool Executor
@@ -1352,8 +1347,6 @@ agent:
   model: "claude-sonnet-4-5-20250514"
   timezone: "Europe/Zurich"
   skills_dir: "skills/"
-  character_file: "character.md"
-  personalia_file: "personalia.md"
 
 memory:
   db_path: "data/memory.db"
