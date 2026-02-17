@@ -33,6 +33,14 @@ COPY tools/ tools/
 COPY voice/ voice/
 COPY api/ api/
 
+# Build CSS with Tailwind CSS v4 standalone CLI
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ]; then TW_ARCH="linux-arm64"; else TW_ARCH="linux-x64"; fi && \
+    curl -sSLo /tmp/tailwindcss "https://github.com/tailwindlabs/tailwindcss/releases/download/v4.1.18/tailwindcss-$TW_ARCH" && \
+    chmod +x /tmp/tailwindcss && \
+    /tmp/tailwindcss --input api/static/input.css --output api/static/style.css --minify && \
+    rm /tmp/tailwindcss
+
 # CLI config directories
 RUN mkdir -p /home/mpa/.config/himalaya /home/mpa/.config/khard /home/mpa/.config/vdirsyncer \
     /home/mpa/.local/share/vdirsyncer /app/data \
