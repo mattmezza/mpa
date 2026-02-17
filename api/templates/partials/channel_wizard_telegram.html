@@ -1,0 +1,75 @@
+<div>
+  <h3 class="text-base mb-2">Telegram setup</h3>
+  <ol class="text-xs text-muted list-disc ml-5 space-y-1 mb-3">
+    <li>Create a bot with <a href="https://t.me/BotFather" target="_blank">@BotFather</a>.</li>
+    <li>Copy the bot token and paste it below.</li>
+    <li>Find your user ID via <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>.</li>
+    <li>Save and enable the channel.</li>
+  </ol>
+
+  <label class="label" for="ch-tg-token">Bot Token</label>
+  <input type="password" class="input" id="ch-tg-token" placeholder="123456:ABC-DEF..."
+         value="{{ bot_token|default('') }}">
+
+  <label class="label mt-3" for="ch-tg-users">Allowed user IDs</label>
+  <input type="text" class="input" id="ch-tg-users" placeholder="123456789"
+         value="{{ user_ids|default('') }}">
+  <div class="hint">Comma-separated IDs. Only these users can message the agent.</div>
+
+  <div class="flex items-center gap-2 mt-3">
+    <button class="btn btn-sm" type="button" onclick="testTelegram()">Test connection</button>
+    <button class="btn-primary btn-sm" type="button" onclick="saveTelegram()">Save</button>
+  </div>
+  <div id="channel-wizard-result" class="mt-2 text-xs"></div>
+</div>
+
+<script>
+  function testTelegram() {
+    const result = document.getElementById('channel-wizard-result');
+    const token = document.getElementById('ch-tg-token').value;
+    result.textContent = 'Testing...';
+    result.className = 'alert-info';
+    fetch('/setup/test-connection', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({service: 'telegram', bot_token: token})
+    })
+      .then(r => r.json())
+      .then(d => {
+        result.textContent = d.ok ? 'Connected to @' + (d.bot_username || '') : d.error;
+        result.className = d.ok ? 'alert-success' : 'alert-error';
+      })
+      .catch(e => {
+        result.textContent = e.message;
+        result.className = 'alert-error';
+      });
+  }
+
+  function saveTelegram() {
+    const result = document.getElementById('channel-wizard-result');
+    const token = document.getElementById('ch-tg-token').value.trim();
+    const users = document.getElementById('ch-tg-users').value.trim();
+    if (!token) {
+      result.textContent = 'Bot token is required.';
+      result.className = 'alert-error';
+      return;
+    }
+    fetch('/channels/telegram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      },
+      body: JSON.stringify({bot_token: token, user_ids: users, enabled: true})
+    })
+      .then(r => r.text())
+      .then(html => {
+        document.getElementById('tab-content').innerHTML = html;
+        closeChannelWizard();
+      })
+      .catch(e => {
+        result.textContent = e.message;
+        result.className = 'alert-error';
+      });
+  }
+</script>

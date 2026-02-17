@@ -110,8 +110,8 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
     return ctx
 
 
-async def _channel_list_context(config_store: ConfigStore) -> dict[str, list[dict[str, str]]]:
-    channels: list[dict[str, str]] = []
+async def _channel_list_context(config_store: ConfigStore) -> dict[str, list[dict[str, object]]]:
+    channels: list[dict[str, object]] = []
 
     tg_enabled_raw = await config_store.get("channels.telegram.enabled")
     tg_enabled = str(tg_enabled_raw).lower() == "true"
@@ -150,6 +150,28 @@ async def _channel_list_context(config_store: ConfigStore) -> dict[str, list[dic
     )
 
     return {"channels": channels}
+
+
+async def _channel_wizard_context(
+    config_store: ConfigStore,
+    channel: str,
+) -> dict[str, str]:
+    ctx: dict[str, str] = {}
+    if channel == "telegram":
+        bot_token = await config_store.get("channels.telegram.bot_token")
+        user_ids = await config_store.get("channels.telegram.allowed_user_ids")
+        if bot_token:
+            ctx["bot_token"] = bot_token
+        if user_ids:
+            ctx["user_ids"] = user_ids
+    if channel == "whatsapp":
+        bridge_url = await config_store.get("channels.whatsapp.bridge_url")
+        allowed_numbers = await config_store.get("channels.whatsapp.allowed_numbers")
+        if bridge_url:
+            ctx["bridge_url"] = bridge_url
+        if allowed_numbers:
+            ctx["allowed_numbers"] = allowed_numbers
+    return ctx
 
 
 def _render_wizard_step(
@@ -832,6 +854,76 @@ def create_admin_app(
         if not skill:
             raise HTTPException(404, f"Skill not found: {name}")
         return skill
+
+    # ── Channels API ──────────────────────────────────────────────────────
+
+    @app.get("/channels/wizard", dependencies=[Depends(auth)])
+    async def channel_wizard(channel: str = "telegram") -> HTMLResponse:
+        key = channel.strip().lower()
+        if key == "telegram":
+            ctx = await _channel_wizard_context(config_store, "telegram")
+            return _render_partial("partials/channel_wizard_telegram.html", **ctx)
+        if key == "whatsapp":
+            ctx = await _channel_wizard_context(config_store, "whatsapp")
+            return _render_partial("partials/channel_wizard_whatsapp.html", **ctx)
+        raise HTTPException(400, f"Unknown channel: {channel}")
+
+    @app.post("/channels/telegram", dependencies=[Depends(auth)])
+    async def save_channel_telegram(request: Request) -> HTMLResponse:
+        body = await request.json()
+        bot_token = str(body.get("bot_token", "")).strip()
+        user_ids = str(body.get("user_ids", "")).strip()
+        enabled = str(body.get("enabled", "true")).lower() == "true"
+        if not bot_token:
+            raise HTTPException(400, "Bot token is required")
+        values = {
+            "channels.telegram.enabled": str(enabled).lower(),
+            "channels.telegram.bot_token": bot_token,
+            "channels.telegram.allowed_user_ids": user_ids,
+        }
+        await config_store.set_many(values)
+        channel_data = await _channel_list_context(config_store)
+        return _render_partial("partials/channels.html", **channel_data)
+
+    @app.post("/channels/whatsapp", dependencies=[Depends(auth)])
+    async def save_channel_whatsapp(request: Request) -> HTMLResponse:
+        body = await request.json()
+        bridge_url = str(body.get("bridge_url", "")).strip()
+        allowed_numbers = str(body.get("allowed_numbers", "")).strip()
+        enabled = str(body.get("enabled", "true")).lower() == "true"
+        if not bridge_url:
+            raise HTTPException(400, "Bridge URL is required")
+        values = {
+            "channels.whatsapp.enabled": str(enabled).lower(),
+            "channels.whatsapp.bridge_url": bridge_url,
+            "channels.whatsapp.allowed_numbers": allowed_numbers,
+        }
+        await config_store.set_many(values)
+        channel_data = await _channel_list_context(config_store)
+        return _render_partial("partials/channels.html", **channel_data)
+
+    @app.delete("/channels/{channel}", dependencies=[Depends(auth)])
+    async def delete_channel(channel: str) -> HTMLResponse:
+        key = channel.strip().lower()
+        values: dict[str, str] = {}
+        if key == "telegram":
+            values = {
+                "channels.telegram.enabled": "false",
+                "channels.telegram.bot_token": "",
+                "channels.telegram.allowed_user_ids": "",
+            }
+        elif key == "whatsapp":
+            values = {
+                "channels.whatsapp.enabled": "false",
+                "channels.whatsapp.bridge_url": "",
+                "channels.whatsapp.allowed_numbers": "",
+            }
+        else:
+            raise HTTPException(400, f"Unknown channel: {channel}")
+
+        await config_store.set_many(values)
+        channel_data = await _channel_list_context(config_store)
+        return _render_partial("partials/channels.html", **channel_data)
 
     @app.post("/skills", dependencies=[Depends(auth)])
     async def upsert_skill(body: SkillUpsertIn) -> HTMLResponse:

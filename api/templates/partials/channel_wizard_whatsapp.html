@@ -1,0 +1,52 @@
+<div>
+  <h3 class="text-base mb-2">WhatsApp setup</h3>
+  <ol class="text-xs text-muted list-disc ml-5 space-y-1 mb-3">
+    <li>Run the WhatsApp bridge service on your server.</li>
+    <li>Set the bridge URL and allowed numbers below.</li>
+    <li>Save and enable the channel.</li>
+  </ol>
+
+  <label class="label" for="ch-wa-bridge">Bridge URL</label>
+  <input type="text" class="input" id="ch-wa-bridge" placeholder="http://localhost:3001"
+         value="{{ bridge_url|default('http://localhost:3001') }}">
+
+  <label class="label mt-3" for="ch-wa-numbers">Allowed numbers</label>
+  <input type="text" class="input" id="ch-wa-numbers" placeholder="+14155551234"
+         value="{{ allowed_numbers|default('') }}">
+  <div class="hint">Comma-separated phone numbers in international format.</div>
+
+  <div class="flex items-center gap-2 mt-3">
+    <button class="btn-primary btn-sm" type="button" onclick="saveWhatsApp()">Save</button>
+  </div>
+  <div id="channel-wizard-result" class="mt-2 text-xs"></div>
+</div>
+
+<script>
+  function saveWhatsApp() {
+    const result = document.getElementById('channel-wizard-result');
+    const bridgeUrl = document.getElementById('ch-wa-bridge').value.trim();
+    const numbers = document.getElementById('ch-wa-numbers').value.trim();
+    if (!bridgeUrl) {
+      result.textContent = 'Bridge URL is required.';
+      result.className = 'alert-error';
+      return;
+    }
+    fetch('/channels/whatsapp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      },
+      body: JSON.stringify({bridge_url: bridgeUrl, allowed_numbers: numbers, enabled: true})
+    })
+      .then(r => r.text())
+      .then(html => {
+        document.getElementById('tab-content').innerHTML = html;
+        closeChannelWizard();
+      })
+      .catch(e => {
+        result.textContent = e.message;
+        result.className = 'alert-error';
+      });
+  }
+</script>
