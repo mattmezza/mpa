@@ -189,6 +189,13 @@ class MemoryStore:
             if hasattr(block, "text"):
                 raw = block.text.strip()
                 break
+        # Strip markdown code fences if the LLM wrapped its response
+        if raw.startswith("```"):
+            # Remove opening fence (```json or ```)
+            raw = raw.split("\n", 1)[-1]
+            # Remove closing fence
+            if raw.endswith("```"):
+                raw = raw[:-3].rstrip()
         try:
             memories = json.loads(raw)
         except json.JSONDecodeError:

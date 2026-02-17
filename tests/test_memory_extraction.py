@@ -86,3 +86,22 @@ async def test_extract_memories_skips_invalid_short_term(store) -> None:
 
     assert stored == 0
     assert await _count_rows(store.db_path, "short_term") == 0
+
+
+@pytest.mark.asyncio
+async def test_extract_memories_strips_markdown_code_fences(store) -> None:
+    """LLMs sometimes wrap JSON in ```json ... ``` fences."""
+    llm = AsyncMock()
+    fenced = '```json\n[{"tier": "LONG_TERM", "category": "fact", "subject": "marco", "content": "Email is marco@example.com"}]\n```'
+    text_block = SimpleNamespace(type="text", text=fenced)
+    llm.messages.create.return_value = SimpleNamespace(content=[text_block])
+
+    stored = await store.extract_memories(
+        llm,
+        model="claude-haiku-4-5",
+        user_msg="My email is marco@example.com",
+        agent_msg="Got it",
+    )
+
+    assert stored == 1
+    assert await _count_rows(store.db_path, "long_term") == 1
