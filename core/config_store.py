@@ -111,7 +111,7 @@ def _parse_value(value: str) -> object:
     if value.startswith("[") or value.startswith("{"):
         try:
             return json.loads(value)
-        except json.JSONDecodeError, ValueError:
+        except (json.JSONDecodeError, ValueError):
             pass
     return value
 

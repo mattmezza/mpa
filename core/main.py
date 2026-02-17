@@ -114,10 +114,10 @@ async def main() -> None:
         log.info("Setup not complete — running in setup-only mode (admin API + wizard)")
 
     # -- Admin API (always runs) --
-    admin_app = create_admin_app(agent_state, config_store)
+    admin_app, auth = create_admin_app(agent_state, config_store)
 
     # Add lifecycle endpoints that can start/stop the agent
-    _attach_lifecycle_routes(admin_app, config_store, agent_state)
+    _attach_lifecycle_routes(admin_app, config_store, agent_state, auth)
 
     port = 8000
     if setup_complete:
@@ -168,43 +168,78 @@ async def main() -> None:
         pass
 
 
-def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentState) -> None:
-    """Add /agent/start and /agent/stop endpoints for runtime lifecycle control.
+def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentState, auth) -> None:
+    """Add /agent/start, /agent/stop, and /agent/restart endpoints.
 
     These share the same ``AgentState`` object used by ``create_admin_app``
     so all endpoints see agent changes immediately.
+
+    Content-negotiation: returns HTML snippets for HTMX requests (the
+    dashboard buttons) and JSON for programmatic callers (the setup
+    wizard's fetch() call).
     """
 
-    @app.post("/agent/start")
-    async def start_agent() -> dict:
+    from fastapi import Depends, Request
+    from fastapi.responses import HTMLResponse
+
+    def _is_htmx(request: Request) -> bool:
+        return request.headers.get("HX-Request") == "true"
+
+    @app.post("/agent/start", dependencies=[Depends(auth)])
+    async def start_agent(request: Request):
         if agent_state.agent is not None:
-            return {"status": "already_running"}
-        try:
-            agent_state.agent = await _start_agent(config_store)
-            log.info("Agent started via API")
-            return {
-                "status": "started",
+            result = {
+                "status": "already_running",
                 "channels": list(agent_state.agent.channels.keys()),
             }
-        except Exception as exc:
-            log.exception("Failed to start agent via API")
-            return {"status": "error", "error": str(exc)}
+        else:
+            try:
+                agent_state.agent = await _start_agent(config_store)
+                log.info("Agent started via API")
+                result = {
+                    "status": "started",
+                    "channels": list(agent_state.agent.channels.keys()),
+                }
+            except Exception as exc:
+                log.exception("Failed to start agent via API")
+                result = {"status": "error", "error": str(exc)}
 
-    @app.post("/agent/stop")
-    async def stop_agent() -> dict:
+        if _is_htmx(request):
+            css = (
+                "alert-success"
+                if result["status"] in ("started", "already_running")
+                else "alert-error"
+            )
+            label = result["status"].replace("_", " ").title()
+            resp = HTMLResponse(f'<span class="{css}">{label}</span>')
+            resp.headers["HX-Trigger"] = "refresh-status"
+            return resp
+        return result
+
+    @app.post("/agent/stop", dependencies=[Depends(auth)])
+    async def stop_agent(request: Request):
         if agent_state.agent is None:
-            return {"status": "not_running"}
-        try:
-            await _stop_agent(agent_state.agent)
-            agent_state.agent = None
-            log.info("Agent stopped via API")
-            return {"status": "stopped"}
-        except Exception as exc:
-            log.exception("Failed to stop agent via API")
-            return {"status": "error", "error": str(exc)}
+            result = {"status": "not_running"}
+        else:
+            try:
+                await _stop_agent(agent_state.agent)
+                agent_state.agent = None
+                log.info("Agent stopped via API")
+                result = {"status": "stopped"}
+            except Exception as exc:
+                log.exception("Failed to stop agent via API")
+                result = {"status": "error", "error": str(exc)}
 
-    @app.post("/agent/restart")
-    async def restart_agent() -> dict:
+        if _is_htmx(request):
+            css = "alert-success" if result["status"] == "stopped" else "alert-error"
+            label = result["status"].replace("_", " ").title()
+            resp = HTMLResponse(f'<span class="{css}">{label}</span>')
+            resp.headers["HX-Trigger"] = "refresh-status"
+            return resp
+        return result
+
+    @app.post("/agent/restart", dependencies=[Depends(auth)])
+    async def restart_agent(request: Request):
         # Stop
         if agent_state.agent is not None:
             try:
@@ -217,13 +252,21 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
         try:
             agent_state.agent = await _start_agent(config_store)
             log.info("Agent restarted via API")
-            return {
+            result = {
                 "status": "restarted",
                 "channels": list(agent_state.agent.channels.keys()),
             }
         except Exception as exc:
             log.exception("Failed to restart agent via API")
-            return {"status": "error", "error": str(exc)}
+            result = {"status": "error", "error": str(exc)}
+
+        if _is_htmx(request):
+            css = "alert-success" if result["status"] == "restarted" else "alert-error"
+            label = result["status"].replace("_", " ").title()
+            resp = HTMLResponse(f'<span class="{css}">{label}</span>')
+            resp.headers["HX-Trigger"] = "refresh-status"
+            return resp
+        return result
 
 
 if __name__ == "__main__":

@@ -142,7 +142,7 @@ def _make_auth_dependency(config_store: ConfigStore):
 def create_admin_app(
     agent_state: AgentState,
     config_store: ConfigStore,
-) -> FastAPI:
+) -> tuple[FastAPI, object]:
     app = FastAPI(title="Personal Agent Admin", version="0.1.0")
 
     # Mount static files
@@ -500,7 +500,7 @@ def create_admin_app(
             recent = recent[-lines:]
         return {"count": len(recent), "lines": recent}
 
-    # ── Agent lifecycle (JSON API) ─────────────────────────────────────
+    # ── Agent status (JSON API) ──────────────────────────────────────
 
     @app.get("/agent/status", dependencies=[Depends(auth)])
     async def agent_status() -> dict:
@@ -513,21 +513,10 @@ def create_admin_app(
             "scheduler_jobs": len(agent.scheduler.scheduler.get_jobs()),
         }
 
-    # Agent lifecycle endpoints return HTML snippets for HTMX
-    @app.post("/agent/start", dependencies=[Depends(auth)])
-    async def start_agent_html() -> HTMLResponse:
-        """Start agent — returns status snippet for HTMX."""
-        # This route is also called from the JSON API (setup done step),
-        # so it returns JSON when Accept header requests it.
-        return HTMLResponse('<span class="alert-info">Starting...</span>')
-
-    @app.post("/agent/stop", dependencies=[Depends(auth)])
-    async def stop_agent_html() -> HTMLResponse:
-        return HTMLResponse('<span class="alert-info">Stopping...</span>')
-
-    @app.post("/agent/restart", dependencies=[Depends(auth)])
-    async def restart_agent_html() -> HTMLResponse:
-        return HTMLResponse('<span class="alert-info">Restarting...</span>')
+    # NOTE: lifecycle POST endpoints (/agent/start, /agent/stop,
+    # /agent/restart) are attached in core/main.py via
+    # _attach_lifecycle_routes() so they can access _start_agent /
+    # _stop_agent without circular imports.
 
     # ── Setup wizard ────────────────────────────────────────────────────
 
@@ -694,7 +683,7 @@ def create_admin_app(
             return await _test_tavily(payload.get("api_key", ""))
         return {"ok": False, "error": f"Unknown service: {service}"}
 
-    return app
+    return app, auth
 
 
 # ---------------------------------------------------------------------------
