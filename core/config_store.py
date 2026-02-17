@@ -1,0 +1,291 @@
+"""SQLite-backed configuration store.
+
+On first boot, imports values from config.yml + .env (the file-based seed).
+After that, config.db is the source of truth.  The admin API and setup
+wizard read/write this store; the agent reads from it at startup and on
+reload.
+
+Config values are stored as key-value pairs with dotted paths
+(e.g. "agent.name", "channels.telegram.bot_token").  Secrets are
+stored alongside plain values — the database file should live on an
+encrypted volume (same as memory.db and agent.db).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+
+import aiosqlite
+
+from core.config import Config, load_config
+
+log = logging.getLogger(__name__)
+
+_SCHEMA = """\
+CREATE TABLE IF NOT EXISTS config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS setup_state (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    completed   INTEGER NOT NULL DEFAULT 0,
+    current_step TEXT NOT NULL DEFAULT 'welcome'
+);
+INSERT OR IGNORE INTO setup_state (id, completed, current_step) VALUES (1, 0, 'welcome');
+"""
+
+# Keys that hold secrets — these are redacted in read-only API responses.
+SECRET_KEYS = frozenset(
+    {
+        "agent.anthropic_api_key",
+        "channels.telegram.bot_token",
+        "channels.whatsapp.bridge_url",
+        "admin.api_key",
+        "search.api_key",
+    }
+)
+
+# Keys that match these prefixes are also considered secret.
+SECRET_PREFIXES = ("calendar.providers.", "email.")
+
+# Setup wizard step order.
+SETUP_STEPS = [
+    "welcome",
+    "llm",
+    "identity",
+    "telegram",
+    "email",
+    "calendar",
+    "search",
+    "admin",
+    "done",
+]
+
+
+def _flatten(obj: object, prefix: str = "") -> dict[str, str]:
+    """Flatten a nested dict/Pydantic model into dotted key-value pairs."""
+    items: dict[str, str] = {}
+    if hasattr(obj, "model_dump"):
+        obj = obj.model_dump()
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            full_key = f"{prefix}{k}" if prefix else k
+            if isinstance(v, dict):
+                items.update(_flatten(v, f"{full_key}."))
+            elif isinstance(v, list):
+                items[full_key] = json.dumps(v)
+            else:
+                items[full_key] = "" if v is None else str(v)
+    return items
+
+
+def _unflatten(flat: dict[str, str]) -> dict:
+    """Reconstruct a nested dict from dotted key-value pairs."""
+    result: dict = {}
+    for key, value in flat.items():
+        parts = key.split(".")
+        d = result
+        for part in parts[:-1]:
+            d = d.setdefault(part, {})
+        # Try to parse JSON for lists/bools/ints
+        d[parts[-1]] = _parse_value(value)
+    return result
+
+
+def _parse_value(value: str) -> object:
+    """Attempt to parse a string value into its native type."""
+    if value == "":
+        return ""
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    # Try int
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    # Try JSON (for lists)
+    if value.startswith("[") or value.startswith("{"):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError, ValueError:
+            pass
+    return value
+
+
+def _is_secret(key: str) -> bool:
+    """Check if a config key holds a secret value."""
+    if key in SECRET_KEYS:
+        return True
+    return any(key.startswith(p) for p in SECRET_PREFIXES)
+
+
+def _redact(value: str) -> str:
+    """Redact a secret value for display."""
+    if not value or len(value) < 8:
+        return "***" if value else ""
+    return value[:4] + "***" + value[-4:]
+
+
+class ConfigStore:
+    """Async SQLite-backed config store."""
+
+    def __init__(self, db_path: str = "data/config.db"):
+        self.db_path = db_path
+        self._ready = False
+
+    async def _ensure_schema(self) -> None:
+        if self._ready:
+            return
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executescript(_SCHEMA)
+        self._ready = True
+
+    # -- Setup state ---------------------------------------------------------
+
+    async def is_setup_complete(self) -> bool:
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT completed FROM setup_state WHERE id = 1")
+            row = await cursor.fetchone()
+            return bool(row and row[0])
+
+    async def get_setup_step(self) -> str:
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT current_step FROM setup_state WHERE id = 1")
+            row = await cursor.fetchone()
+            return row[0] if row else "welcome"
+
+    async def set_setup_step(self, step: str) -> None:
+        await self._ensure_schema()
+        completed = 1 if step == "done" else 0
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE setup_state SET current_step = ?, completed = ? WHERE id = 1",
+                (step, completed),
+            )
+            await db.commit()
+
+    # -- Config CRUD ---------------------------------------------------------
+
+    async def get(self, key: str) -> str | None:
+        """Get a single config value by dotted key."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT value FROM config WHERE key = ?", (key,))
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def get_many(self, prefix: str = "") -> dict[str, str]:
+        """Get all config values, optionally filtered by key prefix."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            if prefix:
+                cursor = await db.execute(
+                    "SELECT key, value FROM config WHERE key LIKE ?",
+                    (f"{prefix}%",),
+                )
+            else:
+                cursor = await db.execute("SELECT key, value FROM config")
+            return {row[0]: row[1] for row in await cursor.fetchall()}
+
+    async def set(self, key: str, value: str) -> None:
+        """Set a single config value."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO config (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+            await db.commit()
+
+    async def set_many(self, values: dict[str, str]) -> None:
+        """Set multiple config values atomically."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            for key, value in values.items():
+                await db.execute(
+                    "INSERT INTO config (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, str(value)),
+                )
+            await db.commit()
+
+    async def delete(self, key: str) -> bool:
+        """Delete a config value. Returns True if it existed."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("DELETE FROM config WHERE key = ?", (key,))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    # -- Bulk operations -----------------------------------------------------
+
+    async def import_from_config(self, config: Config) -> int:
+        """Import a Config object into the store. Returns count of keys written."""
+        flat = _flatten(config)
+        await self.set_many(flat)
+        log.info("Imported %d config keys from Config object", len(flat))
+        return len(flat)
+
+    async def import_from_yaml(self, yaml_path: str = "config.yml") -> int:
+        """Load config.yml + .env, then import into the store."""
+        config = load_config(yaml_path)
+        return await self.import_from_config(config)
+
+    async def export_to_config(self) -> Config:
+        """Reconstruct a Config object from the store."""
+        flat = await self.get_many()
+        nested = _unflatten(flat)
+        return Config.model_validate(nested)
+
+    # -- Redacted views (for API responses) ----------------------------------
+
+    async def get_all_redacted(self) -> dict[str, str]:
+        """Get all config values with secrets redacted."""
+        raw = await self.get_many()
+        return {k: (_redact(v) if _is_secret(k) else v) for k, v in raw.items()}
+
+    async def get_section_redacted(self, section: str) -> dict[str, str]:
+        """Get a config section with secrets redacted."""
+        raw = await self.get_many(prefix=f"{section}.")
+        return {k: (_redact(v) if _is_secret(k) else v) for k, v in raw.items()}
+
+    # -- Seed on first boot --------------------------------------------------
+
+    async def seed_if_empty(self, yaml_path: str = "config.yml") -> bool:
+        """If the store is empty, import from config.yml + .env.
+
+        Returns True if seeding was performed.
+        """
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM config")
+            row = await cursor.fetchone()
+            count = row[0] if row else 0
+
+        if count > 0:
+            return False
+
+        if Path(yaml_path).exists():
+            imported = await self.import_from_yaml(yaml_path)
+            log.info("Seeded config store from %s (%d keys)", yaml_path, imported)
+
+            # If the YAML had meaningful content (e.g. API key is set),
+            # mark setup as complete so the wizard isn't forced on users
+            # who already had a working config.
+            api_key = await self.get("agent.anthropic_api_key")
+            if api_key:
+                await self.set_setup_step("done")
+                log.info("Existing config has API key — marking setup as complete")
+
+            return True
+
+        log.info("No config.yml found — config store is empty, setup wizard required")
+        return False

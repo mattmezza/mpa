@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from anthropic import AsyncAnthropic
+from tavily import TavilyClient
 
 from core.config import Config
 from core.executor import ToolExecutor
@@ -201,6 +202,16 @@ class AgentCore:
         self.scheduler = AgentScheduler(config.history.db_path, self)
         self.permissions = PermissionEngine()
 
+        # Web search (Tavily)
+        if config.search.enabled and config.search.api_key:
+            self.search_client: TavilyClient | None = TavilyClient(
+                api_key=config.search.api_key,
+            )
+            log.info("Web search enabled (provider: %s)", config.search.provider)
+        else:
+            self.search_client = None
+            log.info("Web search disabled (no API key or not enabled)")
+
     async def process(self, message: str, channel: str, user_id: str) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop."""
         system = await self._build_system_prompt()
@@ -314,7 +325,7 @@ class AgentCore:
 
         if name == "web_search":
             log.info("Tool call: web_search — %s", params.get("query", ""))
-            return {"error": "web_search is not configured yet."}
+            return await self._tool_web_search(params)
 
         if name == "schedule_task":
             log.info("Tool call: schedule_task — %s", params.get("task", ""))
@@ -432,6 +443,43 @@ class AgentCore:
             }
         except Exception as exc:
             return {"error": f"Failed to schedule task: {exc}"}
+
+    async def _tool_web_search(self, params: dict) -> dict:
+        """Search the web via Tavily API."""
+        if not self.search_client:
+            return {"error": "Web search is not configured. Set search.api_key in config."}
+
+        query = params.get("query", "").strip()
+        if not query:
+            return {"error": "Empty search query."}
+
+        max_results = self.config.search.max_results
+
+        try:
+            response = await asyncio.to_thread(
+                self.search_client.search,
+                query=query,
+                max_results=max_results,
+            )
+        except Exception as exc:
+            log.exception("Tavily search failed for query: %s", query)
+            return {"error": f"Search failed: {exc}"}
+
+        # Format results for the LLM
+        results = []
+        for item in response.get("results", []):
+            results.append(
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "content": item.get("content", ""),
+                }
+            )
+
+        return {
+            "query": query,
+            "results": results,
+        }
 
     async def _request_approval(
         self, tool_name: str, params: dict, channel: str, user_id: str

@@ -58,6 +58,12 @@ admin:
   port: 8000
   api_key: "${ADMIN_API_KEY}"
 
+search:
+  enabled: true
+  provider: "tavily"
+  api_key: "${TAVILY_API_KEY}"
+  max_results: 5
+
 history:
   db_path: "data/agent.db"
   max_turns: 20

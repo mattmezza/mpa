@@ -92,6 +92,24 @@ class AgentScheduler:
         self.scheduler.start()
         log.info("Scheduler started with %d jobs", len(self.scheduler.get_jobs()))
 
+    def add_async_job(
+        self,
+        job_id: str,
+        func,
+        interval_hours: int,
+        **kwargs,
+    ) -> None:
+        """Register an async callable to run on a fixed interval."""
+        self.scheduler.add_job(
+            func,
+            "interval",
+            id=job_id,
+            hours=interval_hours,
+            kwargs=kwargs,
+            replace_existing=True,
+        )
+        log.info("Registered interval job %r: every %dh", job_id, interval_hours)
+
     def shutdown(self) -> None:
         """Gracefully shut down the scheduler."""
         self.scheduler.shutdown(wait=False)

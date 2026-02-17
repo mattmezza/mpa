@@ -17,6 +17,8 @@ dependencies = [
     "python-dotenv",
     "apscheduler>=3.10,<4",
     "sqlalchemy",
+    "tavily-python",
+    "httpx",
 ]
 
 [dependency-groups]

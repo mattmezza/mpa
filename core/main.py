@@ -1,4 +1,12 @@
-"""Entrypoint — boots the agent and runs Telegram + admin API concurrently."""
+"""Entrypoint — boots the agent and runs Telegram + admin API concurrently.
+
+Supports two boot modes:
+  1. **Setup mode** — config store is empty or setup not complete.
+     Only the admin API runs (serves the setup wizard).  No agent, no
+     Telegram, no scheduler.
+  2. **Normal mode** — setup complete.  Full agent with all channels,
+     scheduler, and admin API.
+"""
 
 from __future__ import annotations
 
@@ -7,11 +15,8 @@ import logging
 
 import uvicorn
 
-from api.admin import create_admin_app
-from channels.telegram import TelegramChannel
-from core.agent import AgentCore
-from core.config import load_config
-from voice.pipeline import VoicePipeline
+from api.admin import AgentState, create_admin_app, install_log_buffer
+from core.config_store import ConfigStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,9 +24,18 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# Install the in-memory log buffer handler before anything else
+install_log_buffer()
 
-async def main() -> None:
-    config = load_config()
+
+async def _start_agent(config_store: ConfigStore):
+    """Build and start the full agent (channels, scheduler, voice)."""
+    from channels.telegram import TelegramChannel
+    from core.agent import AgentCore
+    from voice.pipeline import VoicePipeline
+
+    config = await config_store.export_to_config()
+
     agent = AgentCore(config)
 
     # -- Voice pipeline --
@@ -39,10 +53,8 @@ async def main() -> None:
         )
         agent.voice = voice
 
-    tasks: list[asyncio.Task] = []
-
     # -- Telegram --
-    if config.channels.telegram.enabled:
+    if config.channels.telegram.enabled and config.channels.telegram.bot_token:
         tg = TelegramChannel(config.channels.telegram, agent, voice=voice)
         agent.channels["telegram"] = tg
         log.info("Starting Telegram bot…")
@@ -50,33 +62,83 @@ async def main() -> None:
         await tg.app.initialize()
         await tg.app.start()
         await tg.app.updater.start_polling()
-        # Telegram is now running in the background; no task needed —
-        # it hooks into the event loop via its own internal tasks.
 
     # -- Scheduler --
     if config.scheduler.jobs:
         agent.scheduler.load_jobs(config.scheduler)
-        agent.scheduler.start()
-        log.info("Scheduler started with %d jobs", len(config.scheduler.jobs))
 
-    # -- Admin API --
-    if config.admin.enabled:
-        admin_app = create_admin_app(agent)
-        uvi_config = uvicorn.Config(
-            admin_app,
-            host="0.0.0.0",
-            port=config.admin.port,
-            log_level="info",
+    # Memory consolidation
+    interval = config.memory.consolidation_interval_hours
+    if interval > 0:
+        agent.scheduler.add_async_job(
+            job_id="memory_consolidation",
+            func=agent.memory.consolidate_and_cleanup,
+            interval_hours=interval,
+            llm=agent.llm,
+            model=config.memory.consolidation_model,
         )
-        server = uvicorn.Server(uvi_config)
-        tasks.append(asyncio.create_task(server.serve()))
-        log.info("Starting admin API on port %s…", config.admin.port)
+        log.info("Memory consolidation scheduled every %dh", interval)
 
-    if not tasks and not agent.channels:
-        log.error("Nothing to run. Enable Telegram or the admin API in config.yml.")
-        return
+    agent.scheduler.start()
+    log.info("Scheduler started with %d jobs", len(agent.scheduler.scheduler.get_jobs()))
 
-    # Block until all long-running tasks finish (or are cancelled via signal).
+    return agent
+
+
+async def _stop_agent(agent) -> None:
+    """Gracefully shut down the agent."""
+    agent.scheduler.shutdown()
+
+    if "telegram" in agent.channels:
+        tg = agent.channels["telegram"]
+        await tg.app.updater.stop()
+        await tg.app.stop()
+        await tg.app.shutdown()
+
+
+async def main() -> None:
+    config_store = ConfigStore()
+
+    # Seed from YAML/.env on first boot (or if config.db is empty)
+    await config_store.seed_if_empty()
+
+    setup_complete = await config_store.is_setup_complete()
+
+    agent_state = AgentState()
+    if setup_complete:
+        log.info("Setup complete — starting agent")
+        try:
+            agent_state.agent = await _start_agent(config_store)
+        except Exception:
+            log.exception("Failed to start agent — falling back to setup mode")
+    else:
+        log.info("Setup not complete — running in setup-only mode (admin API + wizard)")
+
+    # -- Admin API (always runs) --
+    admin_app = create_admin_app(agent_state, config_store)
+
+    # Add lifecycle endpoints that can start/stop the agent
+    _attach_lifecycle_routes(admin_app, config_store, agent_state)
+
+    port = 8000
+    if setup_complete:
+        port_val = await config_store.get("admin.port")
+        if port_val:
+            try:
+                port = int(port_val)
+            except ValueError:
+                pass
+
+    uvi_config = uvicorn.Config(
+        admin_app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+    )
+    server = uvicorn.Server(uvi_config)
+    log.info("Starting admin API on port %s…", port)
+
+    # Graceful shutdown
     stop = asyncio.Event()
 
     def _signal_handler() -> None:
@@ -90,25 +152,79 @@ async def main() -> None:
         except NotImplementedError:
             pass  # Windows
 
-    # Wait for shutdown signal
+    # Run server until shutdown signal
+    server_task = asyncio.create_task(server.serve())
+
     await stop.wait()
 
-    # Graceful cleanup
     log.info("Shutting down…")
 
-    # Stop scheduler first (prevents new jobs from firing during shutdown)
-    agent.scheduler.shutdown()
+    if agent_state.agent:
+        await _stop_agent(agent_state.agent)
 
-    if "telegram" in agent.channels:
-        tg = agent.channels["telegram"]
-        await tg.app.updater.stop()
-        await tg.app.stop()
-        await tg.app.shutdown()
+    server_task.cancel()
+    try:
+        await server_task
+    except asyncio.CancelledError:
+        pass
 
-    for task in tasks:
-        task.cancel()
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+
+def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentState) -> None:
+    """Add /agent/start and /agent/stop endpoints for runtime lifecycle control.
+
+    These share the same ``AgentState`` object used by ``create_admin_app``
+    so all endpoints see agent changes immediately.
+    """
+
+    @app.post("/agent/start")
+    async def start_agent() -> dict:
+        if agent_state.agent is not None:
+            return {"status": "already_running"}
+        try:
+            agent_state.agent = await _start_agent(config_store)
+            log.info("Agent started via API")
+            return {
+                "status": "started",
+                "channels": list(agent_state.agent.channels.keys()),
+            }
+        except Exception as exc:
+            log.exception("Failed to start agent via API")
+            return {"status": "error", "error": str(exc)}
+
+    @app.post("/agent/stop")
+    async def stop_agent() -> dict:
+        if agent_state.agent is None:
+            return {"status": "not_running"}
+        try:
+            await _stop_agent(agent_state.agent)
+            agent_state.agent = None
+            log.info("Agent stopped via API")
+            return {"status": "stopped"}
+        except Exception as exc:
+            log.exception("Failed to stop agent via API")
+            return {"status": "error", "error": str(exc)}
+
+    @app.post("/agent/restart")
+    async def restart_agent() -> dict:
+        # Stop
+        if agent_state.agent is not None:
+            try:
+                await _stop_agent(agent_state.agent)
+            except Exception:
+                log.exception("Error during agent stop (restart)")
+            agent_state.agent = None
+
+        # Start
+        try:
+            agent_state.agent = await _start_agent(config_store)
+            log.info("Agent restarted via API")
+            return {
+                "status": "restarted",
+                "channels": list(agent_state.agent.channels.keys()),
+            }
+        except Exception as exc:
+            log.exception("Failed to restart agent via API")
+            return {"status": "error", "error": str(exc)}
 
 
 if __name__ == "__main__":

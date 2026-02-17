@@ -122,6 +122,15 @@ class MemoryConfig(BaseModel):
     db_path: str = "data/memory.db"
     long_term_limit: int = 50
     extraction_model: str = "claude-haiku-4-5"
+    consolidation_interval_hours: int = 24
+    consolidation_model: str = "claude-haiku-4-5"
+
+
+class SearchConfig(BaseModel):
+    enabled: bool = False
+    provider: str = "tavily"
+    api_key: str = ""
+    max_results: int = 5
 
 
 class Config(BaseModel):
@@ -133,6 +142,7 @@ class Config(BaseModel):
     admin: AdminConfig = AdminConfig()
     history: HistoryConfig = HistoryConfig()
     memory: MemoryConfig = MemoryConfig()
+    search: SearchConfig = SearchConfig()
 
 
 def load_config(path: str | Path = "config.yml") -> Config:
