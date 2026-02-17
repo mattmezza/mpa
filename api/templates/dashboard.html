@@ -12,36 +12,90 @@
   </div>
 
   {# Tab navigation #}
-  <div class="flex border-b border-border mb-4" x-data="{ tab: 'config' }">
+  <div class="flex border-b border-border mb-4" x-data="adminTabs()" x-init="init()">
     <button class="tab-link" :class="tab === 'config' && 'tab-link-active'"
-            @click="if (tab !== 'config') { tab = 'config'; htmx.ajax('GET', '/partials/config', {target: '#tab-content', swap: 'innerHTML'}); }">
+            @click="select('config')">
       Config
     </button>
     <button class="tab-link" :class="tab === 'identity' && 'tab-link-active'"
-            @click="if (tab !== 'identity') { tab = 'identity'; htmx.ajax('GET', '/partials/identity', {target: '#tab-content', swap: 'innerHTML'}); }">
+            @click="select('identity')">
       Agent Identity
     </button>
     <button class="tab-link" :class="tab === 'permissions' && 'tab-link-active'"
-            @click="if (tab !== 'permissions') { tab = 'permissions'; htmx.ajax('GET', '/partials/permissions', {target: '#tab-content', swap: 'innerHTML'}); }">
+            @click="select('permissions')">
       Permissions
     </button>
     <button class="tab-link" :class="tab === 'skills' && 'tab-link-active'"
-            @click="if (tab !== 'skills') { tab = 'skills'; htmx.ajax('GET', '/partials/skills', {target: '#tab-content', swap: 'innerHTML'}); }">
+            @click="select('skills')">
       Skills
     </button>
     <button class="tab-link" :class="tab === 'memory' && 'tab-link-active'"
-            @click="if (tab !== 'memory') { tab = 'memory'; htmx.ajax('GET', '/partials/memory', {target: '#tab-content', swap: 'innerHTML'}); }">
+            @click="select('memory')">
       Memory
     </button>
     <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
-            @click="if (tab !== 'logs') { tab = 'logs'; htmx.ajax('GET', '/partials/logs', {target: '#tab-content', swap: 'innerHTML'}); }">
+            @click="select('logs')">
       Logs
     </button>
   </div>
 
   {# Tab content — initially loads config #}
-  <div id="tab-content" hx-get="/partials/config" hx-trigger="load" hx-swap="innerHTML">
+  <div id="tab-content">
     <span class="text-muted text-xs">Loading...</span>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function adminTabs() {
+    const tabs = {
+      config: '/partials/config',
+      identity: '/partials/identity',
+      permissions: '/partials/permissions',
+      skills: '/partials/skills',
+      memory: '/partials/memory',
+      logs: '/partials/logs'
+    };
+
+    return {
+      tab: 'config',
+      init() {
+        const params = new URLSearchParams(window.location.search);
+        const urlTab = params.get('tab');
+        if (urlTab && tabs[urlTab]) {
+          this.tab = urlTab;
+        }
+        this.loadTab(this.tab, false);
+        if (!urlTab) {
+          const url = new URL(window.location.href);
+          url.searchParams.set('tab', this.tab);
+          history.replaceState({tab: this.tab}, '', url);
+        }
+
+        window.addEventListener('popstate', () => {
+          const current = new URLSearchParams(window.location.search).get('tab') || 'config';
+          if (tabs[current]) {
+            this.loadTab(current, false);
+          }
+        });
+      },
+      select(name) {
+        this.loadTab(name, true);
+      },
+      loadTab(name, updateUrl) {
+        if (!tabs[name] || this.tab === name && !updateUrl) {
+          return;
+        }
+        this.tab = name;
+        htmx.ajax('GET', tabs[name], {target: '#tab-content', swap: 'innerHTML'});
+        if (updateUrl) {
+          const url = new URL(window.location.href);
+          url.searchParams.set('tab', name);
+          history.pushState({tab: name}, '', url);
+        }
+      }
+    };
+  }
+</script>
 {% endblock %}
