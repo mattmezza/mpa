@@ -1,4 +1,4 @@
-.PHONY: setup install install-dev sync lock lint format test run clean
+.PHONY: setup install install-dev sync lock lint format test run clean release
 
 PYTHON := uv run python
 UV := uv
@@ -45,3 +45,8 @@ run:
 clean:
 	rm -rf .venv __pycache__ .pytest_cache .ruff_cache
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+# Create a GitHub release and tag
+release:
+	@test -n "$(name)" || (echo "Usage: make release name=v0.x" && exit 1)
+	@gh release create "$(name)" --generate-notes --latest
