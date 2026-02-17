@@ -813,7 +813,7 @@ async function loadCharacter() {
 
 async function saveCharacter() {
   try {
-    await api('PUT', '/config/character', { content: el('char-editor').value });
+    await api('POST', '/config/character', { content: el('char-editor').value });
     el('char-result').innerHTML = '<div class="test-result test-ok">Character saved</div>';
   } catch (e) {
     el('char-result').innerHTML = `<div class="test-result test-err">${e.message}</div>`;
@@ -822,7 +822,7 @@ async function saveCharacter() {
 
 async function savePersonalia() {
   try {
-    await api('PUT', '/config/personalia', { content: el('pers-editor').value });
+    await api('POST', '/config/personalia', { content: el('pers-editor').value });
     el('pers-result').innerHTML = '<div class="test-result test-ok">Personalia saved</div>';
   } catch (e) {
     el('pers-result').innerHTML = `<div class="test-result test-err">${e.message}</div>`;
@@ -879,7 +879,7 @@ async function addPermission() {
   const pattern = el('perm-pattern').value.trim();
   const level = el('perm-level').value;
   if (!pattern) return;
-  await api('PUT', '/permissions', { pattern, level });
+  await api('POST', '/permissions', { pattern, level });
   loadPermissions();
 }
 

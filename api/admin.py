@@ -168,7 +168,7 @@ def create_admin_app(
         value = await config_store.get("agent.character") or ""
         return {"content": value}
 
-    @app.put("/config/character", dependencies=[Depends(auth)])
+    @app.post("/config/character", dependencies=[Depends(auth)])
     async def put_character(request: Request) -> dict:
         """Update the character definition."""
         body = await request.json()
@@ -182,7 +182,7 @@ def create_admin_app(
         value = await config_store.get("agent.personalia") or ""
         return {"content": value}
 
-    @app.put("/config/personalia", dependencies=[Depends(auth)])
+    @app.post("/config/personalia", dependencies=[Depends(auth)])
     async def put_personalia(request: Request) -> dict:
         """Update the personalia definition."""
         body = await request.json()
@@ -218,7 +218,7 @@ def create_admin_app(
             raise HTTPException(503, "Agent not running")
         return {"rules": agent.permissions.rules}
 
-    @app.put("/permissions", dependencies=[Depends(auth)])
+    @app.post("/permissions", dependencies=[Depends(auth)])
     async def upsert_permission(body: PermissionRuleIn) -> dict:
         agent = agent_state.agent
         if not agent:
