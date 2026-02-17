@@ -316,8 +316,9 @@
 
     <!-- Config tab -->
     <div class="tab-panel active" data-tab="config">
-      <div class="btn-row mb">
+      <div class="btn-row mb" style="align-items:end">
         <button onclick="loadConfig()">Refresh</button>
+        <input type="text" id="cfg-search" placeholder="Filter keys..." oninput="filterConfig()" style="flex:1;min-width:150px;max-width:300px;margin:0">
       </div>
       <div id="config-table"></div>
 
@@ -596,42 +597,53 @@ async function loadStatus() {
 }
 
 // Config
+let _configData = {};
+
 async function loadConfig() {
   try {
-    const data = await api('GET', '/config');
-    const keys = Object.keys(data).sort();
-    const table = document.createElement('table');
-    table.innerHTML = '<tr><th>Key</th><th>Value</th><th></th></tr>';
-    for (const k of keys) {
-      const tr = document.createElement('tr');
-      const tdKey = document.createElement('td');
-      tdKey.textContent = k;
-      const tdVal = document.createElement('td');
-      tdVal.textContent = data[k];
-      const tdActions = document.createElement('td');
-      tdActions.style.whiteSpace = 'nowrap';
-
-      const editBtn = document.createElement('button');
-      editBtn.textContent = 'edit';
-      editBtn.style.cssText = 'padding:2px 8px;font-size:0.75rem';
-      editBtn.addEventListener('click', () => editConfig(k, data[k]));
-
-      const delBtn = document.createElement('button');
-      delBtn.textContent = 'x';
-      delBtn.className = 'danger';
-      delBtn.style.cssText = 'padding:2px 8px;font-size:0.75rem;margin-left:4px';
-      delBtn.addEventListener('click', () => deleteConfig(k));
-
-      tdActions.appendChild(editBtn);
-      tdActions.appendChild(delBtn);
-      tr.appendChild(tdKey);
-      tr.appendChild(tdVal);
-      tr.appendChild(tdActions);
-      table.appendChild(tr);
-    }
-    el('config-table').innerHTML = '';
-    el('config-table').appendChild(table);
+    _configData = await api('GET', '/config');
+    renderConfig();
   } catch {}
+}
+
+function renderConfig() {
+  const filter = (el('cfg-search')?.value || '').toLowerCase();
+  const keys = Object.keys(_configData).sort().filter(k => !filter || k.toLowerCase().includes(filter) || (_configData[k] ?? '').toLowerCase().includes(filter));
+  const table = document.createElement('table');
+  table.innerHTML = '<tr><th style="min-width:250px">Key</th><th>Value</th><th></th></tr>';
+  for (const k of keys) {
+    const tr = document.createElement('tr');
+    const tdKey = document.createElement('td');
+    tdKey.textContent = k;
+    const tdVal = document.createElement('td');
+    tdVal.textContent = _configData[k];
+    const tdActions = document.createElement('td');
+    tdActions.style.whiteSpace = 'nowrap';
+
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'edit';
+    editBtn.style.cssText = 'padding:2px 8px;font-size:0.75rem';
+    editBtn.addEventListener('click', () => editConfig(k, _configData[k]));
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'x';
+    delBtn.className = 'danger';
+    delBtn.style.cssText = 'padding:2px 8px;font-size:0.75rem;margin-left:4px';
+    delBtn.addEventListener('click', () => deleteConfig(k));
+
+    tdActions.appendChild(editBtn);
+    tdActions.appendChild(delBtn);
+    tr.appendChild(tdKey);
+    tr.appendChild(tdVal);
+    tr.appendChild(tdActions);
+    table.appendChild(tr);
+  }
+  el('config-table').innerHTML = '';
+  el('config-table').appendChild(table);
+}
+
+function filterConfig() {
+  renderConfig();
 }
 
 async function updateConfig() {
@@ -681,13 +693,44 @@ async function loadPermissions() {
     const data = await api('GET', '/permissions');
     const rules = data.rules || {};
     const keys = Object.keys(rules).sort();
-    let html = '<table><tr><th>Pattern</th><th>Level</th><th></th></tr>';
+    const table = document.createElement('table');
+    table.innerHTML = '<tr><th>Pattern</th><th>Level</th><th></th></tr>';
     for (const k of keys) {
-      html += `<tr><td>${esc(k)}</td><td>${esc(rules[k])}</td><td><button class="danger" style="padding:2px 8px;font-size:0.75rem" onclick="deletePermission('${esc(k)}')">x</button></td></tr>`;
+      const tr = document.createElement('tr');
+      const tdPattern = document.createElement('td');
+      tdPattern.textContent = k;
+      const tdLevel = document.createElement('td');
+      tdLevel.textContent = rules[k];
+      const tdActions = document.createElement('td');
+      tdActions.style.whiteSpace = 'nowrap';
+
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'edit';
+      editBtn.style.cssText = 'padding:2px 8px;font-size:0.75rem';
+      editBtn.addEventListener('click', () => editPermission(k, rules[k]));
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'x';
+      delBtn.className = 'danger';
+      delBtn.style.cssText = 'padding:2px 8px;font-size:0.75rem;margin-left:4px';
+      delBtn.addEventListener('click', () => deletePermission(k));
+
+      tdActions.appendChild(editBtn);
+      tdActions.appendChild(delBtn);
+      tr.appendChild(tdPattern);
+      tr.appendChild(tdLevel);
+      tr.appendChild(tdActions);
+      table.appendChild(tr);
     }
-    html += '</table>';
-    el('perm-table').innerHTML = html;
+    el('perm-table').innerHTML = '';
+    el('perm-table').appendChild(table);
   } catch {}
+}
+
+function editPermission(pattern, level) {
+  el('perm-pattern').value = pattern;
+  el('perm-level').value = level;
+  el('perm-level').focus();
 }
 
 async function addPermission() {
