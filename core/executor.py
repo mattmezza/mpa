@@ -10,6 +10,7 @@ class ToolExecutor:
     """Executes CLI commands on behalf of the LLM."""
 
     ALLOWED_PREFIXES = [
+        "curl",
         "himalaya",
         "jq",
         "khard",
