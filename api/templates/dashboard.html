@@ -41,6 +41,10 @@
             @click="select('identity')">
       Identity
     </button>
+    <button class="tab-link" :class="tab === 'you' && 'tab-link-active'"
+            @click="select('you')">
+      You
+    </button>
     <button class="tab-link" :class="tab === 'llm' && 'tab-link-active'"
             @click="select('llm')">
       LLM
@@ -175,6 +179,64 @@
         document.getElementById('tab-content').innerHTML = html;
       })
       .catch(e => alert(e.message));
+  }
+
+  function testTelegram() {
+    const result = document.getElementById('channel-wizard-result');
+    const tokenInput = document.getElementById('ch-tg-token');
+    if (!result || !tokenInput) return;
+    const token = tokenInput.value.trim();
+    result.textContent = 'Testing...';
+    result.className = 'alert-info';
+    fetch('/setup/test-connection', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      },
+      body: JSON.stringify({service: 'telegram', bot_token: token})
+    })
+      .then(r => r.json())
+      .then(d => {
+        result.textContent = d.ok ? 'Connected to @' + (d.bot_username || '') : d.error;
+        result.className = d.ok ? 'alert-success' : 'alert-error';
+      })
+      .catch(e => {
+        result.textContent = e.message;
+        result.className = 'alert-error';
+      });
+  }
+
+  function saveTelegram() {
+    const result = document.getElementById('channel-wizard-result');
+    const tokenInput = document.getElementById('ch-tg-token');
+    const usersInput = document.getElementById('ch-tg-users');
+    if (!result || !tokenInput || !usersInput) return;
+    const token = tokenInput.value.trim();
+    const users = usersInput.value.trim();
+    if (!token) {
+      result.textContent = 'Bot token is required.';
+      result.className = 'alert-error';
+      return;
+    }
+    fetch('/channels/telegram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      },
+      body: JSON.stringify({bot_token: token, user_ids: users, enabled: true})
+    })
+      .then(r => r.text())
+      .then(html => {
+        document.getElementById('tab-content').innerHTML = html;
+        closeChannelWizard();
+        if (window.showToast) { window.showToast('Telegram channel saved'); }
+      })
+      .catch(e => {
+        result.textContent = e.message;
+        result.className = 'alert-error';
+      });
   }
 
   document.addEventListener('click', (event) => {
