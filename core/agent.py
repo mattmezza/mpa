@@ -16,6 +16,7 @@ from core.history import ConversationHistory
 from core.memory import MemoryStore
 from core.models import AgentResponse
 from core.skills import SkillsEngine
+from voice.pipeline import VoicePipeline
 
 log = logging.getLogger(__name__)
 
@@ -156,6 +157,7 @@ class AgentCore:
             long_term_limit=config.memory.long_term_limit,
         )
         self.channels: dict = {}
+        self.voice: VoicePipeline | None = None
 
     async def process(self, message: str, channel: str, user_id: str) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop."""
@@ -208,11 +210,21 @@ class AgentCore:
         final_text = self._extract_text(response)
         log.info("Response: %s", final_text[:200])
 
+        # Check if the LLM wants to respond with voice
+        voice_bytes = None
+        if "[respond_with_voice]" in final_text and self.voice:
+            clean_text = final_text.replace("[respond_with_voice]", "").strip()
+            try:
+                voice_bytes = await self.voice.synthesize(clean_text)
+            except Exception:
+                log.exception("TTS synthesis failed, sending text only")
+            final_text = clean_text
+
         # Persist the turn (user message + final assistant text only)
         await self.history.add_turn(channel, user_id, "user", message)
         await self.history.add_turn(channel, user_id, "assistant", final_text)
 
-        return AgentResponse(text=final_text)
+        return AgentResponse(text=final_text, voice=voice_bytes)
 
     async def _execute_tool(self, tool_call) -> dict:
         """Dispatch a tool call from the LLM."""

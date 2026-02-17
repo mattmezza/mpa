@@ -11,6 +11,8 @@ dependencies = [
     "aiosqlite",
     "fastapi",
     "uvicorn[standard]",
+    "faster-whisper",
+    "edge-tts",
 ]
 
 [dependency-groups]

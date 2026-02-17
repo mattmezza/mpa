@@ -11,6 +11,7 @@ from api.admin import create_admin_app
 from channels.telegram import TelegramChannel
 from core.agent import AgentCore
 from core.config import load_config
+from voice.pipeline import VoicePipeline
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,11 +24,26 @@ async def main() -> None:
     config = load_config()
     agent = AgentCore(config)
 
+    # -- Voice pipeline --
+    voice: VoicePipeline | None = None
+    if config.voice.tts_enabled:
+        log.info(
+            "Initializing voice pipeline (model=%s, voice=%s)…",
+            config.voice.stt_model,
+            config.voice.tts_voice,
+        )
+        voice = VoicePipeline(
+            stt_model=config.voice.stt_model,
+            tts_voice=config.voice.tts_voice,
+            tts_enabled=config.voice.tts_enabled,
+        )
+        agent.voice = voice
+
     tasks: list[asyncio.Task] = []
 
     # -- Telegram --
     if config.channels.telegram.enabled:
-        tg = TelegramChannel(config.channels.telegram, agent)
+        tg = TelegramChannel(config.channels.telegram, agent, voice=voice)
         agent.channels["telegram"] = tg
         log.info("Starting Telegram bot…")
 

@@ -91,7 +91,7 @@ class CalendarConfig(BaseModel):
 
 class VoiceConfig(BaseModel):
     stt_model: str = "base"
-    tts_voice: str = "en-US-GuyNeural"
+    tts_voice: str = "en-US-AvaNeural"
     tts_enabled: bool = True
 
 
