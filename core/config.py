@@ -118,6 +118,11 @@ class HistoryConfig(BaseModel):
     max_turns: int = 20
 
 
+class MemoryConfig(BaseModel):
+    db_path: str = "data/memory.db"
+    long_term_limit: int = 50
+
+
 class Config(BaseModel):
     agent: AgentConfig = AgentConfig()
     channels: ChannelsConfig = ChannelsConfig()
@@ -126,6 +131,7 @@ class Config(BaseModel):
     scheduler: SchedulerConfig = SchedulerConfig()
     admin: AdminConfig = AdminConfig()
     history: HistoryConfig = HistoryConfig()
+    memory: MemoryConfig = MemoryConfig()
 
 
 def load_config(path: str | Path = "config.yml") -> Config:

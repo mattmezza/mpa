@@ -12,6 +12,7 @@ from anthropic import AsyncAnthropic
 from core.config import Config
 from core.executor import ToolExecutor
 from core.history import ConversationHistory
+from core.memory import MemoryStore
 from core.models import AgentResponse
 from core.skills import SkillsEngine
 
@@ -51,11 +52,15 @@ class AgentCore:
             db_path=config.history.db_path,
             max_turns=config.history.max_turns,
         )
+        self.memory = MemoryStore(
+            db_path=config.memory.db_path,
+            long_term_limit=config.memory.long_term_limit,
+        )
         self.channels: dict = {}
 
     async def process(self, message: str, channel: str, user_id: str) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop."""
-        system = self._build_system_prompt()
+        system = await self._build_system_prompt()
 
         # Load conversation history and append the new user message
         history = await self.history.get_messages(channel, user_id)
@@ -121,11 +126,12 @@ class AgentCore:
 
         return {"error": f"Unknown tool: {name}"}
 
-    def _build_system_prompt(self) -> str:
+    async def _build_system_prompt(self) -> str:
         cfg = self.config.agent
         skills_block = self.skills.get_all_skills()
         character = self._load_file(cfg.character_file)
         personalia = self._load_file(cfg.personalia_file)
+        memories = await self.memory.format_for_prompt()
 
         prompt = f"""You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.
 
@@ -143,7 +149,18 @@ When you need to perform an action, use the `run_command` tool to execute CLI co
 Always use the skill documentation to construct the correct command.
 Parse JSON output when available (himalaya supports -o json, sqlite3 supports -json).
 If a command fails, read the error and try to fix it.
-Never guess at command syntax — always refer to the skill file."""
+Never guess at command syntax — always refer to the skill file.
+
+You can store and recall memories using the sqlite3 CLI (see the memory skill).
+Proactively remember important facts about the user and their contacts.
+Before inserting a new long-term memory, check if it already exists to avoid duplicates."""
+
+        if memories:
+            prompt += f"""
+
+<memories>
+{memories}
+</memories>"""
 
         if skills_block:
             prompt += f"""
