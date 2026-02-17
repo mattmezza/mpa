@@ -67,18 +67,6 @@ async def _start_agent(config_store: ConfigStore):
     if config.scheduler.jobs:
         agent.scheduler.load_jobs(config.scheduler)
 
-    # Memory consolidation
-    interval = config.memory.consolidation_interval_hours
-    if interval > 0:
-        agent.scheduler.add_async_job(
-            job_id="memory_consolidation",
-            func=agent.memory.consolidate_and_cleanup,
-            interval_hours=interval,
-            llm=agent.llm,
-            model=config.memory.consolidation_model,
-        )
-        log.info("Memory consolidation scheduled every %dh", interval)
-
     agent.scheduler.start()
     log.info("Scheduler started with %d jobs", len(agent.scheduler.scheduler.get_jobs()))
 

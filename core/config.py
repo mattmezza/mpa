@@ -122,7 +122,6 @@ class MemoryConfig(BaseModel):
     db_path: str = "data/memory.db"
     long_term_limit: int = 50
     extraction_model: str = "claude-haiku-4-5"
-    consolidation_interval_hours: int = 24
     consolidation_model: str = "claude-haiku-4-5"
 
 

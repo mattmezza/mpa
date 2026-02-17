@@ -889,16 +889,46 @@ class AgentScheduler:
         )
         self.agent = agent_core
 
-    def add_cron_job(self, job_id: str, cron_expr: str, task: str):
+    def load_jobs(self, config):
+        """Register cron jobs from config. Three job types:
+        - "agent": natural-language task → agent.process() → deliver to channel
+        - "system": raw CLI command → executor.run_command_trusted()
+        - "memory_consolidation": review short-term memories via LLM,
+          promote worthy ones to long-term, delete expired entries
+        """
+        for job in config.jobs:
+            cron_kwargs = _parse_cron(job.cron)
+
+            if job.type == "system":
+                self.scheduler.add_job(
+                    self._run_system_command, "cron",
+                    id=job.id, kwargs={"command": job.task},
+                    replace_existing=True, **cron_kwargs,
+                )
+            elif job.type == "memory_consolidation":
+                self.scheduler.add_job(
+                    self._run_memory_consolidation, "cron",
+                    id=job.id, replace_existing=True, **cron_kwargs,
+                )
+            else:
+                self.scheduler.add_job(
+                    self._run_agent_task, "cron",
+                    id=job.id, kwargs={"task": job.task, "channel": job.channel},
+                    replace_existing=True, **cron_kwargs,
+                )
+
+    def add_one_shot(self, job_id: str, run_at: datetime, task: str, channel: str):
         self.scheduler.add_job(
-            self.agent.execute_task, "cron",
-            id=job_id, **parse_cron(cron_expr), args=[task]
+            self._run_agent_task, "date",
+            id=job_id, run_date=run_at, kwargs={"task": task, "channel": channel},
+            replace_existing=True,
         )
 
-    def add_one_shot(self, job_id: str, run_at: datetime, task: str):
-        self.scheduler.add_job(
-            self.agent.execute_task, "date",
-            id=job_id, run_date=run_at, args=[task]
+    async def _run_memory_consolidation(self):
+        """Review short-term memories, promote worthy ones, delete expired."""
+        result = await self.agent.memory.consolidate_and_cleanup(
+            llm=self.agent.llm,
+            model=self.agent.config.memory.consolidation_model,
         )
 ```
 
@@ -1070,15 +1100,33 @@ sqlite3 -json /app/data/memory.db "SELECT * FROM long_term WHERE content LIKE '%
 sqlite3 /app/data/memory.db "UPDATE long_term SET content = 'Prefers almond milk in coffee', updated_at = datetime('now') WHERE id = 42;"
 ```
 
-### 8.4 Short-Term Cleanup
+### 8.4 Memory Consolidation & Cleanup
 
-A scheduled job runs every 8 hours (configurable) to delete expired short-term memories:
+A scheduled job of type `memory_consolidation` runs on a configurable cron schedule (default: every 8 hours). It does two things:
 
-```bash
-sqlite3 /app/data/memory.db "DELETE FROM short_term WHERE expires_at < datetime('now');"
+1. **Consolidation** — reviews all active (non-expired) short-term memories via a lightweight LLM call, and promotes any that contain durable facts to long-term memory. The LLM compacts aggressively: strips temporal context, deduplicates against existing long-term memories, and only promotes facts that would still be useful weeks or months later.
+
+2. **Cleanup** — deletes all expired short-term memories regardless of whether the LLM call succeeded.
+
+This is configured as a regular scheduled job in `config.yml`:
+
+```yaml
+scheduler:
+  jobs:
+    - id: "memory_consolidation"
+      cron: "0 */8 * * *"
+      task: "memory_consolidation"
+      type: "memory_consolidation"
 ```
 
-This is registered as a system-level scheduler job (see §11 config) — no Python code, just a CLI command on a cron.
+The model used for the consolidation LLM call is configured in the `memory` section:
+
+```yaml
+memory:
+  consolidation_model: "claude-haiku-4-5"
+```
+
+You can also trigger consolidation manually via the admin API: `POST /memory/consolidate`.
 
 ### 8.5 Memory in the Agent Loop
 
@@ -1309,10 +1357,9 @@ agent:
 
 memory:
   db_path: "data/memory.db"
-  schema_file: "schema/memory.sql"
-  short_term_ttl_hours: 24          # default TTL for short-term facts
-  short_term_cleanup_interval_hours: 8  # how often to purge expired short-term facts
-  long_term_prompt_limit: 50        # max long-term memories injected into prompt
+  long_term_limit: 50                    # max long-term memories injected into prompt
+  extraction_model: "claude-haiku-4-5"   # cheap model for post-turn memory extraction
+  consolidation_model: "claude-haiku-4-5" # model for scheduled consolidation reviews
 
 channels:
   telegram:
@@ -1354,10 +1401,10 @@ scheduler:
       cron: "*/15 * * * *"
       task: "vdirsyncer sync"
       type: "system"
-    - id: "memory_cleanup"
+    - id: "memory_consolidation"
       cron: "0 */8 * * *"
-      task: "sqlite3 /app/data/memory.db \"DELETE FROM short_term WHERE expires_at < datetime('now');\""
-      type: "system"
+      task: "memory_consolidation"
+      type: "memory_consolidation"
 
 admin:
   enabled: true
@@ -1654,11 +1701,11 @@ if __name__ == "__main__":
 |---|---|---|
 | **1. Foundation** | Agent core + skills engine + executor + Telegram + Claude tool-use loop | 2-3 days |
 | **2. Identity** | `character.md` + `personalia.md` + system prompt injection | 0.5 day |
-| **3. Memory** | SQLite schema + `skills/memory.md` + sqlite3 integration + short-term cleanup scheduler | 1-2 days |
+| **3. Memory** | SQLite schema + `skills/memory.md` + sqlite3 integration + consolidation (LLM-based promotion + expired cleanup) | 1-2 days |
 | **4. Email** | Install himalaya, write config + `himalaya-email.md` skill | 1 day |
 | **5. Calendar** | CalDAV helper scripts + `caldav-calendar.md` skill | 1 day |
 | **6. Contacts** | Install khard + vdirsyncer, write config + `khard-contacts.md` skill | 0.5 day |
-| **7. Scheduler** | APScheduler + morning briefing + periodic email check + memory cleanup | 0.5 day |
+| **7. Scheduler** | APScheduler + morning briefing + periodic email check + memory consolidation + contact sync | 0.5 day |
 | **8. Permissions** | Permission engine + glob patterns + Telegram inline approval | 1 day |
 | **9. Voice** | Whisper STT + edge-tts + `voice.md` skill | 1 day |
 | **10. WhatsApp** | WA bridge + channel integration | 1-2 days |

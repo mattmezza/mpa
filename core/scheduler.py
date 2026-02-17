@@ -1,9 +1,11 @@
 """Scheduler — APScheduler wrapper for cron jobs and one-shot tasks.
 
-Two job types:
+Three job types:
   - "agent": natural-language task → agent.process() → send result to channel
   - "system": raw CLI command → executor.run_command_trusted()
     (e.g. vdirsyncer sync, memory cleanup)
+  - "memory_consolidation": review short-term memories, promote worthy ones
+    to long-term, delete expired entries (uses a lightweight LLM call)
 """
 
 from __future__ import annotations
@@ -63,6 +65,14 @@ class AgentScheduler:
                     replace_existing=True,
                     **cron_kwargs,
                 )
+            elif job.type == "memory_consolidation":
+                self.scheduler.add_job(
+                    self._run_memory_consolidation,
+                    "cron",
+                    id=job.id,
+                    replace_existing=True,
+                    **cron_kwargs,
+                )
             else:
                 self.scheduler.add_job(
                     self._run_agent_task,
@@ -91,24 +101,6 @@ class AgentScheduler:
         """Start the scheduler. Call after load_jobs()."""
         self.scheduler.start()
         log.info("Scheduler started with %d jobs", len(self.scheduler.get_jobs()))
-
-    def add_async_job(
-        self,
-        job_id: str,
-        func,
-        interval_hours: int,
-        **kwargs,
-    ) -> None:
-        """Register an async callable to run on a fixed interval."""
-        self.scheduler.add_job(
-            func,
-            "interval",
-            id=job_id,
-            hours=interval_hours,
-            kwargs=kwargs,
-            replace_existing=True,
-        )
-        log.info("Registered interval job %r: every %dh", job_id, interval_hours)
 
     def shutdown(self) -> None:
         """Gracefully shut down the scheduler."""
@@ -156,6 +148,23 @@ class AgentScheduler:
                 )
         except Exception:
             log.exception("Scheduler system command failed: %s", command[:100])
+
+    async def _run_memory_consolidation(self) -> None:
+        """Review short-term memories, promote worthy ones, delete expired."""
+        log.info("Scheduler running memory consolidation")
+        try:
+            result = await self.agent.memory.consolidate_and_cleanup(
+                llm=self.agent.llm,
+                model=self.agent.config.memory.consolidation_model,
+            )
+            log.info(
+                "Memory consolidation done: %d reviewed, %d promoted, %d expired deleted",
+                result["active_reviewed"],
+                result["promoted_to_long_term"],
+                result["expired_deleted"],
+            )
+        except Exception:
+            log.exception("Scheduler memory consolidation failed")
 
     def _get_owner_chat_id(self, channel: str) -> int | str | None:
         """Get the owner's chat ID for proactive messages."""
