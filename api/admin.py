@@ -3,7 +3,7 @@ memory inspection, log streaming, and agent lifecycle control.
 
 Uses Jinja2 templates with HTMX for the UI. All endpoints (except /health,
 /setup/*, /login, and /static/*) require Bearer token auth matching the
-admin.api_key config value.
+stored admin password hash.
 """
 
 from __future__ import annotations
@@ -104,9 +104,9 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
         if val:
             ctx["tavily_key"] = val
     elif step == "admin":
-        val = await config_store.get("admin.api_key")
+        val = await config_store.get("admin.password_hash")
         if val:
-            ctx["admin_key"] = val
+            ctx["admin_key"] = ""
     return ctx
 
 
@@ -859,17 +859,6 @@ def create_admin_app(
     async def patch_config(body: ConfigPatchIn) -> dict:
         await config_store.set_many(body.values)
         return {"updated": list(body.values.keys())}
-
-    @app.post("/admin/password", dependencies=[Depends(auth)])
-    async def change_admin_password(body: PasswordChangeIn) -> dict:
-        current = body.current_password.strip()
-        new_password = body.new_password.strip()
-        if not current or not new_password:
-            return {"ok": False, "error": "Both current and new passwords are required."}
-        if not await config_store.verify_admin_password(current):
-            return {"ok": False, "error": "Current password is incorrect."}
-        await config_store.set_admin_password(new_password)
-        return {"ok": True, "token": new_password}
 
     @app.post("/admin/password", dependencies=[Depends(auth)])
     async def change_admin_password(body: PasswordChangeIn) -> dict:

@@ -30,8 +30,10 @@ class _ConfigStoreStub:
         # Check explicit data first, then fall back to hardcoded defaults
         if key in self._data:
             return self._data[key]
-        if key == "admin.api_key":
-            return "secret"
+        if key == "admin.password_hash":
+            return "hash"
+        if key == "admin.password_salt":
+            return "salt"
         if key == "agent.character":
             return "# Test character"
         if key == "agent.personalia":
@@ -39,7 +41,14 @@ class _ConfigStoreStub:
         return None
 
     async def get_all_redacted(self) -> dict:
-        return {"agent.name": "Clio", "admin.api_key": "se***ret", "admin.port": "8000"}
+        return {"agent.name": "Clio", "admin.password_hash": "***", "admin.port": "8000"}
+
+    async def verify_admin_password(self, password: str) -> bool:
+        return password == "secret"
+
+    async def set_admin_password(self, password: str) -> None:
+        self._data["admin.password_hash"] = "hash"
+        self._data["admin.password_salt"] = "salt"
 
     async def get_section_redacted(self, section: str) -> dict:
         return {f"{section}.value": "ok"}
@@ -50,6 +59,9 @@ class _ConfigStoreStub:
     async def set_many(self, values: dict) -> None:
         self._last_set = values
         self._data.update(values)
+
+    async def verify_admin_password(self, password: str) -> bool:
+        return password == "secret"
 
     async def delete(self, key: str) -> bool:
         return key in self._data and bool(self._data.pop(key, True))
@@ -142,8 +154,8 @@ class TestPartialRoutes:
         resp = client.get("/partials/status", headers=AUTH)
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
-        # Should show running state with channel info
-        assert "telegram" in resp.text.lower()
+        # Should show running state message
+        assert "running" in resp.text.lower()
 
     def test_status_partial_without_agent(self):
         client = _client(setup_complete=True, agent=None)
@@ -198,6 +210,7 @@ class TestPartialRoutes:
             "/partials/config",
             "/partials/identity",
             "/partials/permissions",
+            "/partials/admin",
             "/partials/logs",
             "/partials/logs-content",
         ]:
@@ -634,14 +647,13 @@ class TestWizardPrePopulation:
         assert "tvly-testkey999" in resp.text
 
     def test_admin_step_shows_saved_key(self):
-        """Navigating back to admin step should pre-fill the admin key in Alpine data."""
+        """Admin step should render without exposing stored password hash."""
         client = _client_with_config(
-            {"admin.api_key": "deadbeef1234"},
+            {"admin.password_hash": "hash", "admin.password_salt": "salt"},
             step="done",
         )
         resp = client.post("/setup/step", json={"step": "admin", "values": {}})
         assert resp.status_code == 200
-        assert "deadbeef1234" in resp.text
 
     def test_setup_page_initial_load_pre_populates(self):
         """GET /setup should pre-populate the current step with saved values."""

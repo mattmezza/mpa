@@ -14,7 +14,14 @@ class _ConfigStoreStub:
         return True
 
     async def get(self, key: str):
-        return "secret" if key == "admin.api_key" else None
+        if key == "admin.password_hash":
+            return "hash"
+        if key == "admin.password_salt":
+            return "salt"
+        return None
+
+    async def verify_admin_password(self, password: str) -> bool:
+        return password == "secret"
 
 
 def _client(agent_state: main.AgentState) -> TestClient:

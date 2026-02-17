@@ -16,16 +16,26 @@ class _ConfigStoreStub:
         return self._setup_complete
 
     async def get(self, key: str):
-        return "secret" if key == "admin.api_key" else None
+        if key == "admin.password_hash":
+            return "hash"
+        if key == "admin.password_salt":
+            return "salt"
+        return None
 
     async def get_all_redacted(self) -> dict:
-        return {"admin.api_key": "se***ret"}
+        return {"admin.password_hash": "***", "admin.password_salt": "***"}
+
+    async def verify_admin_password(self, password: str) -> bool:
+        return password == "secret"
 
     async def get_section_redacted(self, section: str) -> dict:
         return {f"{section}.value": "ok"}
 
     async def set_many(self, values: dict) -> None:
         self._last_set = values
+
+    async def set_admin_password(self, password: str) -> None:
+        self._last_set = {"admin.password_hash": "hash", "admin.password_salt": "salt"}
 
     async def delete(self, key: str) -> bool:
         return key == "test.key"
@@ -46,13 +56,16 @@ class _AgentStub:
 
 def _client(setup_complete: bool = True) -> TestClient:
     store = _ConfigStoreStub(setup_complete=setup_complete)
-    agent_state = AgentState(agent=_AgentStub())
+    agent_state = AgentState(agent=None)
     app, _auth = create_admin_app(agent_state, store)
     return TestClient(app)
 
 
 def test_health_reports_setup_and_running() -> None:
-    client = _client(setup_complete=True)
+    store = _ConfigStoreStub(setup_complete=True)
+    agent_state = AgentState(agent=_AgentStub())
+    app, _auth = create_admin_app(agent_state, store)
+    client = TestClient(app)
     resp = client.get("/health")
 
     assert resp.status_code == 200
@@ -73,7 +86,7 @@ def test_skips_auth_during_setup() -> None:
     resp = client.get("/config")
 
     assert resp.status_code == 200
-    assert resp.json()["admin.api_key"] == "se***ret"
+    assert resp.json()["admin.password_hash"] == "***"
 
 
 def test_config_patch_updates_values() -> None:
@@ -86,13 +99,17 @@ def test_config_patch_updates_values() -> None:
 
 
 def test_agent_status_reports_channels_and_jobs() -> None:
-    client = _client(setup_complete=True)
+    store = _ConfigStoreStub(setup_complete=True)
+    agent_state = AgentState(agent=_AgentStub())
+    app, _auth = create_admin_app(agent_state, store)
+    client = TestClient(app)
     headers = {"Authorization": "Bearer secret"}
     resp = client.get("/agent/status", headers=headers)
 
     assert resp.status_code == 200
     assert resp.json() == {
         "running": True,
+        "status": "STOPPED",
         "channels": ["telegram"],
         "scheduler_jobs": 2,
     }
