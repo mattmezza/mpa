@@ -321,7 +321,7 @@
       </div>
       <div id="config-table"></div>
 
-      <h3 class="mt">Update config</h3>
+      <h3 class="mt">Add / edit config</h3>
       <div style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap">
         <div style="flex:1;min-width:150px">
           <label for="cfg-key">Key</label>
@@ -600,12 +600,37 @@ async function loadConfig() {
   try {
     const data = await api('GET', '/config');
     const keys = Object.keys(data).sort();
-    let html = '<table><tr><th>Key</th><th>Value</th></tr>';
+    const table = document.createElement('table');
+    table.innerHTML = '<tr><th>Key</th><th>Value</th><th></th></tr>';
     for (const k of keys) {
-      html += `<tr><td>${esc(k)}</td><td>${esc(data[k])}</td></tr>`;
+      const tr = document.createElement('tr');
+      const tdKey = document.createElement('td');
+      tdKey.textContent = k;
+      const tdVal = document.createElement('td');
+      tdVal.textContent = data[k];
+      const tdActions = document.createElement('td');
+      tdActions.style.whiteSpace = 'nowrap';
+
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'edit';
+      editBtn.style.cssText = 'padding:2px 8px;font-size:0.75rem';
+      editBtn.addEventListener('click', () => editConfig(k, data[k]));
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'x';
+      delBtn.className = 'danger';
+      delBtn.style.cssText = 'padding:2px 8px;font-size:0.75rem;margin-left:4px';
+      delBtn.addEventListener('click', () => deleteConfig(k));
+
+      tdActions.appendChild(editBtn);
+      tdActions.appendChild(delBtn);
+      tr.appendChild(tdKey);
+      tr.appendChild(tdVal);
+      tr.appendChild(tdActions);
+      table.appendChild(tr);
     }
-    html += '</table>';
-    el('config-table').innerHTML = html;
+    el('config-table').innerHTML = '';
+    el('config-table').appendChild(table);
   } catch {}
 }
 
@@ -616,6 +641,24 @@ async function updateConfig() {
   try {
     const r = await api('PATCH', '/config', { values: { [key]: val } });
     el('cfg-result').innerHTML = `<div class="test-result test-ok">Updated: ${r.updated?.join(', ')}</div>`;
+    el('cfg-key').value = '';
+    el('cfg-val').value = '';
+    loadConfig();
+  } catch (e) {
+    el('cfg-result').innerHTML = `<div class="test-result test-err">${e.message}</div>`;
+  }
+}
+
+function editConfig(key, value) {
+  el('cfg-key').value = key;
+  el('cfg-val').value = value;
+  el('cfg-val').focus();
+}
+
+async function deleteConfig(key) {
+  if (!confirm(`Delete config key "${key}"?`)) return;
+  try {
+    await api('DELETE', `/config/${encodeURIComponent(key)}`);
     loadConfig();
   } catch (e) {
     el('cfg-result').innerHTML = `<div class="test-result test-err">${e.message}</div>`;

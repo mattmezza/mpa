@@ -161,6 +161,14 @@ def create_admin_app(
         await config_store.set_many(body.values)
         return {"updated": list(body.values.keys())}
 
+    @app.delete("/config/{key:path}", dependencies=[Depends(auth)])
+    async def delete_config(key: str) -> dict:
+        """Delete a config value by key."""
+        deleted = await config_store.delete(key)
+        if not deleted:
+            raise HTTPException(404, f"Config key not found: {key}")
+        return {"deleted": key}
+
     # ── Permissions ─────────────────────────────────────────────────────
 
     @app.get("/permissions", dependencies=[Depends(auth)])
