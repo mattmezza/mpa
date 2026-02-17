@@ -201,9 +201,13 @@ def create_admin_app(
         await config_store.set_many(body.values)
         return {"updated": list(body.values.keys())}
 
-    @app.delete("/config/{key:path}", dependencies=[Depends(auth)])
-    async def delete_config(key: str) -> dict:
+    @app.post("/config/delete", dependencies=[Depends(auth)])
+    async def delete_config(request: Request) -> dict:
         """Delete a config value by key."""
+        body = await request.json()
+        key = body.get("key", "")
+        if not key:
+            raise HTTPException(400, "Missing 'key' in request body")
         deleted = await config_store.delete(key)
         if not deleted:
             raise HTTPException(404, f"Config key not found: {key}")
@@ -226,11 +230,15 @@ def create_admin_app(
         agent.permissions.add_rule(body.pattern, body.level)
         return {"pattern": body.pattern, "level": body.level}
 
-    @app.delete("/permissions/{pattern:path}", dependencies=[Depends(auth)])
-    async def delete_permission(pattern: str) -> dict:
+    @app.post("/permissions/delete", dependencies=[Depends(auth)])
+    async def delete_permission(request: Request) -> dict:
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
+        body = await request.json()
+        pattern = body.get("pattern", "")
+        if not pattern:
+            raise HTTPException(400, "Missing 'pattern' in request body")
         if pattern in agent.permissions.rules:
             del agent.permissions.rules[pattern]
             return {"deleted": pattern}
@@ -287,13 +295,18 @@ def create_admin_app(
             rows = [dict(row) for row in await cursor.fetchall()]
         return {"count": len(rows), "memories": rows}
 
-    @app.delete("/memory/{tier}/{memory_id}", dependencies=[Depends(auth)])
-    async def delete_memory(tier: str, memory_id: int) -> dict:
+    @app.post("/memory/delete", dependencies=[Depends(auth)])
+    async def delete_memory(request: Request) -> dict:
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
+        body = await request.json()
+        tier = body.get("tier", "")
+        memory_id = body.get("memory_id")
         if tier not in ("long-term", "short-term"):
             raise HTTPException(400, "Tier must be 'long-term' or 'short-term'")
+        if memory_id is None:
+            raise HTTPException(400, "Missing 'memory_id' in request body")
 
         import aiosqlite
 

@@ -780,7 +780,7 @@ function cancelEditConfig() {
 async function deleteConfig(key) {
   if (!confirm(`Delete config key "${key}"?`)) return;
   try {
-    await api('DELETE', `/config/${encodeURIComponent(key)}`);
+    await api('POST', '/config/delete', { key });
     loadConfig();
   } catch (e) {
     el('cfg-result').innerHTML = `<div class="test-result test-err">${e.message}</div>`;
@@ -884,7 +884,7 @@ async function addPermission() {
 }
 
 async function deletePermission(pattern) {
-  await api('DELETE', `/permissions/${encodeURIComponent(pattern)}`);
+  await api('POST', '/permissions/delete', { pattern });
   loadPermissions();
 }
 
@@ -912,7 +912,7 @@ async function loadMemory() {
 }
 
 async function deleteMemory(tier, id) {
-  await api('DELETE', `/memory/${tier}/${id}`);
+  await api('POST', '/memory/delete', { tier, memory_id: id });
   loadMemory();
 }
 
