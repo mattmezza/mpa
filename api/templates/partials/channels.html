@@ -52,6 +52,13 @@
         </div>
         <button class="btn btn-sm" type="button" onclick="closeChannelWizard()">Close</button>
       </div>
+      <template id="channel-wizard-selector">
+        <div class="text-muted text-xs">Select a channel to begin.</div>
+        <div class="flex items-center gap-2 mt-3">
+          <button class="btn btn-sm" onclick="loadChannelWizard('telegram')">Telegram</button>
+          <button class="btn btn-sm" onclick="loadChannelWizard('whatsapp')">WhatsApp</button>
+        </div>
+      </template>
       <div id="channel-wizard-body">
         <div class="text-muted text-xs">Select a channel to begin.</div>
         <div class="flex items-center gap-2 mt-3">

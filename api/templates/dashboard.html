@@ -115,6 +115,7 @@
   function openChannelWizard(channelKey) {
     const modal = document.getElementById('channel-modal');
     if (!modal) return;
+    resetChannelWizard();
     modal.style.display = 'flex';
     if (channelKey) {
       loadChannelWizard(channelKey);
@@ -125,6 +126,14 @@
     const modal = document.getElementById('channel-modal');
     if (!modal) return;
     modal.style.display = 'none';
+    resetChannelWizard();
+  }
+
+  function resetChannelWizard() {
+    const body = document.getElementById('channel-wizard-body');
+    const selector = document.getElementById('channel-wizard-selector');
+    if (!body || !selector) return;
+    body.innerHTML = selector.innerHTML;
   }
 
   function loadChannelWizard(channelKey) {
