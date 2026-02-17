@@ -17,7 +17,7 @@ from core.executor import ToolExecutor
 from core.history import ConversationHistory
 from core.memory import MemoryStore
 from core.models import AgentResponse
-from core.permissions import PermissionEngine, PermissionLevel
+from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
 from core.scheduler import AgentScheduler
 from core.skills import SkillsEngine
 from voice.pipeline import VoicePipeline
@@ -199,7 +199,7 @@ class AgentCore:
         self.channels: dict = {}
         self.voice: VoicePipeline | None = None
         self.scheduler = AgentScheduler(config.history.db_path, self)
-        self.permissions = PermissionEngine()
+        self.permissions = PermissionEngine(db_path=config.history.db_path)
 
         # Web search (Tavily)
         if config.search.enabled and config.search.api_key:
@@ -495,7 +495,7 @@ class AgentCore:
             return True
 
         request_id, future = self.permissions.create_approval_request(tool_name, params)
-        description = self.permissions.format_approval_message(tool_name, params)
+        description = format_approval_message(tool_name, params)
 
         # Send the approval prompt via the channel
         try:

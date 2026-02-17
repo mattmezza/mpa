@@ -149,7 +149,7 @@ class PermissionEngine:
         """
         request_id = uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
-        future: asyncio.Future[bool] = loop.create_future()
+        future = loop.create_future()
         self._pending[request_id] = {
             "future": future,
             "match_key": self._build_match_key(tool_name, params),
@@ -176,32 +176,33 @@ class PendingApproval(TypedDict):
     future: asyncio.Future[bool]
     match_key: str
 
-    def format_approval_message(self, tool_name: str, params: dict) -> str:
-        """Format a human-readable approval prompt for a tool call."""
-        if tool_name == "send_email":
-            to = params.get("to", "?")
-            subject = params.get("subject", "?")
-            return f"Send email to {to}\nSubject: {subject}"
-        if tool_name == "reply_email":
-            account = params.get("account", "?")
-            msg_id = params.get("message_id", "?")
-            return f"Reply to message {msg_id} on {account}"
-        if tool_name == "send_message":
-            channel = params.get("channel", "?")
-            to = params.get("to", "?")
-            text = params.get("text", "")
-            preview = text[:100] + ("…" if len(text) > 100 else "")
-            return f"Send {channel} message to {to}\n{preview}"
-        if tool_name == "create_calendar_event":
-            summary = params.get("summary", "?")
-            start = params.get("start", "?")
-            return f"Create event: {summary}\nAt: {start}"
-        if tool_name == "schedule_task":
-            task = params.get("task", "?")
-            run_at = params.get("run_at", "?")
-            return f"Schedule task at {run_at}\n{task}"
-        if tool_name == "run_command":
-            cmd = params.get("command", "?")
-            purpose = params.get("purpose", "")
-            return f"Run command: {cmd}" + (f"\n({purpose})" if purpose else "")
-        return f"{tool_name}: {params}"
+
+def format_approval_message(tool_name: str, params: dict) -> str:
+    """Format a human-readable approval prompt for a tool call."""
+    if tool_name == "send_email":
+        to = params.get("to", "?")
+        subject = params.get("subject", "?")
+        return f"Send email to {to}\nSubject: {subject}"
+    if tool_name == "reply_email":
+        account = params.get("account", "?")
+        msg_id = params.get("message_id", "?")
+        return f"Reply to message {msg_id} on {account}"
+    if tool_name == "send_message":
+        channel = params.get("channel", "?")
+        to = params.get("to", "?")
+        text = params.get("text", "")
+        preview = text[:100] + ("…" if len(text) > 100 else "")
+        return f"Send {channel} message to {to}\n{preview}"
+    if tool_name == "create_calendar_event":
+        summary = params.get("summary", "?")
+        start = params.get("start", "?")
+        return f"Create event: {summary}\nAt: {start}"
+    if tool_name == "schedule_task":
+        task = params.get("task", "?")
+        run_at = params.get("run_at", "?")
+        return f"Schedule task at {run_at}\n{task}"
+    if tool_name == "run_command":
+        cmd = params.get("command", "?")
+        purpose = params.get("purpose", "")
+        return f"Run command: {cmd}" + (f"\n({purpose})" if purpose else "")
+    return f"{tool_name}: {params}"

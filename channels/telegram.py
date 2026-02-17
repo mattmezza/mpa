@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -28,7 +29,8 @@ class TelegramChannel:
         self.config = config
         self.agent = agent
         self.voice = voice
-        self.app = Application.builder().token(config.bot_token).build()
+        self._last_chat_for_user: dict[int, int] = {}
+        self.app = Application.builder().token(config.bot_token).concurrent_updates(8).build()
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
         self.app.add_handler(CallbackQueryHandler(self._on_approval_callback))
@@ -38,32 +40,39 @@ class TelegramChannel:
     async def _on_text(self, update: Update, context) -> None:
         user = update.effective_user
         message = update.message
+        chat = update.effective_chat
         if not user or not message:
             return
         user_id = user.id
+        if chat:
+            self._last_chat_for_user[user_id] = chat.id
         if not self._is_allowed(user_id):
             return
 
-        response = await self.agent.process(
-            message=message.text or "",
-            channel="telegram",
-            user_id=str(user_id),
+        chat_id = chat.id if chat else user_id
+        asyncio.create_task(
+            self._handle_text(message.text or "", user_id, chat_id),
+            name=f"tg-text-{user_id}",
         )
-        await self._send_response(update, response)
 
     async def _on_voice(self, update: Update, context) -> None:
         """Handle incoming voice messages: download, transcribe, process, reply."""
         user = update.effective_user
         message = update.message
+        chat = update.effective_chat
         if not user or not message:
             return
         user_id = user.id
+        if chat:
+            self._last_chat_for_user[user_id] = chat.id
         if not self._is_allowed(user_id):
             return
 
+        chat_id = chat.id if chat else user_id
         if not self.voice:
-            await message.reply_text(
-                "Voice messages are not supported (voice pipeline not configured)."
+            await self.app.bot.send_message(
+                chat_id=chat_id,
+                text="Voice messages are not supported (voice pipeline not configured).",
             )
             return
 
@@ -71,37 +80,23 @@ class TelegramChannel:
         voice_msg = message.voice or message.audio
         if not voice_msg:
             return
-
-        file = await voice_msg.get_file()
-        audio_bytes = await file.download_as_bytearray()
-
-        # Transcribe via Whisper
-        log.info("Transcribing voice message from user %s (%d bytes)", user_id, len(audio_bytes))
-        transcript = await self.voice.transcribe(bytes(audio_bytes))
-
-        if not transcript.strip():
-            await message.reply_text("(could not transcribe voice message)")
-            return
-
-        log.info("Transcript: %s", transcript[:200])
-
-        # Pass to agent with [voice] prefix so the LLM knows the input medium
-        response = await self.agent.process(
-            message=f"[voice] {transcript}",
-            channel="telegram",
-            user_id=str(user_id),
+        asyncio.create_task(
+            self._handle_voice(voice_msg.file_id, user_id, chat_id),
+            name=f"tg-voice-{user_id}",
         )
-        await self._send_response(update, response)
 
     async def _on_approval_callback(self, update: Update, context) -> None:
         """Handle inline keyboard button presses for permission approvals."""
         query = update.callback_query
         user = update.effective_user
+        chat = update.effective_chat
         if not query or not user:
             return
         await query.answer()  # Acknowledge the button press
 
         user_id = user.id
+        if chat:
+            self._last_chat_for_user[user_id] = chat.id
         if not self._is_allowed(user_id):
             return
 
@@ -130,6 +125,8 @@ class TelegramChannel:
 
     async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
         """Send a permission approval prompt with Approve/Deny inline buttons."""
+        target_id = int(user_id)
+        chat_id = self._last_chat_for_user.get(target_id, target_id)
         keyboard = InlineKeyboardMarkup(
             [
                 [
@@ -142,7 +139,7 @@ class TelegramChannel:
             ]
         )
         await self.app.bot.send_message(
-            chat_id=int(user_id),
+            chat_id=chat_id,
             text=f"Permission request:\n\n{description}",
             reply_markup=keyboard,
         )
@@ -155,15 +152,41 @@ class TelegramChannel:
             return False
         return True
 
-    async def _send_response(self, update: Update, response) -> None:
-        """Send an AgentResponse back — voice if present, otherwise text."""
-        message = update.message
-        if not message:
+    async def _handle_text(self, text: str, user_id: int, chat_id: int) -> None:
+        response = await self.agent.process(
+            message=text,
+            channel="telegram",
+            user_id=str(user_id),
+        )
+        await self._send_response(chat_id, response)
+
+    async def _handle_voice(self, file_id: str, user_id: int, chat_id: int) -> None:
+        file = await self.app.bot.get_file(file_id)
+        audio_bytes = await file.download_as_bytearray()
+
+        # Transcribe via Whisper
+        log.info("Transcribing voice message from user %s (%d bytes)", user_id, len(audio_bytes))
+        transcript = await self.voice.transcribe(bytes(audio_bytes))
+
+        if not transcript.strip():
+            await self.app.bot.send_message(chat_id=chat_id, text="(could not transcribe voice)")
             return
+
+        log.info("Transcript: %s", transcript[:200])
+
+        response = await self.agent.process(
+            message=f"[voice] {transcript}",
+            channel="telegram",
+            user_id=str(user_id),
+        )
+        await self._send_response(chat_id, response)
+
+    async def _send_response(self, chat_id: int, response) -> None:
+        """Send an AgentResponse back — voice if present, otherwise text."""
         if response.voice:
-            await message.reply_voice(voice=response.voice)
+            await self.app.bot.send_voice(chat_id=chat_id, voice=response.voice)
         else:
-            await message.reply_text(response.text)
+            await self.app.bot.send_message(chat_id=chat_id, text=response.text)
 
     async def _finalize_approval_response(
         self, query: CallbackQuery, resolved: bool, label: str
