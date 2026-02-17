@@ -279,6 +279,36 @@ def create_admin_app(
             return RedirectResponse("/setup", status_code=302)
         return _render("dashboard.html")
 
+    @app.get("/admin/skills/new", response_class=HTMLResponse)
+    async def admin_skill_new() -> HTMLResponse:
+        """New skill editor page."""
+        setup_complete = await config_store.is_setup_complete()
+        if not setup_complete:
+            return RedirectResponse("/setup", status_code=302)
+        return _render(
+            "skill_editor.html",
+            skill_name="",
+            skill_content="",
+            is_new=True,
+        )
+
+    @app.get("/admin/skills/{name}", response_class=HTMLResponse)
+    async def admin_skill_editor(name: str) -> HTMLResponse:
+        """Skill editor page."""
+        setup_complete = await config_store.is_setup_complete()
+        if not setup_complete:
+            return RedirectResponse("/setup", status_code=302)
+        store = await _skills_store_from_config(config_store)
+        skill = await store.get_skill(name)
+        if not skill:
+            raise HTTPException(404, f"Skill not found: {name}")
+        return _render(
+            "skill_editor.html",
+            skill_name=skill.get("name", ""),
+            skill_content=skill.get("content", ""),
+            is_new=False,
+        )
+
     @app.get("/", response_class=HTMLResponse)
     async def root_redirect() -> RedirectResponse:
         """Redirect root to setup or admin based on state."""

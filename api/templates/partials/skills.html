@@ -1,12 +1,5 @@
 {# Skills tab partial #}
-<div x-data="{
-  filter: '',
-  editName: '',
-  editContent: '',
-  editing: false,
-  result: '',
-  resultOk: false
-}">
+<div x-data="{ filter: '' }">
   <div class="flex items-center gap-2 mb-4 flex-wrap">
     <button class="btn btn-sm" hx-get="/partials/skills" hx-target="#tab-content" hx-swap="innerHTML">
       Refresh
@@ -31,10 +24,7 @@
           <td class="text-xs break-all">{{ skill.name }}</td>
           <td class="text-xs">{{ skill.summary }}</td>
           <td class="whitespace-nowrap">
-            <button class="btn btn-sm"
-                    @click="editName = {{ skill.name|tojson|forceescape }}; editContent = {{ skill.content|tojson|forceescape }}; editing = true">
-              edit
-            </button>
+            <a class="btn btn-sm" href="/admin/skills/{{ skill.name }}">edit</a>
             <button class="btn-danger btn-sm ml-0.5"
                     hx-post="/skills/delete" hx-target="#tab-content" hx-swap="innerHTML"
                     hx-vals='{"name": {{ skill.name|tojson }} }'
@@ -51,39 +41,7 @@
     </table>
   </div>
 
-  <h3 class="text-xs text-muted uppercase tracking-wider mt-5 mb-2">Add / edit skill</h3>
-  <div class="flex gap-2 items-end flex-wrap">
-    <div class="flex-1 min-w-[150px]">
-      <label class="label">Name</label>
-      <input type="text" class="input-sm" x-model="editName" :readonly="editing" placeholder="himalaya-email">
-    </div>
-    <div class="flex-[2] min-w-[200px]">
-      <label class="label">Content (Markdown)</label>
-      <textarea class="textarea" x-model="editContent" placeholder="# Skill\n\nHow to use it..."></textarea>
-      <div class="hint">Use markdown. First non-empty line becomes summary.</div>
-    </div>
-    <button type="button" class="btn btn-sm"
-            @click="
-              fetch('/skills', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
-                },
-                body: JSON.stringify({name: editName, content: editContent})
-              })
-              .then(r => r.text())
-              .then(html => { resultOk = true; result = 'Saved skill: ' + editName; editName = ''; editContent = ''; editing = false; document.getElementById('tab-content').innerHTML = html; })
-              .catch(e => { resultOk = false; result = e.message; })
-            ">
-      Save
-    </button>
-    <button type="button" class="btn btn-sm" x-show="editing"
-            @click="editName = ''; editContent = ''; editing = false; result = ''">
-      Cancel
-    </button>
+  <div class="mt-5 flex items-center gap-2">
+    <a class="btn btn-sm" href="/admin/skills/new">Create new skill</a>
   </div>
-  <template x-if="result">
-    <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
-  </template>
 </div>

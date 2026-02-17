@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{% if is_new %}New Skill{% else %}Edit Skill{% endif %} — Agent Admin{% endblock %}
+
+{% block body %}
+<div>
+  <div class="flex items-center justify-between gap-2 mb-4 flex-wrap">
+    <div>
+      <h1 class="text-xl text-accent">{% if is_new %}New Skill{% else %}Edit Skill{% endif %}</h1>
+      <p class="text-muted text-xs mt-1">Skills teach the agent how to use tools safely and correctly.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <a class="btn btn-sm" href="/admin?tab=skills">Back to Skills</a>
+    </div>
+  </div>
+
+  <div class="flex gap-4 flex-wrap">
+    <div class="flex-[2] min-w-[260px]">
+      <div class="card">
+        <div class="mb-3">
+          <label class="label">Skill name</label>
+          <input id="skill-name" class="input" value="{{ skill_name }}" {% if not is_new %}readonly{% endif %} placeholder="himalaya-email">
+        </div>
+        <div class="mb-3">
+          <label class="label">Markdown content</label>
+          <textarea id="skill-content" class="textarea" style="min-height: 420px;" placeholder="# Skill title
+
+## Overview
+Describe what this skill enables.
+
+## Commands
+Include executable CLI examples.
+
+## Notes
+Edge cases, pitfalls, safety constraints.">{{ skill_content }}</textarea>
+          <div class="hint">First non-empty line becomes the summary shown in the list.</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="btn btn-sm" type="button" onclick="saveSkill()">Save</button>
+        </div>
+        <div id="save-result" class="mt-2 text-xs"></div>
+      </div>
+    </div>
+
+    <div class="flex-1 min-w-[220px]">
+      <div class="card">
+        <h3 class="text-xs text-muted uppercase tracking-wider mb-2">What a skill is</h3>
+        <p class="text-xs text-muted mb-3">A skill is a short, structured guide that teaches the agent how to use a tool or workflow. It should be concrete, runnable, and safe.</p>
+
+        <h3 class="text-xs text-muted uppercase tracking-wider mb-2">Format guidelines</h3>
+        <ul class="text-xs text-muted list-disc ml-5 space-y-1">
+          <li>Start with a short title line (used as summary).</li>
+          <li>Use clear sections (Overview, Commands, Notes).</li>
+          <li>Prefer bullet lists for rules and constraints.</li>
+          <li>Include example CLI commands in fenced code blocks.</li>
+          <li>Show safe defaults and mention required flags.</li>
+        </ul>
+
+        <h3 class="text-xs text-muted uppercase tracking-wider mt-4 mb-2">What works best</h3>
+        <ul class="text-xs text-muted list-disc ml-5 space-y-1">
+          <li>Concrete examples with realistic parameters.</li>
+          <li>Explicit input/output expectations.</li>
+          <li>Edge cases and common mistakes to avoid.</li>
+          <li>Use the exact command syntax you expect.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function saveSkill() {
+    const name = document.getElementById('skill-name').value.trim();
+    const content = document.getElementById('skill-content').value.trim();
+    const result = document.getElementById('save-result');
+
+    if (!name || !content) {
+      result.textContent = 'Name and content are required.';
+      result.className = 'alert-error';
+      return;
+    }
+
+    fetch('/skills', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      },
+      body: JSON.stringify({name: name, content: content})
+    })
+    .then(r => r.text())
+    .then(() => {
+      result.textContent = 'Saved.';
+      result.className = 'alert-success';
+    })
+    .catch(e => {
+      result.textContent = e.message;
+      result.className = 'alert-error';
+    });
+  }
+</script>
+{% endblock %}
