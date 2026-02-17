@@ -1,5 +1,15 @@
 {# Status bar partial — loaded via HTMX into #status-bar #}
 {% set status_label = status or (running and 'RUNNING' or 'STOPPED') %}
+{% set status_message = 'Your personal assistant bot is up and running.' %}
+{% if status_label == 'STARTING' %}
+  {% set status_message = 'Your personal assistant bot is starting.' %}
+{% elif status_label == 'RESTARTING' %}
+  {% set status_message = 'Your personal assistant bot is restarting.' %}
+{% elif status_label == 'STOPPING' %}
+  {% set status_message = 'Your personal assistant bot is stopping.' %}
+{% elif status_label == 'STOPPED' %}
+  {% set status_message = 'Your personal assistant bot is stopped.' %}
+{% endif %}
 {% if status_label == 'RUNNING' %}
 <button class="badge-ok" type="button" onclick="openAgentModal()" style="cursor: pointer;">{{ status_label }}</button>
 {% elif status_label in ['STARTING', 'RESTARTING'] %}
@@ -9,4 +19,4 @@
 {% else %}
 <button class="badge-off" type="button" onclick="openAgentModal()" style="cursor: pointer;">{{ status_label }}</button>
 {% endif %}
-<span class="text-muted text-xs">Channels: {{ channels | join(', ') or 'none' }} | Jobs: {{ scheduler_jobs }}</span>
+<span class="text-muted text-xs">{{ status_message }}</span>
