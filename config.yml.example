@@ -1,0 +1,37 @@
+agent:
+  name: "Jarvis"
+  owner_name: "Matteo"
+  anthropic_api_key: "${ANTHROPIC_API_KEY}"
+  model: "claude-sonnet-4-5-20250514"
+  timezone: "Europe/Zurich"
+  skills_dir: "skills/"
+
+channels:
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_user_ids: []
+  whatsapp:
+    enabled: false
+    bridge_url: "http://localhost:3001"
+    allowed_numbers: []
+
+calendar:
+  providers: []
+
+voice:
+  stt_model: "base"
+  tts_voice: "en-US-GuyNeural"
+  tts_enabled: true
+
+scheduler:
+  jobs:
+    - id: "morning_briefing"
+      cron: "0 7 * * *"
+      task: "Give me a morning briefing: weather in Zurich, today's calendar, unread emails summary"
+      channel: "telegram"
+
+admin:
+  enabled: true
+  port: 8000
+  api_key: "${ADMIN_API_KEY}"

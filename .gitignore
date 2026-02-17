@@ -1,1 +1,31 @@
 .tmux-session
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# venv
+.venv/
+
+# uv
+uv.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment & secrets
+.env
+config.yml
+
+# Data (runtime state, DB, models)
+data/
+
+# pytest / ruff
+.pytest_cache/
+.ruff_cache/
