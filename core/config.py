@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -122,9 +123,11 @@ class Config(BaseModel):
 def load_config(path: str | Path = "config.yml") -> Config:
     """Load and validate config from a YAML file.
 
-    Environment variables referenced as ${VAR_NAME} in the YAML are
-    resolved before validation.
+    Loads .env file first, then resolves ${VAR_NAME} references in the
+    YAML against environment variables.
     """
+    load_dotenv()
+
     path = Path(path)
     if not path.exists():
         return Config()
