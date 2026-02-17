@@ -2,7 +2,7 @@
 <div class="space-y-6">
   {# Basic identity fields #}
   <div class="card" x-data="{
-    agentName: {{ agent_name|default('', true)|tojson }},
+    agentName: {{ agent_name|default('', true)|tojson|forceescape }},
     idResult: '',
     idOk: false
   }">

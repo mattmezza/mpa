@@ -2,8 +2,8 @@
 <div class="space-y-6">
   {# Basic owner fields #}
   <div class="card" x-data="{
-    ownerName: {{ owner_name|default('', true)|tojson }},
-    timezone: {{ timezone|default('', true)|tojson }},
+    ownerName: {{ owner_name|default('', true)|tojson|forceescape }},
+    timezone: {{ timezone|default('', true)|tojson|forceescape }},
     result: '',
     ok: false
   }">
