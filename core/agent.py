@@ -567,6 +567,10 @@ class AgentCore:
         skills_index = await self.skills.get_index_block()
         character = cfg.character
         personalia = cfg.personalia
+        you_personalia = self.config.you.personalia
+        about_user_block = (
+            f"<about_user>\n{you_personalia}\n</about_user>\n\n" if you_personalia.strip() else ""
+        )
         memories = await self.memory.format_for_prompt()
 
         prompt = f"""You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.
@@ -581,7 +585,7 @@ Today is {datetime.now().strftime("%A, %B %d, %Y")}. Timezone: {cfg.timezone}.
 {character}
 </character>
 
-When you need to perform an action, use the `run_command` tool to execute CLI commands.
+{about_user_block}When you need to perform an action, use the `run_command` tool to execute CLI commands.
 Always use the skill documentation to construct the correct command.
 If you don't have the skill content in context, call `load_skill` with the skill name to load it.
 Parse JSON output when available (himalaya supports -o json, sqlite3 supports -json).

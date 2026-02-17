@@ -354,6 +354,7 @@ def create_admin_app(
     _SCHEDULER_PREFIX = "scheduler."
     _CALENDAR_PREFIX = "calendar."
     _YOU_PREFIX = "you."
+    _VOICE_PREFIX = "voice."
 
     def _is_managed_key(key: str) -> bool:
         """Return True if this key is managed by a dedicated tab (not Config)."""
@@ -366,6 +367,7 @@ def create_admin_app(
             _SCHEDULER_PREFIX,
             _CALENDAR_PREFIX,
             _YOU_PREFIX,
+            _VOICE_PREFIX,
         ):
             if key.startswith(prefix):
                 return True
@@ -485,15 +487,17 @@ def create_admin_app(
         character = await config_store.get("agent.character") or ""
         personalia = await config_store.get("agent.personalia") or ""
         agent_name = await config_store.get("agent.name") or ""
-        owner_name = await config_store.get("agent.owner_name") or ""
-        timezone = await config_store.get("agent.timezone") or ""
+        stt_model = await config_store.get("voice.stt_model") or "base"
+        tts_voice = await config_store.get("voice.tts_voice") or "en-US-AvaNeural"
+        tts_enabled = await config_store.get("voice.tts_enabled") or "true"
         return _render_partial(
             "partials/identity.html",
             character=character,
             personalia=personalia,
             agent_name=agent_name,
-            owner_name=owner_name,
-            timezone=timezone,
+            stt_model=stt_model,
+            tts_voice=tts_voice,
+            tts_enabled=tts_enabled,
         )
 
     @app.get("/partials/you", dependencies=[Depends(auth)])

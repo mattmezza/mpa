@@ -132,6 +132,10 @@ class SearchConfig(BaseModel):
     max_results: int = 5
 
 
+class YouConfig(BaseModel):
+    personalia: str = ""
+
+
 class Config(BaseModel):
     agent: AgentConfig = AgentConfig()
     channels: ChannelsConfig = ChannelsConfig()
@@ -142,6 +146,7 @@ class Config(BaseModel):
     history: HistoryConfig = HistoryConfig()
     memory: MemoryConfig = MemoryConfig()
     search: SearchConfig = SearchConfig()
+    you: YouConfig = YouConfig()
 
 
 def load_config(path: str | Path = "config.yml") -> Config:

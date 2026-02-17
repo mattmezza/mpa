@@ -3,30 +3,17 @@
   {# Basic identity fields #}
   <div class="card" x-data="{
     agentName: {{ agent_name|default('', true)|tojson }},
-    ownerName: {{ owner_name|default('', true)|tojson }},
-    timezone: {{ timezone|default('', true)|tojson }},
     idResult: '',
     idOk: false
   }">
     <h2 class="text-base mb-1">Identity</h2>
-    <p class="text-muted text-xs mb-3">Basic agent identity — name, owner, and timezone.</p>
+    <p class="text-muted text-xs mb-3">The agent's name — how it introduces itself.</p>
 
     <div class="space-y-3">
       <div>
         <label class="label">Agent name</label>
         <input type="text" class="input-sm" style="max-width:300px"
                x-model="agentName" placeholder="Clio">
-      </div>
-      <div>
-        <label class="label">Owner name</label>
-        <input type="text" class="input-sm" style="max-width:300px"
-               x-model="ownerName" placeholder="Matteo">
-      </div>
-      <div>
-        <label class="label">Timezone</label>
-        <input type="text" class="input-sm" style="max-width:300px"
-               x-model="timezone" placeholder="Europe/Zurich">
-        <p class="text-muted text-xs mt-1">IANA timezone (e.g. Europe/Zurich, America/New_York, UTC).</p>
       </div>
     </div>
 
@@ -39,7 +26,7 @@
                     'Content-Type': 'application/json',
                     'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
                   },
-                  body: JSON.stringify({values: {'agent.name': agentName, 'agent.owner_name': ownerName, 'agent.timezone': timezone}})
+                  body: JSON.stringify({values: {'agent.name': agentName}})
                 })
                 .then(r => { idOk = r.ok; return r.json(); })
                 .then(d => { idResult = idOk ? 'Identity saved' : (d.detail || 'Error'); })
@@ -120,6 +107,73 @@
     </div>
     <template x-if="persResult">
       <div :class="persOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="persResult"></div>
+    </template>
+  </div>
+
+  {# Voice #}
+  <div class="card" x-data="{
+    ttsEnabled: {{ tts_enabled|default('true', true)|tojson|forceescape }},
+    sttModel: {{ stt_model|default('base', true)|tojson|forceescape }},
+    ttsVoice: {{ tts_voice|default('en-US-AvaNeural', true)|tojson|forceescape }},
+    voiceResult: '',
+    voiceOk: false
+  }">
+    <h2 class="text-base mb-1">Voice</h2>
+    <p class="text-muted text-xs mb-3">Configure speech-to-text (STT) and text-to-speech (TTS) used for voice messages.</p>
+
+    <div class="space-y-3">
+      <div class="flex items-center gap-2">
+        <label class="label mb-0">Enable TTS replies</label>
+        <input type="checkbox" x-model="ttsEnabled"
+               :checked="ttsEnabled === 'true' || ttsEnabled === true">
+      </div>
+
+      <div>
+        <label class="label">STT model</label>
+        <select class="input-sm" style="max-width:240px" x-model="sttModel">
+          <option value="base">Whisper Base</option>
+          <option value="small">Whisper Small</option>
+          <option value="medium">Whisper Medium</option>
+          <option value="large">Whisper Large</option>
+        </select>
+        <p class="text-muted text-xs mt-1">Larger models are more accurate but slower.</p>
+      </div>
+
+      <div>
+        <label class="label">TTS voice</label>
+        <input type="text" class="input-sm" style="max-width:260px" x-model="ttsVoice" placeholder="en-US-AvaNeural">
+        <p class="text-muted text-xs mt-1">Use Edge TTS voice names. Example: en-US-AvaNeural.</p>
+      </div>
+    </div>
+
+    <div class="flex justify-end mt-3">
+      <button class="btn-primary btn-sm"
+              @click="
+                const vals = {
+                  'voice.tts_enabled': String(ttsEnabled === true || ttsEnabled === 'true'),
+                  'voice.stt_model': sttModel,
+                  'voice.tts_voice': ttsVoice
+                };
+                fetch('/config', {
+                  method: 'PATCH',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+                  },
+                  body: JSON.stringify({values: vals})
+                })
+                .then(r => { voiceOk = r.ok; return r.json(); })
+                .then(d => {
+                  voiceResult = voiceOk ? 'Voice settings saved' : (d.detail || 'Error');
+                  if (voiceOk && window.showToast) { window.showToast('Voice settings saved'); }
+                })
+                .catch(e => { voiceOk = false; voiceResult = e.message; })
+              ">
+        Save voice
+      </button>
+    </div>
+    <template x-if="voiceResult">
+      <div :class="voiceOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="voiceResult"></div>
     </template>
   </div>
 </div>

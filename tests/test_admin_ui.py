@@ -203,12 +203,58 @@ class TestPartialRoutes:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
 
+    def test_you_partial(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        store._data["agent.owner_name"] = "Matteo"
+        store._data["agent.timezone"] = "Europe/Zurich"
+        store._data["you.personalia"] = "Likes espresso"
+        agent_state = AgentState(agent=_AgentStub())
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.get("/partials/you", headers=AUTH)
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Matteo" in resp.text
+        assert "Europe/Zurich" in resp.text
+        assert "Likes espresso" in resp.text
+
+    def test_you_partial_empty(self):
+        client = _client(setup_complete=True)
+        resp = client.get("/partials/you", headers=AUTH)
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "About you" in resp.text
+
+    def test_calendars_partial(self):
+        import json as _json
+
+        store = _ConfigStoreStub(setup_complete=True)
+        store._data["calendar.providers"] = _json.dumps(
+            [{"name": "work", "url": "https://cal.example.com", "username": "u", "password": "p"}]
+        )
+        agent_state = AgentState(agent=_AgentStub())
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.get("/partials/calendars", headers=AUTH)
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
+    def test_calendars_partial_empty(self):
+        client = _client(setup_complete=True)
+        resp = client.get("/partials/calendars", headers=AUTH)
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
     def test_partials_require_auth(self):
         client = _client(setup_complete=True)
         for path in [
             "/partials/status",
             "/partials/config",
             "/partials/identity",
+            "/partials/you",
+            "/partials/calendars",
             "/partials/permissions",
             "/partials/admin",
             "/partials/logs",
@@ -380,6 +426,85 @@ class TestConfigAPI:
         )
         assert resp.status_code == 200
         assert store._data.get("agent.personalia") == "# New personalia"
+
+    def test_get_you_personalia(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        store._data["you.personalia"] = "# About the user"
+        agent_state = AgentState(agent=_AgentStub())
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.get("/config/you-personalia", headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "# About the user"
+
+    def test_get_you_personalia_empty(self):
+        client = _client(setup_complete=True)
+        resp = client.get("/config/you-personalia", headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.json()["content"] == ""
+
+    def test_save_you_personalia(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        agent_state = AgentState(agent=_AgentStub())
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/config/you-personalia",
+            json={"content": "Loves hiking and coffee"},
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["updated"] == "you.personalia"
+        assert store._data.get("you.personalia") == "Loves hiking and coffee"
+
+    def test_save_calendar_providers(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        agent_state = AgentState(agent=_AgentStub())
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/calendar/providers",
+            json={
+                "providers": [
+                    {
+                        "name": "google",
+                        "url": "https://cal.example.com",
+                        "username": "user@gmail.com",
+                        "password": "app-pass",
+                    }
+                ]
+            },
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        assert "calendar.providers" in store._data
+
+    def test_save_calendar_providers_filters_empty(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        agent_state = AgentState(agent=_AgentStub())
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/calendar/providers",
+            json={
+                "providers": [
+                    {"name": "", "url": "", "username": "", "password": ""},
+                    {"name": "keep", "url": "https://x.com", "username": "u", "password": "p"},
+                ]
+            },
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        import json as _json
+
+        saved = _json.loads(store._data["calendar.providers"])
+        assert len(saved) == 1
+        assert saved[0]["name"] == "keep"
 
 
 # ---------------------------------------------------------------------------
