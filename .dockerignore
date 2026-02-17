@@ -1,0 +1,11 @@
+.venv/
+.git/
+.gitignore
+.env
+.env.example
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+data/
+*.md
+.tmux-session

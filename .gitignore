@@ -11,7 +11,7 @@ build/
 .venv/
 
 # uv
-uv.lock
+# uv.lock is tracked — Docker needs it to build
 
 # IDE
 .idea/

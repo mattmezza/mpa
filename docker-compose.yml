@@ -1,0 +1,12 @@
+services:
+  agent:
+    build: .
+    container_name: mpa
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config.yml:/app/config.yml:ro
+      - ./skills:/app/skills:ro
+    env_file: .env
