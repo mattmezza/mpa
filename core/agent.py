@@ -266,6 +266,15 @@ class AgentCore:
         await self.history.add_turn(channel, user_id, "user", message)
         await self.history.add_turn(channel, user_id, "assistant", final_text)
 
+        # Automatic memory extraction (fire-and-forget, non-blocking)
+        # Skip for system-channel messages (scheduled tasks) to avoid
+        # the agent remembering its own briefing output.
+        if channel != "system":
+            asyncio.create_task(
+                self._extract_memories(message, final_text),
+                name=f"memory-extract-{user_id}",
+            )
+
         return AgentResponse(text=final_text, voice=voice_bytes)
 
     async def _execute_tool(self, tool_call, channel: str, user_id: str) -> dict:
@@ -461,6 +470,26 @@ class AgentCore:
             log.info("Approval request %s timed out", request_id)
             self.permissions._pending.pop(request_id, None)
             return False
+
+    async def _extract_memories(self, user_msg: str, agent_msg: str) -> None:
+        """Run automatic memory extraction in the background.
+
+        Uses a cheap/fast model to identify facts worth remembering
+        from the conversation turn, then stores them in the memory DB.
+        Exceptions are logged and swallowed — this must never crash the
+        main agent loop.
+        """
+        try:
+            stored = await self.memory.extract_memories(
+                llm=self.llm,
+                model=self.config.memory.extraction_model,
+                user_msg=user_msg,
+                agent_msg=agent_msg,
+            )
+            if stored:
+                log.info("Background memory extraction stored %d memories", stored)
+        except Exception:
+            log.exception("Background memory extraction failed")
 
     async def _build_system_prompt(self) -> str:
         cfg = self.config.agent

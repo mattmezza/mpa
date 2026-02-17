@@ -61,3 +61,8 @@ admin:
 history:
   db_path: "data/agent.db"
   max_turns: 20
+
+memory:
+  db_path: "data/memory.db"
+  long_term_limit: 50
+  extraction_model: "claude-haiku-4-5"  # cheap model for post-turn memory extraction

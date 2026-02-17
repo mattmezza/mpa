@@ -121,6 +121,7 @@ class HistoryConfig(BaseModel):
 class MemoryConfig(BaseModel):
     db_path: str = "data/memory.db"
     long_term_limit: int = 50
+    extraction_model: str = "claude-haiku-4-5"
 
 
 class Config(BaseModel):

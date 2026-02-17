@@ -1,24 +1,63 @@
-"""Memory store — initializes schema and queries memories for prompt injection."""
+"""Memory store — initializes schema, queries memories, and extracts new ones."""
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
+from anthropic import AsyncAnthropic
 
 log = logging.getLogger(__name__)
 
 _SCHEMA_FILE = Path(__file__).resolve().parent.parent / "schema" / "memory.sql"
+
+_EXTRACTION_PROMPT = """\
+Given this conversation exchange, identify any facts worth remembering.
+
+User: {user_msg}
+Assistant: {agent_msg}
+
+For each fact, classify it:
+- LONG_TERM: preferences, relationships, routines, biographical facts — things that stay true
+- SHORT_TERM: situational context, temporary states, time-bound info — things that expire
+
+Return a JSON array. Each element must be one of:
+  {{"tier": "LONG_TERM", "category": "<category>", \
+"subject": "<who/what>", "content": "<the fact>"}}
+  {{"tier": "SHORT_TERM", "content": "<the fact>", \
+"context": "<why stored>", "ttl_hours": <int>}}
+
+Categories: preference, relationship, fact, routine, work, health, travel
+
+Rules:
+- Only extract genuinely useful facts. Skip greetings, filler,
+  and anything already obvious from context.
+- Use lowercase for subject (e.g. "matteo", "simge").
+- For LONG_TERM, always set category and subject.
+- For SHORT_TERM, you MUST set ttl_hours by reasoning about how long
+  the fact stays relevant. Guidelines:
+  - 2-4h: trivial, task-at-hand context ("looking at flights now")
+  - 8-12h: day-scoped situations ("working from home today")
+  - 24-48h: near-term plans ("dinner with Marco tomorrow")
+  - 72-168h: week-scoped context ("Simge visiting parents this week")
+  - If the user says when to forget ("remind me tomorrow", "for the
+    next two days"), use that as the TTL.
+- If nothing is worth remembering, return an empty array: []
+
+Respond with ONLY the JSON array, no other text."""
 
 
 class MemoryStore:
     """Two-tier memory system backed by SQLite.
 
     The LLM reads and writes memories via the sqlite3 CLI (taught by
-    skills/memory.md).  This class handles schema initialisation and
+    skills/memory.md).  This class handles schema initialisation,
     provides async helpers to query both tiers for injection into the
-    system prompt.
+    system prompt, and runs automatic memory extraction after each
+    conversation turn.
     """
 
     def __init__(self, db_path: str = "data/memory.db", long_term_limit: int = 50):
@@ -78,3 +117,121 @@ class MemoryStore:
             sections.append("## Current context (short-term)\n" + "\n".join(lines))
 
         return "\n\n".join(sections) if sections else ""
+
+    # -- Automatic memory extraction --
+
+    async def extract_memories(
+        self, llm: AsyncAnthropic, model: str, user_msg: str, agent_msg: str
+    ) -> int:
+        """Extract facts from a conversation turn and store them.
+
+        Makes a secondary LLM call (cheap/fast model) to identify facts
+        worth remembering, then writes them to the appropriate tier.
+
+        Returns the number of memories stored.
+        """
+        prompt = _EXTRACTION_PROMPT.format(user_msg=user_msg, agent_msg=agent_msg)
+
+        try:
+            response = await llm.messages.create(
+                model=model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception:
+            log.exception("Memory extraction LLM call failed")
+            return 0
+
+        raw = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                raw = block.text.strip()
+                break
+        try:
+            memories = json.loads(raw)
+        except json.JSONDecodeError:
+            log.warning("Memory extraction returned non-JSON: %s", raw[:200])
+            return 0
+
+        if not isinstance(memories, list):
+            log.warning("Memory extraction returned non-list: %s", type(memories).__name__)
+            return 0
+
+        stored = 0
+        for mem in memories:
+            try:
+                tier = mem.get("tier", "").upper()
+                if tier == "LONG_TERM":
+                    stored += await self._store_long_term(mem)
+                elif tier == "SHORT_TERM":
+                    stored += await self._store_short_term(mem)
+                else:
+                    log.warning("Unknown memory tier: %s", tier)
+            except Exception:
+                log.exception("Failed to store extracted memory: %s", mem)
+
+        if stored:
+            log.info("Extracted and stored %d memories", stored)
+        return stored
+
+    async def _store_long_term(self, mem: dict) -> int:
+        """Store a long-term memory, skipping if a similar one exists."""
+        category = mem.get("category", "fact")
+        subject = mem.get("subject", "")
+        content = mem.get("content", "")
+        if not content:
+            return 0
+
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            # Check for duplicates: same subject + overlapping content
+            cursor = await db.execute(
+                "SELECT id, content FROM long_term WHERE subject = ?",
+                (subject,),
+            )
+            existing = await cursor.fetchall()
+            content_lower = content.lower()
+            for row in existing:
+                if content_lower in row[1].lower() or row[1].lower() in content_lower:
+                    # Update the existing memory if the new content is more detailed
+                    if len(content) > len(row[1]):
+                        await db.execute(
+                            "UPDATE long_term SET content = ?, updated_at = datetime('now') "
+                            "WHERE id = ?",
+                            (content, row[0]),
+                        )
+                        await db.commit()
+                        log.debug("Updated long-term memory %d: %s", row[0], content[:80])
+                    return 0
+
+            await db.execute(
+                "INSERT INTO long_term (category, subject, content, source, confidence) "
+                "VALUES (?, ?, ?, 'conversation', 'stated')",
+                (category, subject, content),
+            )
+            await db.commit()
+            log.debug("Stored long-term memory: [%s] %s: %s", category, subject, content[:80])
+            return 1
+
+    async def _store_short_term(self, mem: dict) -> int:
+        """Store a short-term memory with a LLM-determined TTL."""
+        content = mem.get("content", "")
+        context = mem.get("context", "")
+        ttl_hours = mem.get("ttl_hours")
+        if not content:
+            return 0
+        if not ttl_hours or not isinstance(ttl_hours, int | float):
+            log.warning("Short-term memory missing ttl_hours, skipping: %s", content[:80])
+            return 0
+
+        expires_at = datetime.now(tz=UTC) + timedelta(hours=ttl_hours)
+
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO short_term (content, context, expires_at) VALUES (?, ?, ?)",
+                (content, context, expires_at.isoformat()),
+            )
+            await db.commit()
+            log.debug("Stored short-term memory (TTL %dh): %s", ttl_hours, content[:80])
+            return 1
