@@ -38,6 +38,11 @@ async def _start_agent(config_store: ConfigStore):
 
     agent = AgentCore(config)
 
+    # Ensure scheduler jobs can resolve the current agent instance
+    from core.scheduler import set_agent_context
+
+    set_agent_context(agent)
+
     # -- Voice pipeline --
     voice: VoicePipeline | None = None
     if config.voice.tts_enabled:
@@ -61,7 +66,9 @@ async def _start_agent(config_store: ConfigStore):
 
         await tg.app.initialize()
         await tg.app.start()
-        await tg.app.updater.start_polling()
+        updater = tg.app.updater
+        if updater is not None:
+            await updater.start_polling()
 
     # -- Scheduler --
     if config.scheduler.jobs:
@@ -76,6 +83,10 @@ async def _start_agent(config_store: ConfigStore):
 async def _stop_agent(agent) -> None:
     """Gracefully shut down the agent."""
     agent.scheduler.shutdown()
+
+    from core.scheduler import set_agent_context
+
+    set_agent_context(None)
 
     if "telegram" in agent.channels:
         tg = agent.channels["telegram"]
