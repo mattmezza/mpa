@@ -5,6 +5,7 @@ WORKDIR /app
 # System deps (ffmpeg for voice pipeline, curl for health checks, sqlite3 for memory)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg curl ca-certificates jq sqlite3 \
+    bash tar gzip xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Himalaya CLI (pre-built Rust binary for email management)
