@@ -411,3 +411,125 @@ class TestLogsAPI:
         data = resp.json()
         assert "count" in data
         assert "lines" in data
+
+
+# ---------------------------------------------------------------------------
+# Delete endpoints (form-encoded and JSON)
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteEndpoints:
+    def test_config_delete_form_encoded(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        store._data["test.key"] = "value"
+        agent_state = AgentState(agent=_AgentStub())
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/config/delete",
+            data={"key": "test.key"},
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
+    def test_config_delete_json(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        store._data["test.key"] = "value"
+        agent_state = AgentState(agent=_AgentStub())
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/config/delete",
+            json={"key": "test.key"},
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
+    def test_config_delete_missing_key_returns_400(self):
+        client = _client(setup_complete=True)
+        resp = client.post(
+            "/config/delete",
+            data={"key": ""},
+            headers=AUTH,
+        )
+        assert resp.status_code == 400
+
+    def test_permissions_delete_form_encoded(self):
+        agent = _AgentStub()
+        agent.permissions.rules["test:*"] = "ALWAYS"
+        client = _client(setup_complete=True, agent=agent)
+
+        resp = client.post(
+            "/permissions/delete",
+            data={"pattern": "test:*"},
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "test:*" not in agent.permissions.rules
+
+
+# ---------------------------------------------------------------------------
+# Login validation
+# ---------------------------------------------------------------------------
+
+
+class TestLoginValidation:
+    def test_login_page_validates_against_authenticated_endpoint(self):
+        """Login page should use /agent/status (auth-protected), not /health."""
+        client = _client(setup_complete=True)
+        resp = client.get("/login")
+        assert resp.status_code == 200
+        # Template should reference /agent/status, not /health
+        assert "/agent/status" in resp.text
+        assert "/health" not in resp.text or "health" in resp.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# Wizard progress OOB updates
+# ---------------------------------------------------------------------------
+
+
+class TestWizardProgress:
+    def test_setup_step_includes_progress_oob(self):
+        """Wizard step responses should include OOB progress dots update."""
+        client = _client(setup_complete=False, step="welcome")
+        resp = client.post(
+            "/setup/step",
+            json={"step": "llm", "values": {}},
+        )
+        assert resp.status_code == 200
+        assert "wizard-progress" in resp.text
+        assert "hx-swap-oob" in resp.text
+
+    def test_identity_step_includes_progress_oob(self):
+        store = _ConfigStoreStub(setup_complete=False, step="identity")
+        agent_state = AgentState(agent=None)
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/setup/step/identity",
+            data={"agent_name": "Ada", "owner_name": "Alice", "timezone": "UTC"},
+        )
+        assert resp.status_code == 200
+        assert "wizard-progress" in resp.text
+        assert "hx-swap-oob" in resp.text
+
+    def test_calendar_step_includes_progress_oob(self):
+        store = _ConfigStoreStub(setup_complete=False, step="calendar")
+        agent_state = AgentState(agent=None)
+        app, _ = create_admin_app(agent_state, store)
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/setup/step/calendar",
+            data={"cal_name": "", "cal_url": ""},
+        )
+        assert resp.status_code == 200
+        assert "wizard-progress" in resp.text
+        assert "hx-swap-oob" in resp.text

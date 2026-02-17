@@ -7,7 +7,7 @@
          clearInterval(interval);
        }
      })"
-     @htmx:before-cleanup.window="clearInterval(interval)">
+     x-effect="() => { return () => clearInterval(interval); }">
 
   <div class="flex items-center gap-3 mb-4">
     <button class="btn btn-sm" hx-get="/partials/logs-content" hx-target="#log-content" hx-swap="innerHTML">

@@ -1,0 +1,12 @@
+{# Wizard progress dots — swapped OOB via hx-swap-oob="innerHTML" #}
+<div id="wizard-progress" hx-swap-oob="innerHTML" class="flex gap-1 mb-6">
+  {% for s in steps %}
+  {% set idx = loop.index0 %}
+  {% set current_idx = steps.index(current_step) %}
+  <div class="w-2.5 h-2.5 rounded-full transition-colors duration-300
+    {% if idx < current_idx %}bg-accent
+    {% elif idx == current_idx %}bg-warn
+    {% else %}bg-border{% endif %}"
+    title="{{ s }}"></div>
+  {% endfor %}
+</div>

@@ -29,16 +29,16 @@
       </thead>
       <tbody>
         {% for key, value in config_items %}
-        <tr x-show="!filter || '{{ key }}'.toLowerCase().includes(filter.toLowerCase()) || '{{ value }}'.toLowerCase().includes(filter.toLowerCase())">
+        <tr x-show="!filter || {{ key|tojson }}.toLowerCase().includes(filter.toLowerCase()) || {{ value|tojson }}.toLowerCase().includes(filter.toLowerCase())">
           <td class="text-xs break-all">{{ key }}</td>
           <td class="text-xs break-all">{{ value }}</td>
           <td class="whitespace-nowrap">
-            <button class="btn btn-sm" @click="editKey = '{{ key }}'; editVal = '{{ value }}'; editing = true">
+            <button class="btn btn-sm" @click="editKey = {{ key|tojson }}; editVal = {{ value|tojson }}; editing = true">
               edit
             </button>
             <button class="btn-danger btn-sm ml-0.5"
                     hx-post="/config/delete" hx-target="#tab-content" hx-swap="innerHTML"
-                    hx-vals='{"key": "{{ key }}"}'
+                    hx-vals='{"key": {{ key|tojson }} }'
                     hx-confirm="Delete config key &quot;{{ key }}&quot;?">
               x
             </button>
@@ -51,42 +51,35 @@
 
   {# Add / edit config #}
   <h3 class="text-xs text-muted uppercase tracking-wider mt-5 mb-2">Add / edit config</h3>
-  <form hx-patch="/config" hx-target="#tab-content" hx-swap="innerHTML"
-        @htmx:before-request="
-          $event.detail.headers['Content-Type'] = 'application/json';
-          $event.detail.xhr.send(JSON.stringify({values: {[editKey]: editVal}}));
-          $event.preventDefault();
-        ">
-    <div class="flex gap-2 items-end flex-wrap">
-      <div class="flex-1 min-w-[150px]">
-        <label class="label">Key</label>
-        <input type="text" class="input-sm" x-model="editKey" :readonly="editing" placeholder="agent.name">
-      </div>
-      <div class="flex-[2] min-w-[200px]">
-        <label class="label">Value</label>
-        <input type="text" class="input-sm" x-model="editVal" placeholder="Jarvis">
-      </div>
-      <button type="button" class="btn btn-sm"
-              @click="
-                fetch('/config', {
-                  method: 'PATCH',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
-                  },
-                  body: JSON.stringify({values: {[editKey]: editVal}})
-                })
-                .then(r => r.json())
-                .then(d => { resultOk = true; result = 'Updated: ' + (d.updated || []).join(', '); editKey = ''; editVal = ''; editing = false; htmx.ajax('GET', '/partials/config', {target: '#tab-content', swap: 'innerHTML'}); })
-                .catch(e => { resultOk = false; result = e.message; })
-              ">
-        Save
-      </button>
-      <button type="button" class="btn btn-sm" x-show="editing" @click="editKey = ''; editVal = ''; editing = false; result = ''">
-        Cancel
-      </button>
+  <div class="flex gap-2 items-end flex-wrap">
+    <div class="flex-1 min-w-[150px]">
+      <label class="label">Key</label>
+      <input type="text" class="input-sm" x-model="editKey" :readonly="editing" placeholder="agent.name">
     </div>
-  </form>
+    <div class="flex-[2] min-w-[200px]">
+      <label class="label">Value</label>
+      <input type="text" class="input-sm" x-model="editVal" placeholder="Jarvis">
+    </div>
+    <button type="button" class="btn btn-sm"
+            @click="
+              fetch('/config', {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+                },
+                body: JSON.stringify({values: {[editKey]: editVal}})
+              })
+              .then(r => r.json())
+              .then(d => { resultOk = true; result = 'Updated: ' + (d.updated || []).join(', '); editKey = ''; editVal = ''; editing = false; htmx.ajax('GET', '/partials/config', {target: '#tab-content', swap: 'innerHTML'}); })
+              .catch(e => { resultOk = false; result = e.message; })
+            ">
+      Save
+    </button>
+    <button type="button" class="btn btn-sm" x-show="editing" @click="editKey = ''; editVal = ''; editing = false; result = ''">
+      Cancel
+    </button>
+  </div>
   <template x-if="result">
     <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
   </template>
@@ -95,7 +88,8 @@
   <h3 class="text-xs text-muted uppercase tracking-wider mt-5 mb-2">Agent control</h3>
   <div id="agent-control" class="flex gap-2 items-center flex-wrap">
     <button class="btn btn-sm" hx-post="/agent/start" hx-target="#agent-result" hx-swap="innerHTML">Start</button>
-    <button class="btn-danger btn-sm" hx-post="/agent/stop" hx-target="#agent-result" hx-swap="innerHTML">Stop</button>
+    <button class="btn-danger btn-sm" hx-post="/agent/stop" hx-target="#agent-result" hx-swap="innerHTML"
+            hx-confirm="Stop the agent?">Stop</button>
     <button class="btn btn-sm" hx-post="/agent/restart" hx-target="#agent-result" hx-swap="innerHTML">Restart</button>
     <span id="agent-result" class="text-xs"></span>
   </div>

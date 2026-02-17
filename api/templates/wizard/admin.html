@@ -1,17 +1,32 @@
-<div class="card" x-data="{ key: '' }">
+<div class="card" x-data="{ key: '', error: '' }">
   <h2 class="text-base mb-3">Admin API Key</h2>
   <p class="text-muted text-sm mb-3">Set a key to protect the admin API. You'll need this to access the dashboard after setup.</p>
 
   <label class="label" for="w-admin-key">API Key</label>
-  <input type="password" class="input" id="w-admin-key" name="admin_key" x-model="key">
+  <div class="flex gap-2 items-center">
+    <input type="text" class="input flex-1 font-mono text-xs" id="w-admin-key" name="admin_key" x-model="key"
+           placeholder="Paste or generate a key" readonly>
+    <button type="button" class="btn btn-sm text-xs" @click="
+      navigator.clipboard.writeText(key).then(() => {
+        $el.textContent = 'Copied!';
+        setTimeout(() => $el.textContent = 'Copy', 1500);
+      })
+    " x-show="key">Copy</button>
+  </div>
 
   <div class="mt-3">
     <button class="btn" @click="
       const arr = new Uint8Array(24);
       crypto.getRandomValues(arr);
       key = Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+      error = '';
     ">Generate random key</button>
   </div>
+
+  <p class="text-xs text-warn mt-2" x-show="key">Save this key somewhere safe — you won't be able to see it again after leaving this page.</p>
+  <template x-if="error">
+    <div class="alert-error mt-2" x-text="error"></div>
+  </template>
 
   <div class="flex justify-between mt-4">
     <button class="btn"
@@ -21,6 +36,7 @@
     </button>
     <button class="btn-primary"
             @click="
+              if (!key.trim()) { error = 'Please generate or enter an API key'; return; }
               localStorage.setItem('admin_api_key', key);
               htmx.ajax('POST', '/setup/step', {
                 target: '#wizard-step', swap: 'innerHTML',

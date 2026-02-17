@@ -9,7 +9,7 @@
       <h2 class="text-base mb-4">Authentication</h2>
       <form @submit.prevent="
         const key = $refs.apiKey.value;
-        fetch('/health', { headers: { 'Authorization': 'Bearer ' + key } })
+        fetch('/agent/status', { headers: { 'Authorization': 'Bearer ' + key } })
           .then(r => {
             if (r.ok) {
               localStorage.setItem('admin_api_key', key);
@@ -22,7 +22,7 @@
       ">
         <label class="label" for="auth-key">Admin API Key</label>
         <input type="password" class="input" id="auth-key" x-ref="apiKey"
-               placeholder="Enter your admin API key" autofocus>
+               placeholder="Enter your admin API key" autocomplete="current-password" required autofocus>
 
         <template x-if="error">
           <div class="alert-error mt-3" x-text="error"></div>

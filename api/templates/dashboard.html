@@ -5,32 +5,32 @@
 <div>
   <h1 class="text-xl text-accent mb-2">Agent Admin</h1>
 
-  {# Status bar — loaded via HTMX #}
+  {# Status bar — loaded via HTMX, refreshes on lifecycle events #}
   <div id="status-bar" class="flex items-center gap-3 py-2 mb-4 flex-wrap"
-       hx-get="/partials/status" hx-trigger="load" hx-swap="innerHTML">
+       hx-get="/partials/status" hx-trigger="load, refresh-status from:body" hx-swap="innerHTML">
     <span class="text-muted text-xs">Loading...</span>
   </div>
 
   {# Tab navigation #}
   <div class="flex border-b border-border mb-4" x-data="{ tab: 'config' }">
     <button class="tab-link" :class="tab === 'config' && 'tab-link-active'"
-            @click="tab = 'config'" hx-get="/partials/config" hx-target="#tab-content" hx-swap="innerHTML">
+            @click="if (tab !== 'config') { tab = 'config'; htmx.ajax('GET', '/partials/config', {target: '#tab-content', swap: 'innerHTML'}); }">
       Config
     </button>
     <button class="tab-link" :class="tab === 'identity' && 'tab-link-active'"
-            @click="tab = 'identity'" hx-get="/partials/identity" hx-target="#tab-content" hx-swap="innerHTML">
+            @click="if (tab !== 'identity') { tab = 'identity'; htmx.ajax('GET', '/partials/identity', {target: '#tab-content', swap: 'innerHTML'}); }">
       Agent Identity
     </button>
     <button class="tab-link" :class="tab === 'permissions' && 'tab-link-active'"
-            @click="tab = 'permissions'" hx-get="/partials/permissions" hx-target="#tab-content" hx-swap="innerHTML">
+            @click="if (tab !== 'permissions') { tab = 'permissions'; htmx.ajax('GET', '/partials/permissions', {target: '#tab-content', swap: 'innerHTML'}); }">
       Permissions
     </button>
     <button class="tab-link" :class="tab === 'memory' && 'tab-link-active'"
-            @click="tab = 'memory'" hx-get="/partials/memory" hx-target="#tab-content" hx-swap="innerHTML">
+            @click="if (tab !== 'memory') { tab = 'memory'; htmx.ajax('GET', '/partials/memory', {target: '#tab-content', swap: 'innerHTML'}); }">
       Memory
     </button>
     <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
-            @click="tab = 'logs'" hx-get="/partials/logs" hx-target="#tab-content" hx-swap="innerHTML">
+            @click="if (tab !== 'logs') { tab = 'logs'; htmx.ajax('GET', '/partials/logs', {target: '#tab-content', swap: 'innerHTML'}); }">
       Logs
     </button>
   </div>

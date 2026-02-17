@@ -52,6 +52,15 @@ def _render_partial(template_name: str, **ctx: object) -> HTMLResponse:
     return HTMLResponse(tmpl.render(**ctx))
 
 
+def _render_wizard_step(step: str, steps: list[str]) -> HTMLResponse:
+    """Render a wizard step partial with OOB progress dots update."""
+    step_html = _jinja_env.get_template(f"wizard/{step}.html").render()
+    progress_html = _jinja_env.get_template("wizard/progress.html").render(
+        steps=steps, current_step=step
+    )
+    return HTMLResponse(step_html + progress_html)
+
+
 # ---------------------------------------------------------------------------
 # Shared mutable agent state
 # ---------------------------------------------------------------------------
@@ -332,8 +341,12 @@ def create_admin_app(
     @app.post("/config/delete", dependencies=[Depends(auth)])
     async def delete_config(request: Request) -> HTMLResponse:
         """Delete a config key. Returns refreshed config partial for HTMX."""
-        body = await request.json()
-        key = body.get("key", "")
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        key = str(body.get("key", ""))
         if not key:
             raise HTTPException(400, "Missing 'key' in request body")
         deleted = await config_store.delete(key)
@@ -374,8 +387,12 @@ def create_admin_app(
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
-        body = await request.json()
-        pattern = body.get("pattern", "")
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        pattern = str(body.get("pattern", ""))
         if pattern and pattern in agent.permissions.rules:
             del agent.permissions.rules[pattern]
         rules = agent.permissions.rules
@@ -438,13 +455,22 @@ def create_admin_app(
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
-        body = await request.json()
-        tier = body.get("tier", "")
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        tier = str(body.get("tier", ""))
         memory_id = body.get("memory_id")
         if tier not in ("long-term", "short-term"):
             raise HTTPException(400, "Tier must be 'long-term' or 'short-term'")
         if memory_id is None:
             raise HTTPException(400, "Missing 'memory_id' in request body")
+        # Coerce to int (form-encoded values arrive as strings)
+        try:
+            memory_id = int(memory_id)
+        except TypeError, ValueError:
+            raise HTTPException(400, "memory_id must be an integer")
 
         import aiosqlite
 
@@ -560,7 +586,7 @@ def create_admin_app(
             raise HTTPException(400, f"Unknown step: {step}")
         await config_store.set_setup_step(step)
 
-        return _render_partial(f"wizard/{step}.html")
+        return _render_wizard_step(step, SETUP_STEPS)
 
     @app.post("/setup/step/identity")
     async def setup_save_identity(request: Request) -> HTMLResponse:
@@ -645,11 +671,13 @@ def create_admin_app(
 
         next_step = "telegram"
         await config_store.set_setup_step(next_step)
-        return _render_partial(f"wizard/{next_step}.html")
+        return _render_wizard_step(next_step, SETUP_STEPS)
 
     @app.post("/setup/step/calendar")
     async def setup_save_calendar(request: Request) -> HTMLResponse:
         """Handle calendar step form submission."""
+        from core.config_store import SETUP_STEPS
+
         form_data = await request.form()
         cal_name = str(form_data.get("cal_name", "")).strip()
         cal_url = str(form_data.get("cal_url", "")).strip()
@@ -668,7 +696,7 @@ def create_admin_app(
 
         next_step = "search"
         await config_store.set_setup_step(next_step)
-        return _render_partial(f"wizard/{next_step}.html")
+        return _render_wizard_step(next_step, SETUP_STEPS)
 
     @app.post("/setup/test-connection")
     async def test_connection(request: Request) -> dict:

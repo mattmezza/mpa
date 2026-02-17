@@ -8,17 +8,10 @@
             hx-vals='{"step": "telegram", "values": {}}'>
       Back
     </button>
-    <div class="flex gap-2">
-      <button class="btn"
-              hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
-              hx-vals='{"step": "calendar", "values": {}}'>
-        Skip
-      </button>
-      <button class="btn-primary"
-              hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
-              hx-vals='{"step": "calendar", "values": {}}'>
-        Next
-      </button>
-    </div>
+    <button class="btn-primary"
+            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+            hx-vals='{"step": "calendar", "values": {}}'>
+      Next
+    </button>
   </div>
 </div>

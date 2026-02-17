@@ -2,7 +2,10 @@
 {% for line in lines %}{{ line }}
 {% endfor %}
 <script>
-  // Auto-scroll to bottom after content swap
+  // Sticky scroll: only auto-scroll if user is already near the bottom
   const viewer = document.getElementById('log-content');
-  if (viewer) viewer.scrollTop = viewer.scrollHeight;
+  if (viewer) {
+    const atBottom = (viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight) < 50;
+    if (atBottom) viewer.scrollTop = viewer.scrollHeight;
+  }
 </script>

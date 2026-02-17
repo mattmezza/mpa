@@ -28,14 +28,15 @@
           <td class="whitespace-nowrap">
             <button class="btn btn-sm"
                     @click="
-                      document.getElementById('perm-pattern').value = '{{ pattern }}';
-                      document.getElementById('perm-level').value = '{{ level }}';
+                      document.getElementById('perm-pattern').value = {{ pattern|tojson }};
+                      document.getElementById('perm-level').value = {{ level|tojson }};
                     ">
               edit
             </button>
             <button class="btn-danger btn-sm ml-0.5"
                     hx-post="/permissions/delete" hx-target="#tab-content" hx-swap="innerHTML"
-                    hx-vals='{"pattern": "{{ pattern }}"}'>
+                    hx-vals='{"pattern": {{ pattern|tojson }} }'
+                    hx-confirm="Delete permission rule &quot;{{ pattern }}&quot;?">
               x
             </button>
           </td>
