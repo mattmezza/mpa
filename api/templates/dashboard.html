@@ -202,19 +202,22 @@
     };
 
     return {
-      tab: 'identity',
+      tab: null,
       init() {
         const params = new URLSearchParams(window.location.search);
         const urlTab = params.get('tab');
-        if (urlTab && tabs[urlTab]) {
-          this.tab = urlTab;
-        }
-        this.loadTab(this.tab, false);
+        const initialTab = (urlTab && tabs[urlTab]) ? urlTab : 'identity';
+        this.tab = initialTab;
         if (!urlTab) {
           const url = new URL(window.location.href);
-          url.searchParams.set('tab', this.tab);
-          history.replaceState({tab: this.tab}, '', url);
+          url.searchParams.set('tab', initialTab);
+          history.replaceState({tab: initialTab}, '', url);
         }
+        // Defer the initial HTMX fetch so both Alpine and HTMX are fully
+        // initialised before the request fires.
+        this.$nextTick(() => {
+          htmx.ajax('GET', tabs[initialTab], {target: '#tab-content', swap: 'innerHTML'});
+        });
 
         window.addEventListener('popstate', () => {
           const current = new URLSearchParams(window.location.search).get('tab') || 'identity';
