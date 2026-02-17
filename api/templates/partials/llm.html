@@ -1,12 +1,5 @@
 {# LLM tab partial #}
-<div class="space-y-6" x-data="{
-  apiKey: {{ api_key|default('', true)|tojson }},
-  model: {{ model|default('', true)|tojson }},
-  result: '',
-  resultOk: false,
-  testing: false,
-  testResult: ''
-}">
+<div class="space-y-6" x-data="llmTab({{ api_key|default('', true)|tojson|forceescape }}, {{ model|default('', true)|tojson|forceescape }})">
   <div class="card">
     <h2 class="text-base mb-1">Language Model</h2>
     <p class="text-muted text-xs mb-4">Configure the Anthropic API key and model used by the agent.</p>
@@ -14,7 +7,10 @@
     <form class="space-y-3" @submit.prevent>
       <div>
         <label class="label">API Key</label>
+        <input type="text" class="input-sm" style="max-width:500px; display:none"
+               autocomplete="username" aria-hidden="true" tabindex="-1">
         <input type="password" class="input-sm" style="max-width:500px"
+               autocomplete="new-password"
                x-model="apiKey" placeholder="sk-ant-...">
         <p class="text-muted text-xs mt-1">Your Anthropic API key. Stored encrypted in the config database.</p>
       </div>

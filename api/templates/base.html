@@ -42,6 +42,18 @@
     }
     window.showToast = showToast;
 
+    function llmTab(apiKey, model) {
+      return {
+        apiKey: apiKey || '',
+        model: model || '',
+        result: '',
+        resultOk: false,
+        testing: false,
+        testResult: ''
+      };
+    }
+    window.llmTab = llmTab;
+
     // Global: handle 401 by redirecting to auth gate
     document.body.addEventListener('htmx:responseError', function(e) {
       if (e.detail.xhr.status === 401) {
