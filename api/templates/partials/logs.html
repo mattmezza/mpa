@@ -24,3 +24,18 @@
        hx-get="/partials/logs-content" hx-trigger="load" hx-swap="innerHTML">
   </div>
 </div>
+
+<script>
+  // Auto-scroll logs after HTMX swaps new content in
+  document.body.addEventListener('htmx:afterSettle', function(evt) {
+    const viewer = document.getElementById('log-content');
+    if (!viewer || evt.detail.target !== viewer) return;
+    // Check if auto-refresh is on via the Alpine component
+    const alpineRoot = viewer.closest('[x-data]');
+    const autoRefresh = alpineRoot && Alpine.$data(alpineRoot).autoRefresh;
+    const atBottom = (viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight) < 50;
+    if (autoRefresh || atBottom) {
+      viewer.scrollTop = viewer.scrollHeight;
+    }
+  });
+</script>

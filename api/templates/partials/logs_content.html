@@ -1,11 +1,3 @@
 {# Log content — swapped into #log-content by HTMX #}
 {% for line in lines %}{{ line }}
 {% endfor %}
-<script>
-  // Sticky scroll: only auto-scroll if user is already near the bottom
-  const viewer = document.getElementById('log-content');
-  if (viewer) {
-    const atBottom = (viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight) < 50;
-    if (atBottom) viewer.scrollTop = viewer.scrollHeight;
-  }
-</script>
