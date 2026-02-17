@@ -3,12 +3,36 @@
 
 {% block body %}
 <div>
-  <h1 class="text-xl text-accent mb-2">Agent Admin</h1>
+  <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
+    <h1 class="text-xl text-accent">Agent Admin</h1>
+  </div>
 
   {# Status bar — loaded via HTMX, refreshes on lifecycle events #}
   <div id="status-bar" class="flex items-center gap-3 py-2 mb-4 flex-wrap"
        hx-get="/partials/status" hx-trigger="load, refresh-status from:body" hx-swap="innerHTML">
     <span class="text-muted text-xs">Loading...</span>
+  </div>
+
+  <div id="agent-modal" class="fixed" style="inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 50;">
+    <div class="card" style="max-width: 520px; width: 100%;">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="text-base text-accent">Agent Control</h2>
+          <p class="text-muted text-xs">Start, stop, or restart the agent. Status updates instantly.</p>
+        </div>
+        <button class="btn btn-sm" type="button" onclick="closeAgentModal()">Close</button>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button class="btn btn-sm" hx-post="/agent/start" hx-target="#agent-modal-result" hx-swap="innerHTML">Start</button>
+        <button class="btn-danger btn-sm" hx-post="/agent/stop" hx-target="#agent-modal-result" hx-swap="innerHTML"
+                hx-confirm="Stop the agent?">Stop</button>
+        <button class="btn btn-sm" hx-post="/agent/restart" hx-target="#agent-modal-result" hx-swap="innerHTML">Restart</button>
+      </div>
+      <div id="agent-modal-result" class="mt-3 text-xs"></div>
+      <div class="mt-3 text-muted text-xs">
+        Current status updates in the header badge; click it any time to manage the agent.
+      </div>
+    </div>
   </div>
 
   {# Tab navigation #}
@@ -48,6 +72,33 @@
 
 {% block scripts %}
 <script>
+  function openAgentModal() {
+    const modal = document.getElementById('agent-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+  }
+
+  function closeAgentModal() {
+    const modal = document.getElementById('agent-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+  }
+
+  document.addEventListener('click', (event) => {
+    const modal = document.getElementById('agent-modal');
+    if (!modal || modal.style.display !== 'flex') return;
+    if (event.target === modal) {
+      closeAgentModal();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const modal = document.getElementById('agent-modal');
+    if (!modal || modal.style.display !== 'flex') return;
+    closeAgentModal();
+  });
+
   function adminTabs() {
     const tabs = {
       config: '/partials/config',

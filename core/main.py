@@ -108,12 +108,16 @@ async def main() -> None:
     agent_state = AgentState()
     if setup_complete:
         log.info("Setup complete — starting agent")
+        agent_state.status = "STARTING"
         try:
             agent_state.agent = await _start_agent(config_store)
+            agent_state.status = "RUNNING"
         except Exception:
             log.exception("Failed to start agent — falling back to setup mode")
+            agent_state.status = "STOPPED"
     else:
         log.info("Setup not complete — running in setup-only mode (admin API + wizard)")
+        agent_state.status = "STOPPED"
 
     # -- Admin API (always runs) --
     admin_app, auth = create_admin_app(agent_state, config_store)
@@ -161,7 +165,9 @@ async def main() -> None:
     log.info("Shutting down…")
 
     if agent_state.agent:
+        agent_state.status = "STOPPING"
         await _stop_agent(agent_state.agent)
+        agent_state.status = "STOPPED"
 
     server_task.cancel()
     try:
@@ -193,14 +199,17 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
             }
         else:
             try:
+                agent_state.status = "STARTING"
                 agent_state.agent = await _start_agent(config_store)
                 log.info("Agent started via API")
+                agent_state.status = "RUNNING"
                 result = {
                     "status": "started",
                     "channels": list(agent_state.agent.channels.keys()),
                 }
             except Exception as exc:
                 log.exception("Failed to start agent via API")
+                agent_state.status = "STOPPED"
                 result = {"status": "error", "error": str(exc)}
 
         if _is_htmx(request):
@@ -221,12 +230,15 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
             result = {"status": "not_running"}
         else:
             try:
+                agent_state.status = "STOPPING"
                 await _stop_agent(agent_state.agent)
                 agent_state.agent = None
                 log.info("Agent stopped via API")
+                agent_state.status = "STOPPED"
                 result = {"status": "stopped"}
             except Exception as exc:
                 log.exception("Failed to stop agent via API")
+                agent_state.status = "RUNNING"
                 result = {"status": "error", "error": str(exc)}
 
         if _is_htmx(request):
@@ -242,21 +254,26 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
         # Stop
         if agent_state.agent is not None:
             try:
+                agent_state.status = "STOPPING"
                 await _stop_agent(agent_state.agent)
             except Exception:
                 log.exception("Error during agent stop (restart)")
             agent_state.agent = None
+            agent_state.status = "STOPPED"
 
         # Start
         try:
+            agent_state.status = "RESTARTING"
             agent_state.agent = await _start_agent(config_store)
             log.info("Agent restarted via API")
+            agent_state.status = "RUNNING"
             result = {
                 "status": "restarted",
                 "channels": list(agent_state.agent.channels.keys()),
             }
         except Exception as exc:
             log.exception("Failed to restart agent via API")
+            agent_state.status = "STOPPED"
             result = {"status": "error", "error": str(exc)}
 
         if _is_htmx(request):

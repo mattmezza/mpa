@@ -133,8 +133,9 @@ def _render_wizard_step(
 class AgentState:
     """Mutable container for the currently running agent."""
 
-    def __init__(self, agent: AgentCore | None = None):
+    def __init__(self, agent: AgentCore | None = None, status: str = "STOPPED"):
         self.agent: AgentCore | None = agent
+        self.status: str = status
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +335,7 @@ def create_admin_app(
         return _render_partial(
             "partials/status.html",
             running=running,
+            status=agent_state.status,
             channels=channels,
             scheduler_jobs=scheduler_jobs,
         )
@@ -691,9 +693,15 @@ def create_admin_app(
     async def agent_status() -> dict:
         agent = agent_state.agent
         if not agent:
-            return {"running": False, "channels": [], "scheduler_jobs": 0}
+            return {
+                "running": False,
+                "status": agent_state.status,
+                "channels": [],
+                "scheduler_jobs": 0,
+            }
         return {
             "running": True,
+            "status": agent_state.status,
             "channels": list(agent.channels.keys()),
             "scheduler_jobs": len(agent.scheduler.scheduler.get_jobs()),
         }

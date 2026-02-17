@@ -84,13 +84,5 @@
     <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
   </template>
 
-  {# Agent control #}
-  <h3 class="text-xs text-muted uppercase tracking-wider mt-5 mb-2">Agent control</h3>
-  <div id="agent-control" class="flex gap-2 items-center flex-wrap">
-    <button class="btn btn-sm" hx-post="/agent/start" hx-target="#agent-result" hx-swap="innerHTML">Start</button>
-    <button class="btn-danger btn-sm" hx-post="/agent/stop" hx-target="#agent-result" hx-swap="innerHTML"
-            hx-confirm="Stop the agent?">Stop</button>
-    <button class="btn btn-sm" hx-post="/agent/restart" hx-target="#agent-result" hx-swap="innerHTML">Restart</button>
-    <span id="agent-result" class="text-xs"></span>
-  </div>
+  {# Agent control moved to header #}
 </div>

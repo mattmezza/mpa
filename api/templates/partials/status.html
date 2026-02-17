@@ -1,9 +1,12 @@
 {# Status bar partial — loaded via HTMX into #status-bar #}
-{% if running %}
-<span class="badge-ok">Running</span>
+{% set status_label = status or (running and 'RUNNING' or 'STOPPED') %}
+{% if status_label == 'RUNNING' %}
+<button class="badge-ok" type="button" onclick="openAgentModal()" style="cursor: pointer;">{{ status_label }}</button>
+{% elif status_label in ['STARTING', 'RESTARTING'] %}
+<button class="badge-warn" type="button" onclick="openAgentModal()" style="cursor: pointer;">{{ status_label }}</button>
+{% elif status_label == 'STOPPING' %}
+<button class="badge-warn" type="button" onclick="openAgentModal()" style="cursor: pointer;">{{ status_label }}</button>
 {% else %}
-<span class="badge-off">Stopped</span>
+<button class="badge-off" type="button" onclick="openAgentModal()" style="cursor: pointer;">{{ status_label }}</button>
 {% endif %}
-<span class="text-muted text-xs">
-  Channels: {{ channels | join(', ') or 'none' }} | Jobs: {{ scheduler_jobs }}
-</span>
+<span class="text-muted text-xs">Channels: {{ channels | join(', ') or 'none' }} | Jobs: {{ scheduler_jobs }}</span>
