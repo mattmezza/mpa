@@ -1,0 +1,41 @@
+# vdirsyncer configuration for the personal agent.
+#
+# Copy this file to cli-configs/vdirsyncer.conf and fill in your credentials.
+# vdirsyncer syncs contacts from a CardDAV server to local vCard files,
+# which khard then reads.
+#
+# Run `vdirsyncer discover contacts` on first setup, then `vdirsyncer sync`.
+# The agent's scheduler can run `vdirsyncer sync` periodically.
+#
+# See https://vdirsyncer.pimutils.org/en/stable/config.html
+
+[general]
+status_path = "~/.local/share/vdirsyncer/status/"
+
+[pair contacts]
+a = "contacts_local"
+b = "contacts_remote"
+collections = ["from a", "from b"]
+
+[storage contacts_local]
+type = "filesystem"
+path = "~/.local/share/vdirsyncer/contacts/"
+fileext = ".vcf"
+
+# --- CardDAV server (iCloud example) ---
+# For Google Contacts, use type = "google_contacts" with OAuth2.
+# For iCloud/Fastmail/others, use type = "carddav" as shown below.
+
+[storage contacts_remote]
+type = "carddav"
+url = "https://contacts.icloud.com/"
+# Set VDIRSYNCER_CARDDAV_USERNAME and VDIRSYNCER_CARDDAV_PASSWORD in .env
+username.fetch = ["command", "printenv", "VDIRSYNCER_CARDDAV_USERNAME"]
+password.fetch = ["command", "printenv", "VDIRSYNCER_CARDDAV_PASSWORD"]
+
+# --- Google Contacts example (uncomment and replace the iCloud block above) ---
+# [storage contacts_remote]
+# type = "google_contacts"
+# token_file = "~/.local/share/vdirsyncer/google_token"
+# client_id = "your-client-id.apps.googleusercontent.com"
+# client_secret = "your-client-secret"

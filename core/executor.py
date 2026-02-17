@@ -25,7 +25,18 @@ class ToolExecutor:
             return {
                 "error": f"Command not allowed. Must start with one of: {self.ALLOWED_PREFIXES}"
             }
+        return await self._exec(command, timeout)
 
+    async def run_command_trusted(self, command: str, timeout: int = 30) -> dict:
+        """Execute a shell command without prefix validation.
+
+        Only use this for commands constructed internally by the agent code,
+        never for commands originating from LLM tool calls.
+        """
+        return await self._exec(command, timeout)
+
+    async def _exec(self, command: str, timeout: int) -> dict:
+        """Run a shell command and capture output."""
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,

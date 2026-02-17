@@ -5,11 +5,14 @@ email client — each command is independent, no session state.
 
 ## Configuration
 
-Himalaya is pre-configured with these accounts:
-- `personal` — Matteo's personal email
-- `work` — Matteo's work email
-
+Himalaya is pre-configured. The available accounts are defined in its TOML config file.
 Always specify the account with `-a <account_name>`.
+
+To see which accounts are available:
+
+```bash
+himalaya account list
+```
 
 ## Reading emails
 
@@ -21,93 +24,107 @@ himalaya -a personal envelope list -s 10 -o json
 
 # List emails in a specific folder
 himalaya -a work envelope list --folder "Archives" -s 20 -o json
+
+# Page through results (page 2)
+himalaya -a personal envelope list -s 10 -p 2 -o json
 ```
 
-The JSON output is an array of envelope objects:
-
-```json
-[
-  {
-    "id": "123",
-    "subject": "Meeting tomorrow",
-    "from": {"name": "Alice", "addr": "alice@example.com"},
-    "date": "2025-02-17T10:30:00Z",
-    "flags": ["Seen"]
-  }
-]
-```
+The JSON output is an array of envelope objects with fields like id, subject, from, date, and flags.
 
 ### Read a specific email
 
 ```bash
-# Read email by ID (returns plain text body)
+# Read email by ID (returns plain text body with headers)
 himalaya -a personal message read 123
 
-# Read as raw MIME (useful for attachments)
-himalaya -a personal message read 123 --raw
+# Read specific headers only
+himalaya -a personal message read 123 --header From --header Subject --header Date
 ```
 
 ### Search emails
 
+Himalaya uses IMAP search queries after `--`:
+
 ```bash
 # Search by subject
-himalaya -a work envelope list --folder INBOX -o json -- "subject:invoice"
+himalaya -a work envelope list -o json -- "subject:invoice"
 
 # Search by sender
-himalaya -a personal envelope list -o json -- "from:simge"
+himalaya -a personal envelope list -o json -- "from:alice@example.com"
+
+# Search for unseen emails
+himalaya -a personal envelope list -o json -- "unseen"
 
 # Combined search
-himalaya -a work envelope list -o json -- "from:ikea subject:contract"
+himalaya -a work envelope list -o json -- "from:ikea subject:contract unseen"
 ```
 
 ## Sending emails
 
 ### Send a new email
 
-```bash
-# Using MML (MIME Meta Language) format via stdin
-echo 'From: matteo@example.com
-To: recipient@example.com
-Subject: Hello from the agent
+Construct the message as headers + blank line + body, then pipe to himalaya:
 
-This is the body of the email.' | himalaya -a personal message send
+```bash
+printf 'From: matteo@example.com\nTo: recipient@example.com\nSubject: Hello\n\nThis is the body.' | himalaya -a personal message send
+```
+
+For multi-line bodies:
+
+```bash
+printf 'From: matteo@example.com\nTo: recipient@example.com\nSubject: Meeting follow-up\n\nHi Alice,\n\nThanks for the meeting today.\n\nBest regards,\nMatteo' | himalaya -a personal message send
+```
+
+With CC and BCC:
+
+```bash
+printf 'From: matteo@example.com\nTo: alice@example.com\nCc: bob@example.com\nBcc: carol@example.com\nSubject: Project update\n\nPlease see attached notes.' | himalaya -a work message send
 ```
 
 ### Reply to an email
 
 ```bash
-echo 'Thank you for your email.
+# Reply to sender only
+printf 'Thanks for your email.\n\nBest regards,\nMatteo' | himalaya -a personal message reply 123
 
-Best regards,
-Matteo' | himalaya -a personal message reply 123
+# Reply to all recipients
+printf 'Thanks everyone.\n\nBest,\nMatteo' | himalaya -a personal message reply --all 123
 ```
 
 ### Forward an email
 
 ```bash
-himalaya -a work message forward 123
+# Forward with added text
+printf 'FYI — see below.' | himalaya -a work message forward 123
 ```
 
 ## Managing emails
 
 ```bash
-# Move to folder
+# Move to a folder
 himalaya -a personal message move 123 "Archives"
 
-# Delete
+# Copy to a folder
+himalaya -a personal message copy 123 "Important"
+
+# Delete (moves to Trash)
 himalaya -a personal message delete 123
 
-# Flag/unflag
+# Add a flag
 himalaya -a personal flag add 123 Seen
+himalaya -a personal flag add 123 Flagged
+
+# Remove a flag
 himalaya -a personal flag remove 123 Seen
 
-# List folders
+# List all folders
 himalaya -a personal folder list -o json
 ```
 
 ## Important notes
 
 - Always use `-o json` when you need to parse results programmatically.
-- Email IDs are relative to the current folder — always specify `--folder` when not using INBOX.
-- For multi-line email bodies, construct the full MML template and pipe it via echo.
-- The `personal` account is for personal correspondence, `work` for professional.
+- Email IDs are folder-relative — always specify `--folder` when not using INBOX.
+- Use `printf` with `\n` for newlines when constructing email messages to pipe to himalaya. Never use bare `echo` with literal newlines as it can break in shell.
+- When sending on behalf of the user, always include the correct `From:` header matching the account's email address.
+- Before sending, always present the draft to the user for approval.

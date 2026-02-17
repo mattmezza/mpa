@@ -51,7 +51,7 @@ TOOLS = [
     # Structured tools for write actions (will require permission once the permission engine lands)
     {
         "name": "send_email",
-        "description": "Send an email on behalf of the user.",
+        "description": "Send a new email on behalf of the user.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -59,11 +59,47 @@ TOOLS = [
                     "type": "string",
                     "description": "Email account name (e.g. 'personal', 'work')",
                 },
-                "to": {"type": "string", "description": "Recipient email address"},
+                "from": {
+                    "type": "string",
+                    "description": "Sender email address (must match the account)",
+                },
+                "to": {
+                    "type": "string",
+                    "description": "Recipient email address(es), comma-separated",
+                },
+                "cc": {"type": "string", "description": "CC recipient(s), comma-separated"},
+                "bcc": {"type": "string", "description": "BCC recipient(s), comma-separated"},
                 "subject": {"type": "string"},
                 "body": {"type": "string"},
             },
             "required": ["account", "to", "subject", "body"],
+        },
+    },
+    {
+        "name": "reply_email",
+        "description": "Reply to an existing email by message ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account": {
+                    "type": "string",
+                    "description": "Email account name (e.g. 'personal', 'work')",
+                },
+                "message_id": {
+                    "type": "string",
+                    "description": "The ID of the message to reply to",
+                },
+                "body": {"type": "string", "description": "The reply body text"},
+                "reply_all": {
+                    "type": "boolean",
+                    "description": "Reply to all recipients (default: false)",
+                },
+                "folder": {
+                    "type": "string",
+                    "description": "Folder the message is in (default: INBOX)",
+                },
+            },
+            "required": ["account", "message_id", "body"],
         },
     },
     {
@@ -238,6 +274,9 @@ class AgentCore:
         if name == "send_email":
             return await self._tool_send_email(params)
 
+        if name == "reply_email":
+            return await self._tool_reply_email(params)
+
         if name == "send_message":
             return await self._tool_send_message(params)
 
@@ -262,12 +301,46 @@ class AgentCore:
         to = params["to"]
         subject = params["subject"]
         body = params["body"]
+        cc = params.get("cc")
+        bcc = params.get("bcc")
+        from_addr = params.get("from")
         log.info("Tool call: send_email — to=%s subject=%s", to, subject)
 
-        # Build MML message and pipe to himalaya
-        mml = f"To: {to}\nSubject: {subject}\n\n{body}"
-        command = f"echo {_shell_quote(mml)} | himalaya -a {_shell_quote(account)} message send"
-        return await self.executor.run_command(command)
+        # Build MML message headers
+        headers = []
+        if from_addr:
+            headers.append(f"From: {from_addr}")
+        headers.append(f"To: {to}")
+        if cc:
+            headers.append(f"Cc: {cc}")
+        if bcc:
+            headers.append(f"Bcc: {bcc}")
+        headers.append(f"Subject: {subject}")
+        mml = "\n".join(headers) + "\n\n" + body
+
+        command = (
+            f"printf %s {_shell_quote(mml)} | himalaya -a {_shell_quote(account)} message send"
+        )
+        return await self.executor.run_command_trusted(command)
+
+    async def _tool_reply_email(self, params: dict) -> dict:
+        """Reply to an email via himalaya CLI."""
+        account = params["account"]
+        message_id = params["message_id"]
+        body = params["body"]
+        reply_all = params.get("reply_all", False)
+        folder = params.get("folder")
+        log.info("Tool call: reply_email — account=%s message=%s", account, message_id)
+
+        cmd_parts = [f"printf %s {_shell_quote(body)} | himalaya -a {_shell_quote(account)}"]
+        if folder:
+            cmd_parts.append(f"--folder {_shell_quote(folder)}")
+        cmd_parts.append("message reply")
+        if reply_all:
+            cmd_parts.append("--all")
+        cmd_parts.append(_shell_quote(message_id))
+
+        return await self.executor.run_command_trusted(" ".join(cmd_parts))
 
     async def _tool_send_message(self, params: dict) -> dict:
         """Send a message via a registered channel."""

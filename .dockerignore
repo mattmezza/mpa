@@ -8,4 +8,5 @@
 __pycache__/
 data/
 *.md
+!skills/*.md
 .tmux-session

@@ -1,0 +1,20 @@
+# khard configuration for the personal agent.
+#
+# Copy this file to cli-configs/khard.conf and adjust paths if needed.
+# Contacts are synced to disk by vdirsyncer, then khard reads from that directory.
+#
+# See https://khard.readthedocs.io/en/latest/configuration.html
+
+[addressbooks]
+[[personal]]
+path = ~/.local/share/vdirsyncer/contacts/personal/
+
+[general]
+default_action = list
+editor = /bin/true
+merge_editor = /bin/true
+
+[contact table]
+display = formatted_name
+preferred_email_address_type = pref, work, home
+preferred_phone_number_type = pref, cell, home

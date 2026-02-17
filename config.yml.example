@@ -19,7 +19,15 @@ channels:
     allowed_numbers: "${WHATSAPP_ALLOWED_NUMBERS}"
 
 calendar:
-  providers: []
+  providers:
+    - name: "google"
+      url: "https://apidata.googleusercontent.com/caldav/v2/${GOOGLE_EMAIL}/events"
+      username: "${GOOGLE_EMAIL}"
+      password: "${GOOGLE_APP_PASSWORD}"
+    # - name: "icloud"
+    #   url: "https://caldav.icloud.com/"
+    #   username: "${ICLOUD_EMAIL}"
+    #   password: "${ICLOUD_APP_PASSWORD}"
 
 voice:
   stt_model: "base"

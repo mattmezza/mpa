@@ -1,0 +1,64 @@
+# Himalaya configuration for the personal agent.
+#
+# Copy this file to cli-configs/himalaya.toml and fill in your credentials.
+# Passwords are read from environment variables via the `cmd` auth method,
+# which calls `printenv` at runtime. Set these in your .env file:
+#
+#   HIMALAYA_PERSONAL_PASSWORD=your-app-password
+#   HIMALAYA_WORK_PASSWORD=your-app-password
+#
+# For Gmail: generate an App Password at https://myaccount.google.com/apppasswords
+# For Fastmail: generate an App Password at https://www.fastmail.com/settings/security/devicekeys
+#
+# See https://github.com/pimalaya/himalaya/blob/master/config.sample.toml
+# for the full list of options.
+
+# --------------------------------------------------------------------------
+# Personal account (Gmail example)
+# --------------------------------------------------------------------------
+
+[accounts.personal]
+default = true
+email = "you@gmail.com"
+display-name = "Your Name"
+
+folder.aliases.inbox = "INBOX"
+folder.aliases.sent = "[Gmail]/Sent Mail"
+folder.aliases.drafts = "[Gmail]/Drafts"
+folder.aliases.trash = "[Gmail]/Trash"
+
+backend.type = "imap"
+backend.host = "imap.gmail.com"
+backend.port = 993
+backend.login = "you@gmail.com"
+backend.auth.type = "password"
+backend.auth.cmd = "printenv HIMALAYA_PERSONAL_PASSWORD"
+
+message.send.backend.type = "smtp"
+message.send.backend.host = "smtp.gmail.com"
+message.send.backend.port = 465
+message.send.backend.login = "you@gmail.com"
+message.send.backend.auth.type = "password"
+message.send.backend.auth.cmd = "printenv HIMALAYA_PERSONAL_PASSWORD"
+
+# --------------------------------------------------------------------------
+# Work account (Fastmail example)
+# --------------------------------------------------------------------------
+
+#[accounts.work]
+#email = "you@work.com"
+#display-name = "Your Name"
+#
+#backend.type = "imap"
+#backend.host = "imap.fastmail.com"
+#backend.port = 993
+#backend.login = "you@work.com"
+#backend.auth.type = "password"
+#backend.auth.cmd = "printenv HIMALAYA_WORK_PASSWORD"
+#
+#message.send.backend.type = "smtp"
+#message.send.backend.host = "smtp.fastmail.com"
+#message.send.backend.port = 465
+#message.send.backend.login = "you@work.com"
+#message.send.backend.auth.type = "password"
+#message.send.backend.auth.cmd = "printenv HIMALAYA_WORK_PASSWORD"

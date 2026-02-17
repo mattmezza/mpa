@@ -94,8 +94,8 @@ class TelegramChannel:
         return True
 
     async def _send_response(self, update: Update, response) -> None:
-        """Send an AgentResponse back — text always, voice if present."""
-        await update.message.reply_text(response.text)
-
+        """Send an AgentResponse back — voice if present, otherwise text."""
         if response.voice:
             await update.message.reply_voice(voice=response.voice)
+        else:
+            await update.message.reply_text(response.text)

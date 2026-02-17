@@ -11,4 +11,8 @@ services:
       - ./character.md:/app/character.md:ro
       - ./personalia.md:/app/personalia.md
       - ./skills:/app/skills:ro
+      - ./cli-configs/himalaya.toml:/root/.config/himalaya/config.toml:ro
+      - ./cli-configs/khard.conf:/root/.config/khard/khard.conf:ro
+      - ./cli-configs/vdirsyncer.conf:/root/.config/vdirsyncer/config:ro
+      - ./data/vdirsyncer:/root/.local/share/vdirsyncer
     env_file: .env
