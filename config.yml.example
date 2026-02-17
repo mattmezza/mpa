@@ -1,5 +1,5 @@
 agent:
-  name: "Jarvis"
+  name: "Clio"
   owner_name: "Matteo"
   anthropic_api_key: "${ANTHROPIC_API_KEY}"
   model: "claude-sonnet-4-5-20250514"
@@ -10,11 +10,11 @@ channels:
   telegram:
     enabled: true
     bot_token: "${TELEGRAM_BOT_TOKEN}"
-    allowed_user_ids: []
+    allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
   whatsapp:
     enabled: false
     bridge_url: "http://localhost:3001"
-    allowed_numbers: []
+    allowed_numbers: "${WHATSAPP_ALLOWED_NUMBERS}"
 
 calendar:
   providers: []

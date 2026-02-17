@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def _resolve_env_vars(obj: object) -> object:
@@ -34,7 +34,7 @@ def _resolve_env_vars(obj: object) -> object:
 
 
 class AgentConfig(BaseModel):
-    name: str = "Jarvis"
+    name: str = "Clio"
     owner_name: str = "Matteo"
     anthropic_api_key: str = ""
     model: str = "claude-sonnet-4-5-20250514"
@@ -47,11 +47,27 @@ class TelegramConfig(BaseModel):
     bot_token: str = ""
     allowed_user_ids: list[int] = Field(default_factory=list)
 
+    @field_validator("allowed_user_ids", mode="before")
+    @classmethod
+    def parse_comma_separated_ints(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return [int(x.strip()) for x in v.split(",") if x.strip()] if v else []
+        return v
+
 
 class WhatsAppConfig(BaseModel):
     enabled: bool = False
     bridge_url: str = "http://localhost:3001"
     allowed_numbers: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_numbers", mode="before")
+    @classmethod
+    def parse_comma_separated_strings(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return [x.strip() for x in v.split(",") if x.strip()] if v else []
+        return v
 
 
 class ChannelsConfig(BaseModel):
