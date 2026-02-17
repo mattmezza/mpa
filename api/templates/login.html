@@ -20,9 +20,9 @@
           })
           .catch(() => { error = 'Connection failed'; })
       ">
-        <label class="label" for="auth-key">Admin API Key</label>
+        <label class="label" for="auth-key">Admin password</label>
         <input type="password" class="input" id="auth-key" x-ref="apiKey"
-               placeholder="Enter your admin API key" autocomplete="current-password" required autofocus>
+               placeholder="Enter your admin password" autocomplete="current-password" required autofocus>
 
         <template x-if="error">
           <div class="alert-error mt-3" x-text="error"></div>

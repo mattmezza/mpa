@@ -109,7 +109,6 @@ class SchedulerConfig(BaseModel):
 
 
 class AdminConfig(BaseModel):
-    enabled: bool = True
     port: int = 8000
     api_key: str = ""
 

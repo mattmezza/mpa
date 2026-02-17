@@ -39,7 +39,7 @@ class _ConfigStoreStub:
         return None
 
     async def get_all_redacted(self) -> dict:
-        return {"agent.name": "Clio", "admin.api_key": "se***ret"}
+        return {"agent.name": "Clio", "admin.api_key": "se***ret", "admin.port": "8000"}
 
     async def get_section_redacted(self, section: str) -> dict:
         return {f"{section}.value": "ok"}
@@ -321,7 +321,7 @@ class TestConfigAPI:
         resp = client.get("/config", headers=AUTH)
         assert resp.status_code == 200
         data = resp.json()
-        assert "agent.name" in data
+        assert "admin.port" in data
 
     def test_config_section(self):
         client = _client(setup_complete=True)

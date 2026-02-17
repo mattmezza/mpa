@@ -13,8 +13,12 @@ encrypted volume (same as memory.db and agent.db).
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
+import secrets
 from pathlib import Path
 
 import aiosqlite
@@ -43,6 +47,8 @@ SECRET_KEYS = frozenset(
         "channels.telegram.bot_token",
         "channels.whatsapp.bridge_url",
         "admin.api_key",
+        "admin.password_hash",
+        "admin.password_salt",
         "search.api_key",
     }
 )
@@ -111,7 +117,7 @@ def _parse_value(value: str) -> object:
     if value.startswith("[") or value.startswith("{"):
         try:
             return json.loads(value)
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             pass
     return value
 
@@ -128,6 +134,23 @@ def _redact(value: str) -> str:
     if not value or len(value) < 8:
         return "***" if value else ""
     return value[:4] + "***" + value[-4:]
+
+
+def _hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
+    if salt is None:
+        salt = secrets.token_bytes(16)
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
+    return base64.b64encode(derived).decode(), base64.b64encode(salt).decode()
+
+
+def _verify_password(password: str, hashed: str, salt: str) -> bool:
+    try:
+        salt_bytes = base64.b64decode(salt.encode())
+        expected = base64.b64decode(hashed.encode())
+    except ValueError, TypeError:
+        return False
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode(), salt_bytes, 200_000)
+    return hmac.compare_digest(derived, expected)
 
 
 class ConfigStore:
@@ -308,3 +331,41 @@ class ConfigStore:
                         seeded = True
 
         return seeded
+
+    async def ensure_admin_password(self) -> bool:
+        """Ensure the admin password hash exists; seed from env if needed."""
+        await self._ensure_schema()
+        existing_hash = await self.get("admin.password_hash")
+        existing_salt = await self.get("admin.password_salt")
+        if existing_hash and existing_salt:
+            return False
+
+        from os import getenv
+
+        existing_api_key = await self.get("admin.api_key")
+        if existing_api_key:
+            hashed, salt = _hash_password(existing_api_key)
+            await self.set_many({"admin.password_hash": hashed, "admin.password_salt": salt})
+            await self.delete("admin.api_key")
+            return True
+
+        seed_password = getenv("ADMIN_PASSWORD") or getenv("ADMIN_API_KEY")
+        if not seed_password:
+            return False
+
+        hashed, salt = _hash_password(seed_password)
+        await self.set_many({"admin.password_hash": hashed, "admin.password_salt": salt})
+        return True
+
+    async def set_admin_password(self, password: str) -> None:
+        """Set a new admin password hash + salt."""
+        hashed, salt = _hash_password(password)
+        await self.set_many({"admin.password_hash": hashed, "admin.password_salt": salt})
+
+    async def verify_admin_password(self, password: str) -> bool:
+        """Verify a password against stored hash + salt."""
+        stored_hash = await self.get("admin.password_hash")
+        stored_salt = await self.get("admin.password_salt")
+        if not stored_hash or not stored_salt:
+            return False
+        return _verify_password(password, stored_hash, stored_salt)

@@ -36,22 +36,14 @@
   </div>
 
   {# Tab navigation #}
-  <div class="flex border-b border-border mb-4" x-data="adminTabs()" x-init="init()">
-    <button class="tab-link" :class="tab === 'config' && 'tab-link-active'"
-            @click="select('config')">
-      Config
-    </button>
+  <div class="flex border-b border-border mb-4 overflow-x-auto" x-data="adminTabs()" x-init="init()">
     <button class="tab-link" :class="tab === 'identity' && 'tab-link-active'"
             @click="select('identity')">
-      Agent Identity
+      Identity
     </button>
-    <button class="tab-link" :class="tab === 'permissions' && 'tab-link-active'"
-            @click="select('permissions')">
-      Permissions
-    </button>
-    <button class="tab-link" :class="tab === 'skills' && 'tab-link-active'"
-            @click="select('skills')">
-      Skills
+    <button class="tab-link" :class="tab === 'llm' && 'tab-link-active'"
+            @click="select('llm')">
+      LLM
     </button>
     <button class="tab-link" :class="tab === 'channels' && 'tab-link-active'"
             @click="select('channels')">
@@ -61,6 +53,18 @@
             @click="select('memory')">
       Memory
     </button>
+    <button class="tab-link" :class="tab === 'search' && 'tab-link-active'"
+            @click="select('search')">
+      Search
+    </button>
+    <button class="tab-link" :class="tab === 'permissions' && 'tab-link-active'"
+            @click="select('permissions')">
+      Permissions
+    </button>
+    <button class="tab-link" :class="tab === 'skills' && 'tab-link-active'"
+            @click="select('skills')">
+      Skills
+    </button>
     <button class="tab-link" :class="tab === 'jobs' && 'tab-link-active'"
             @click="select('jobs')">
       Jobs
@@ -68,6 +72,14 @@
     <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
             @click="select('logs')">
       Logs
+    </button>
+    <button class="tab-link" :class="tab === 'admin' && 'tab-link-active'"
+            @click="select('admin')">
+      Admin
+    </button>
+    <button class="tab-link" :class="tab === 'config' && 'tab-link-active'"
+            @click="select('config')">
+      Config
     </button>
   </div>
 
@@ -176,18 +188,21 @@
 
   function adminTabs() {
     const tabs = {
-      config: '/partials/config',
       identity: '/partials/identity',
-      permissions: '/partials/permissions',
-      skills: '/partials/skills',
+      llm: '/partials/llm',
       channels: '/partials/channels',
       memory: '/partials/memory',
+      search: '/partials/search',
+      permissions: '/partials/permissions',
+      skills: '/partials/skills',
       jobs: '/partials/jobs',
-      logs: '/partials/logs'
+      logs: '/partials/logs',
+      admin: '/partials/admin',
+      config: '/partials/config'
     };
 
     return {
-      tab: 'config',
+      tab: 'identity',
       init() {
         const params = new URLSearchParams(window.location.search);
         const urlTab = params.get('tab');
@@ -202,7 +217,7 @@
         }
 
         window.addEventListener('popstate', () => {
-          const current = new URLSearchParams(window.location.search).get('tab') || 'config';
+          const current = new URLSearchParams(window.location.search).get('tab') || 'identity';
           if (tabs[current]) {
             this.loadTab(current, false);
           }

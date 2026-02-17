@@ -102,6 +102,7 @@ async def main() -> None:
 
     # Seed from YAML/.env on first boot (or if config.db is empty)
     await config_store.seed_if_empty()
+    await config_store.ensure_admin_password()
 
     setup_complete = await config_store.is_setup_complete()
 

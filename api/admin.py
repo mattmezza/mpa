@@ -250,6 +250,11 @@ class SkillUpsertIn(BaseModel):
     content: str
 
 
+class PasswordChangeIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
 # ---------------------------------------------------------------------------
 # Auth dependency
 # ---------------------------------------------------------------------------
@@ -267,11 +272,15 @@ def _make_auth_dependency(config_store: ConfigStore):
         if not setup_complete:
             return
 
-        api_key = await config_store.get("admin.api_key")
-        if not api_key:
+        password_hash = await config_store.get("admin.password_hash")
+        password_salt = await config_store.get("admin.password_salt")
+        if not password_hash or not password_salt:
             return
 
-        if not credentials or credentials.credentials != api_key:
+        if not credentials:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+        if not await config_store.verify_admin_password(credentials.credentials):
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
     return _check_auth
@@ -301,8 +310,28 @@ def create_admin_app(
 
     auth = _make_auth_dependency(config_store)
 
-    # Keys that hold large text content
-    _LARGE_TEXT_KEYS = {"agent.character", "agent.personalia"}
+    # Keys managed by dedicated tabs — excluded from the generic Config tab.
+    _IDENTITY_KEYS = {
+        "agent.character",
+        "agent.personalia",
+        "agent.name",
+        "agent.owner_name",
+        "agent.timezone",
+    }
+    _LLM_KEYS = {"agent.anthropic_api_key", "agent.model"}
+    _SEARCH_PREFIX = "search."
+    _MEMORY_PREFIX = "memory."
+    _CHANNEL_PREFIX = "channels."
+    _SCHEDULER_PREFIX = "scheduler."
+
+    def _is_managed_key(key: str) -> bool:
+        """Return True if this key is managed by a dedicated tab (not Config)."""
+        if key in _IDENTITY_KEYS or key in _LLM_KEYS:
+            return True
+        for prefix in (_SEARCH_PREFIX, _MEMORY_PREFIX, _CHANNEL_PREFIX, _SCHEDULER_PREFIX):
+            if key.startswith(prefix):
+                return True
+        return False
 
     # ── Health ──────────────────────────────────────────────────────────
 
@@ -408,7 +437,7 @@ def create_admin_app(
     async def partial_config() -> HTMLResponse:
         """Config tab partial."""
         data = await config_store.get_all_redacted()
-        filtered = {k: v for k, v in data.items() if k not in _LARGE_TEXT_KEYS}
+        filtered = {k: v for k, v in data.items() if not _is_managed_key(k)}
         config_items = sorted(filtered.items())
         return _render_partial("partials/config.html", config_items=config_items)
 
@@ -417,10 +446,16 @@ def create_admin_app(
         """Agent identity tab partial."""
         character = await config_store.get("agent.character") or ""
         personalia = await config_store.get("agent.personalia") or ""
+        agent_name = await config_store.get("agent.name") or ""
+        owner_name = await config_store.get("agent.owner_name") or ""
+        timezone = await config_store.get("agent.timezone") or ""
         return _render_partial(
             "partials/identity.html",
             character=character,
             personalia=personalia,
+            agent_name=agent_name,
+            owner_name=owner_name,
+            timezone=timezone,
         )
 
     @app.get("/partials/permissions", dependencies=[Depends(auth)])
@@ -443,9 +478,51 @@ def create_admin_app(
         channel_data = await _channel_list_context(config_store)
         return _render_partial("partials/channels.html", **channel_data)
 
+    @app.get("/partials/admin", dependencies=[Depends(auth)])
+    async def partial_admin() -> HTMLResponse:
+        """Admin tab partial."""
+        return _render_partial("partials/admin.html")
+
+    @app.get("/partials/llm", dependencies=[Depends(auth)])
+    async def partial_llm() -> HTMLResponse:
+        """LLM tab partial."""
+        api_key = await config_store.get("agent.anthropic_api_key") or ""
+        model = await config_store.get("agent.model") or "claude-sonnet-4-5-20250514"
+        return _render_partial(
+            "partials/llm.html",
+            api_key=api_key,
+            model=model,
+        )
+
+    @app.get("/partials/search", dependencies=[Depends(auth)])
+    async def partial_search() -> HTMLResponse:
+        """Search tab partial."""
+        enabled = await config_store.get("search.enabled") or "false"
+        provider = await config_store.get("search.provider") or "tavily"
+        api_key = await config_store.get("search.api_key") or ""
+        max_results = await config_store.get("search.max_results") or "5"
+        return _render_partial(
+            "partials/search.html",
+            enabled=enabled,
+            provider=provider,
+            api_key=api_key,
+            max_results=max_results,
+        )
+
     @app.get("/partials/memory", dependencies=[Depends(auth)])
     async def partial_memory() -> HTMLResponse:
         """Memory tab partial."""
+        # Memory config
+        memory_db_path = await config_store.get("memory.db_path") or "data/memory.db"
+        memory_long_term_limit = await config_store.get("memory.long_term_limit") or "50"
+        memory_extraction_model = (
+            await config_store.get("memory.extraction_model") or "claude-haiku-4-5"
+        )
+        memory_consolidation_model = (
+            await config_store.get("memory.consolidation_model") or "claude-haiku-4-5"
+        )
+
+        # Memory data
         agent = agent_state.agent
         long_term = []
         short_term = []
@@ -470,6 +547,10 @@ def create_admin_app(
             "partials/memory.html",
             long_term=long_term,
             short_term=short_term,
+            memory_db_path=memory_db_path,
+            memory_long_term_limit=memory_long_term_limit,
+            memory_extraction_model=memory_extraction_model,
+            memory_consolidation_model=memory_consolidation_model,
         )
 
     @app.get("/partials/logs", dependencies=[Depends(auth)])
@@ -744,7 +825,7 @@ def create_admin_app(
     @app.get("/config", dependencies=[Depends(auth)])
     async def get_config() -> dict:
         data = await config_store.get_all_redacted()
-        return {k: v for k, v in data.items() if k not in _LARGE_TEXT_KEYS}
+        return {k: v for k, v in data.items() if not _is_managed_key(k)}
 
     @app.get("/config/character", dependencies=[Depends(auth)])
     async def get_character() -> dict:
@@ -779,6 +860,28 @@ def create_admin_app(
         await config_store.set_many(body.values)
         return {"updated": list(body.values.keys())}
 
+    @app.post("/admin/password", dependencies=[Depends(auth)])
+    async def change_admin_password(body: PasswordChangeIn) -> dict:
+        current = body.current_password.strip()
+        new_password = body.new_password.strip()
+        if not current or not new_password:
+            return {"ok": False, "error": "Both current and new passwords are required."}
+        if not await config_store.verify_admin_password(current):
+            return {"ok": False, "error": "Current password is incorrect."}
+        await config_store.set_admin_password(new_password)
+        return {"ok": True, "token": new_password}
+
+    @app.post("/admin/password", dependencies=[Depends(auth)])
+    async def change_admin_password(body: PasswordChangeIn) -> dict:
+        current = body.current_password.strip()
+        new_password = body.new_password.strip()
+        if not current or not new_password:
+            return {"ok": False, "error": "Both current and new passwords are required."}
+        if not await config_store.verify_admin_password(current):
+            return {"ok": False, "error": "Current password is incorrect."}
+        await config_store.set_admin_password(new_password)
+        return {"ok": True, "token": new_password}
+
     @app.post("/config/delete", dependencies=[Depends(auth)])
     async def delete_config(request: Request) -> HTMLResponse:
         """Delete a config key. Returns refreshed config partial for HTMX."""
@@ -795,7 +898,7 @@ def create_admin_app(
             raise HTTPException(404, f"Config key not found: {key}")
         # Return refreshed config partial
         data = await config_store.get_all_redacted()
-        filtered = {k: v for k, v in data.items() if k not in _LARGE_TEXT_KEYS}
+        filtered = {k: v for k, v in data.items() if not _is_managed_key(k)}
         config_items = sorted(filtered.items())
         return _render_partial("partials/config.html", config_items=config_items)
 
@@ -1040,6 +1143,14 @@ def create_admin_app(
                 raise HTTPException(404, f"Memory {memory_id} not found in {tier}")
 
         # Return refreshed memory partial
+        memory_db_path = await config_store.get("memory.db_path") or "data/memory.db"
+        memory_long_term_limit = await config_store.get("memory.long_term_limit") or "50"
+        memory_extraction_model = (
+            await config_store.get("memory.extraction_model") or "claude-haiku-4-5"
+        )
+        memory_consolidation_model = (
+            await config_store.get("memory.consolidation_model") or "claude-haiku-4-5"
+        )
         long_term = []
         short_term = []
         cols = "id, category, subject, content, source, confidence, created_at, updated_at"
@@ -1057,6 +1168,10 @@ def create_admin_app(
             "partials/memory.html",
             long_term=long_term,
             short_term=short_term,
+            memory_db_path=memory_db_path,
+            memory_long_term_limit=memory_long_term_limit,
+            memory_extraction_model=memory_extraction_model,
+            memory_consolidation_model=memory_consolidation_model,
         )
 
     @app.post("/memory/consolidate", dependencies=[Depends(auth)])

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -186,8 +187,10 @@ class MemoryStore:
 
         raw = ""
         for block in response.content:
-            if hasattr(block, "text"):
-                raw = block.text.strip()
+            if getattr(block, "type", None) == "text":
+                block_any: Any = block
+                text = getattr(block_any, "text", "")
+                raw = str(text).strip()
                 break
         # Strip markdown code fences if the LLM wrapped its response
         if raw.startswith("```"):
@@ -218,6 +221,9 @@ class MemoryStore:
                     log.warning("Unknown memory tier: %s", tier)
             except Exception:
                 log.exception("Failed to store extracted memory: %s", mem)
+
+        if stored == 0:
+            log.info("Memory extraction stored 0 items (model=%s)", model)
 
         if stored:
             log.info("Extracted and stored %d memories", stored)
@@ -369,8 +375,10 @@ class MemoryStore:
 
         raw = ""
         for block in response.content:
-            if hasattr(block, "text"):
-                raw = block.text.strip()
+            if getattr(block, "type", None) == "text":
+                block_any: Any = block
+                text = getattr(block_any, "text", "")
+                raw = str(text).strip()
                 break
 
         try:

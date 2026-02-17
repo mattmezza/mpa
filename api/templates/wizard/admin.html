@@ -1,11 +1,11 @@
 <div class="card" x-data="{ key: {{ step_ctx.admin_key|default('')|tojson|forceescape }}, error: '' }">
-  <h2 class="text-base mb-3">Admin API Key</h2>
-  <p class="text-muted text-sm mb-3">Set a key to protect the admin API. You'll need this to access the dashboard after setup.</p>
+  <h2 class="text-base mb-3">Admin Password</h2>
+  <p class="text-muted text-sm mb-3">Set a password to protect the admin dashboard.</p>
 
-  <label class="label" for="w-admin-key">API Key</label>
+  <label class="label" for="w-admin-key">Password</label>
   <div class="flex gap-2 items-center">
     <input type="text" class="input flex-1 font-mono text-xs" id="w-admin-key" name="admin_key" x-model="key"
-           placeholder="Paste or generate a key" readonly>
+           placeholder="Paste or generate a password" readonly>
     <button type="button" class="btn btn-sm text-xs" @click="
       navigator.clipboard.writeText(key).then(() => {
         $el.textContent = 'Copied!';
@@ -23,7 +23,7 @@
     ">Generate random key</button>
   </div>
 
-  <p class="text-xs text-warn mt-2" x-show="key">Save this key somewhere safe — you won't be able to see it again after leaving this page.</p>
+  <p class="text-xs text-warn mt-2" x-show="key">Save this password somewhere safe — you won't be able to see it again after leaving this page.</p>
   <template x-if="error">
     <div class="alert-error mt-2" x-text="error"></div>
   </template>
