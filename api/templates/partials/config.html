@@ -29,11 +29,11 @@
       </thead>
       <tbody>
         {% for key, value in config_items %}
-        <tr x-show="!filter || {{ key|tojson|e }}.toLowerCase().includes(filter.toLowerCase()) || {{ value|tojson|e }}.toLowerCase().includes(filter.toLowerCase())">
+        <tr x-show="!filter || {{ key|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase()) || {{ value|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())">
           <td class="text-xs break-all">{{ key }}</td>
           <td class="text-xs break-all">{{ value }}</td>
           <td class="whitespace-nowrap">
-            <button class="btn btn-sm" @click="editKey = {{ key|tojson|e }}; editVal = {{ value|tojson|e }}; editing = true">
+            <button class="btn btn-sm" @click="editKey = {{ key|tojson|forceescape }}; editVal = {{ value|tojson|forceescape }}; editing = true">
               edit
             </button>
             <button class="btn-danger btn-sm ml-0.5"
