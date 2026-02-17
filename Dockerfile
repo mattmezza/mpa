@@ -4,7 +4,7 @@ WORKDIR /app
 
 # System deps (ffmpeg for future voice pipeline, curl for health checks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg curl ca-certificates \
+    ffmpeg curl ca-certificates jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv

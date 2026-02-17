@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from anthropic import AsyncAnthropic
 
@@ -109,14 +110,24 @@ class AgentCore:
     def _build_system_prompt(self) -> str:
         cfg = self.config.agent
         skills_block = self.skills.get_all_skills()
+        character = self._load_file(cfg.character_file)
+        personalia = self._load_file(cfg.personalia_file)
 
         prompt = f"""You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.
 
 Today is {datetime.now().strftime("%A, %B %d, %Y")}. Timezone: {cfg.timezone}.
 
+<personalia>
+{personalia}
+</personalia>
+
+<character>
+{character}
+</character>
+
 When you need to perform an action, use the `run_command` tool to execute CLI commands.
 Always use the skill documentation to construct the correct command.
-Parse JSON output when available (himalaya supports -o json).
+Parse JSON output when available (himalaya supports -o json, sqlite3 supports -json).
 If a command fails, read the error and try to fix it.
 Never guess at command syntax — always refer to the skill file."""
 
@@ -128,6 +139,11 @@ Never guess at command syntax — always refer to the skill file."""
 </available_skills>"""
 
         return prompt
+
+    def _load_file(self, filename: str) -> str:
+        """Load a top-level markdown file (character.md or personalia.md)."""
+        path = Path(filename)
+        return path.read_text() if path.exists() else ""
 
     def _extract_text(self, response) -> str:
         """Pull the text content out of the LLM response."""

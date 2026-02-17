@@ -22,6 +22,8 @@ build/
 # Environment & secrets
 .env
 config.yml
+character.md
+personalia.md
 
 # Data (runtime state, DB, models)
 data/

@@ -41,6 +41,8 @@ class AgentConfig(BaseModel):
     model: str = "claude-sonnet-4-5-20250514"
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
+    character_file: str = "character.md"
+    personalia_file: str = "personalia.md"
 
 
 class TelegramConfig(BaseModel):

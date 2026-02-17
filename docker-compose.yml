@@ -8,5 +8,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./config.yml:/app/config.yml:ro
+      - ./character.md:/app/character.md:ro
+      - ./personalia.md:/app/personalia.md
       - ./skills:/app/skills:ro
     env_file: .env

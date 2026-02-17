@@ -11,8 +11,10 @@ class ToolExecutor:
 
     ALLOWED_PREFIXES = [
         "himalaya",
+        "jq",
         "khard",
         "vdirsyncer",
+        "sqlite3",
         "python3 /app/tools/",
     ]
 
