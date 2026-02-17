@@ -20,6 +20,7 @@ dependencies = [
     "tavily-python",
     "httpx",
     "jinja2",
+    "python-multipart>=0.0.22",
 ]
 
 [dependency-groups]

@@ -47,7 +47,7 @@ class _AgentStub:
 def _client(setup_complete: bool = True) -> TestClient:
     store = _ConfigStoreStub(setup_complete=setup_complete)
     agent_state = AgentState(agent=_AgentStub())
-    app = create_admin_app(agent_state, store)
+    app, _auth = create_admin_app(agent_state, store)
     return TestClient(app)
 
 

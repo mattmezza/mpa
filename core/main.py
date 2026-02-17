@@ -14,6 +14,8 @@ import asyncio
 import logging
 
 import uvicorn
+from fastapi import Depends, Request
+from fastapi.responses import HTMLResponse
 
 from api.admin import AgentState, create_admin_app, install_log_buffer
 from core.config_store import ConfigStore
@@ -178,9 +180,6 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
     dashboard buttons) and JSON for programmatic callers (the setup
     wizard's fetch() call).
     """
-
-    from fastapi import Depends, Request
-    from fastapi.responses import HTMLResponse
 
     def _is_htmx(request: Request) -> bool:
         return request.headers.get("HX-Request") == "true"
