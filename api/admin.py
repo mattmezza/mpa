@@ -215,7 +215,13 @@ def create_admin_app(
     agent_state: AgentState,
     config_store: ConfigStore,
 ) -> tuple[FastAPI, object]:
-    app = FastAPI(title="Personal Agent Admin", version="0.1.0")
+    app = FastAPI(
+        title="Personal Agent Admin",
+        version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
 
     # Mount static files
     static_dir = Path(__file__).parent / "static"
