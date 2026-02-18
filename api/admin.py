@@ -719,6 +719,10 @@ def create_admin_app(
             if ap_job.next_run_time:
                 next_run = ap_job.next_run_time.strftime("%Y-%m-%d %H:%M")
 
+            silent = bool(kwargs.get("silent", False))
+            if job_type == "agent" and silent:
+                job_type = "agent_silent"
+
             jobs.append(
                 {
                     "id": ap_job.id,
@@ -760,7 +764,7 @@ def create_admin_app(
             raise HTTPException(400, "Job ID is required")
         if not cron:
             raise HTTPException(400, "Cron schedule is required")
-        if job_type not in ("agent", "system", "memory_consolidation"):
+        if job_type not in ("agent", "agent_silent", "system", "memory_consolidation"):
             raise HTTPException(400, f"Invalid job type: {job_type}")
         if job_type != "memory_consolidation" and not task:
             raise HTTPException(400, "Task is required for agent/system jobs")
@@ -796,11 +800,17 @@ def create_admin_app(
                 **cron_kwargs,
             )
         else:
+            silent = job_type == "agent_silent"
             agent.scheduler.scheduler.add_job(
                 run_agent_task,
                 "cron",
                 id=job_id,
-                kwargs={"task": task, "channel": channel},
+                kwargs={
+                    "task": task,
+                    "channel": channel,
+                    "job_id": job_id,
+                    "silent": silent,
+                },
                 replace_existing=True,
                 **cron_kwargs,
             )

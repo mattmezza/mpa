@@ -92,6 +92,7 @@
         <select class="select" name="type" x-model="form.type"
                 style="padding: 0.375rem 2rem 0.375rem 0.5rem; font-size: 0.75rem;">
           <option value="agent">agent — natural language task</option>
+          <option value="agent_silent">agent_silent — quiet when nothing new</option>
           <option value="system">system — CLI command</option>
           <option value="memory_consolidation">memory_consolidation</option>
         </select>
@@ -110,6 +111,7 @@
                   :placeholder="form.type === 'system' ? 'vdirsyncer sync' : 'Check my calendar and send me a morning briefing'"
                   :required="form.type !== 'memory_consolidation'"></textarea>
         <span class="hint" x-show="form.type === 'agent'">Natural language instruction for the agent</span>
+        <span class="hint" x-show="form.type === 'agent_silent'">Only sends when there are updates; otherwise stays quiet</span>
         <span class="hint" x-show="form.type === 'system'">Shell command to execute</span>
         <span class="hint" x-show="form.type === 'memory_consolidation'">No task needed — runs memory consolidation automatically</span>
       </div>

@@ -36,12 +36,28 @@ def _get_agent_context() -> AgentCore | None:
     return _AGENT_CONTEXT
 
 
-async def run_agent_task(task: str, channel: str = "telegram") -> None:
+async def run_agent_task(
+    task: str,
+    channel: str = "telegram",
+    job_id: str | None = None,
+    silent: bool = False,
+) -> None:
     """Execute a natural-language task through the agent and deliver the result."""
     agent = _get_agent_context()
     if agent is None:
         log.error("Scheduler agent task dropped; agent not initialized")
         return
+
+    lower_task = task.lower()
+    is_email_check = job_id == "email_check" or (
+        "email" in lower_task and "notify me if any" in lower_task
+    )
+    silent_mode = silent or is_email_check
+    if silent_mode:
+        task = (
+            task
+            + "\n\nIf there is nothing important or urgent to report, respond with [NO_UPDATES] only."
+        )
 
     log.info("Scheduler running agent task: %s", task[:100])
     try:
@@ -54,10 +70,14 @@ async def run_agent_task(task: str, channel: str = "telegram") -> None:
         # Deliver the response to the target channel
         ch = agent.channels.get(channel)
         if ch and response.text:
+            text = response.text.replace("[NO_UPDATES]", "").strip()
+            if silent_mode and not text:
+                log.info("Scheduler silent task produced no updates; skipping send")
+                return
             # For Telegram, send to the first allowed user (the owner)
             chat_id = _get_owner_chat_id(agent, channel)
             if chat_id:
-                await ch.send(chat_id, response.text)
+                await ch.send(chat_id, text or response.text)
             else:
                 log.warning("Scheduler: no owner chat ID for channel %r, response dropped", channel)
         elif not ch:
@@ -173,7 +193,11 @@ class AgentScheduler:
                     run_agent_task,
                     "cron",
                     id=job.id,
-                    kwargs={"task": job.task, "channel": job.channel},
+                    kwargs={
+                        "task": job.task,
+                        "channel": job.channel,
+                        "job_id": job.id,
+                    },
                     replace_existing=True,
                     **cron_kwargs,
                 )
@@ -187,7 +211,7 @@ class AgentScheduler:
             "date",
             id=job_id,
             run_date=run_at,
-            kwargs={"task": task, "channel": channel},
+            kwargs={"task": task, "channel": channel, "job_id": job_id},
             replace_existing=True,
         )
         log.info("Scheduled one-shot job %r at %s", job_id, run_at)
