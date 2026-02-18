@@ -61,41 +61,23 @@ himalaya envelope list -a work -o json -- "from ikea subject contract unseen"
 
 ## Sending emails
 
-### Send a new email
+**IMPORTANT:** Do NOT use `run_command` with piped `printf` / `echo` commands to send or reply to
+emails. Instead, always use the dedicated structured tools:
 
-Construct the message as headers + blank line + body, then pipe to himalaya:
+- **`send_email`** — for composing and sending a new email (pass account, to, subject, body, etc.)
+- **`reply_email`** — for replying to an existing email by message ID (pass account, message_id, body)
 
-```bash
-printf 'From: matteo@example.com\nTo: recipient@example.com\nSubject: Hello\n\nThis is the body.' | himalaya message send -a personal
-```
-
-For multi-line bodies:
-
-```bash
-printf 'From: matteo@example.com\nTo: recipient@example.com\nSubject: Meeting follow-up\n\nHi Alice,\n\nThanks for the meeting today.\n\nBest regards,\nMatteo' | himalaya message send -a personal
-```
-
-With CC and BCC:
-
-```bash
-printf 'From: matteo@example.com\nTo: alice@example.com\nCc: bob@example.com\nBcc: carol@example.com\nSubject: Project update\n\nPlease see attached notes.' | himalaya message send -a work
-```
-
-### Reply to an email
-
-```bash
-# Reply to sender only
-printf 'Thanks for your email.\n\nBest regards,\nMatteo' | himalaya message reply 123 -a personal
-
-# Reply to all recipients
-printf 'Thanks everyone.\n\nBest,\nMatteo' | himalaya message reply --all 123 -a personal
-```
+These tools handle shell quoting and piping internally. Using `run_command` with `printf ... | himalaya`
+will fail because `printf` is not an allowed command prefix.
 
 ### Forward an email
 
+Forwarding is not available as a structured tool, so use `run_command` with himalaya as the first
+command in the pipe:
+
 ```bash
 # Forward with added text
-printf 'FYI — see below.' | himalaya message forward 123 -a work
+himalaya -a work message forward 123 <<< 'FYI — see below.'
 ```
 
 ## Managing emails

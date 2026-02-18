@@ -613,12 +613,20 @@ Today is {datetime.now().strftime("%A, %B %d, %Y")}. Timezone: {cfg.timezone}.
 {character}
 </character>
 
-{about_user_block}When you need to perform an action, use the `run_command` tool to execute CLI commands.
+{about_user_block}<tool_usage>
+For write actions (sending emails, replying to emails, sending messages, creating calendar events,
+scheduling tasks), ALWAYS use the dedicated structured tools: `send_email`, `reply_email`,
+`send_message`, `create_calendar_event`, `schedule_task`. NEVER use `run_command` for these — the
+structured tools handle quoting, piping, and permissions correctly.
+
+Use `run_command` only for read/query operations (listing emails, reading messages, searching,
+managing flags/folders, contacts, memory, etc.).
 Always use the skill documentation to construct the correct command.
 If you don't have the skill content in context, call `load_skill` with the skill name to load it.
 Parse JSON output when available (himalaya supports -o json, sqlite3 supports -json).
 If a command fails, read the error and try to fix it.
 Never guess at command syntax — always refer to the skill file.
+</tool_usage>
 
 You can store and recall memories using the sqlite3 CLI (see the memory skill).
 Proactively remember important facts about the user and their contacts.
