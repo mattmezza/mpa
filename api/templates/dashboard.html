@@ -16,7 +16,8 @@
   </div>
 
   <div id="agent-modal" class="fixed" style="inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 50;">
-    <div class="card" style="max-width: 520px; width: 100%;">
+    <div class="card" style="max-width: 520px; width: 100%;"
+         x-data="agentControl()" x-init="init()">
       <div class="flex items-center justify-between mb-3">
         <div>
           <h2 class="text-base text-accent">Agent Control</h2>
@@ -25,12 +26,24 @@
         <button class="btn btn-sm" type="button" onclick="closeAgentModal()">Close</button>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
-        <button class="btn btn-sm" hx-post="/agent/start" hx-target="#agent-modal-result" hx-swap="innerHTML">Start</button>
-        <button class="btn-danger btn-sm" hx-post="/agent/stop" hx-target="#agent-modal-result" hx-swap="innerHTML"
-                hx-confirm="Stop the agent?">Stop</button>
-        <button class="btn btn-sm" hx-post="/agent/restart" hx-target="#agent-modal-result" hx-swap="innerHTML">Restart</button>
+        <button class="btn btn-sm" :disabled="busy" @click="run('start')">
+          <span x-show="action === 'start'" class="spinner" style="width: 12px; height: 12px; display: none;"></span>
+          Start
+        </button>
+        <button class="btn-danger btn-sm" :disabled="busy" @click="run('stop', true)">
+          <span x-show="action === 'stop'" class="spinner" style="width: 12px; height: 12px; display: none;"></span>
+          Stop
+        </button>
+        <button class="btn btn-sm" :disabled="busy" @click="run('restart')">
+          <span x-show="action === 'restart'" class="spinner" style="width: 12px; height: 12px; display: none;"></span>
+          Restart
+        </button>
       </div>
-      <div id="agent-modal-result" class="mt-3 text-xs"></div>
+      <div id="agent-modal-result" class="mt-3 text-xs">
+        <template x-if="result">
+          <span :class="ok ? 'alert-success' : 'alert-error'" x-text="result"></span>
+        </template>
+      </div>
       <div class="mt-3 text-muted text-xs">
         Current status updates in the header badge; click it any time to manage the agent.
       </div>
@@ -110,6 +123,59 @@
 
 {% block scripts %}
 <script>
+  function agentControl() {
+    return {
+      busy: false,
+      action: '',
+      result: '',
+      ok: false,
+      init() {
+        // Reset result when modal is reopened
+        const modal = document.getElementById('agent-modal');
+        if (modal) {
+          const observer = new MutationObserver(() => {
+            if (modal.style.display === 'flex' && !this.busy) {
+              this.result = '';
+            }
+          });
+          observer.observe(modal, { attributes: true, attributeFilter: ['style'] });
+        }
+      },
+      async run(act, confirm = false) {
+        if (confirm && !window.confirm('Stop the agent?')) return;
+        this.busy = true;
+        this.action = act;
+        this.result = '';
+        // Immediately refresh the status bar so the user sees STARTING/STOPPING/RESTARTING
+        document.body.dispatchEvent(new CustomEvent('refresh-status'));
+        const key = localStorage.getItem('admin_api_key') || '';
+        try {
+          const resp = await fetch('/agent/' + act, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + key }
+          });
+          const data = await resp.json();
+          const status = data.status || '';
+          if (['started', 'already_running', 'stopped', 'not_running', 'restarted'].includes(status)) {
+            this.ok = true;
+            this.result = status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          } else {
+            this.ok = false;
+            this.result = data.error || status;
+          }
+        } catch (e) {
+          this.ok = false;
+          this.result = e.message || 'Request failed';
+        } finally {
+          this.busy = false;
+          this.action = '';
+          // Refresh status bar with final state
+          document.body.dispatchEvent(new CustomEvent('refresh-status'));
+        }
+      }
+    };
+  }
+
   function openAgentModal() {
     const modal = document.getElementById('agent-modal');
     if (!modal) return;
