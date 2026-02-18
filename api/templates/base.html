@@ -139,6 +139,31 @@
     }
     window.calendarTab = calendarTab;
 
+    function emailTab(toml) {
+      return {
+        toml: toml || '',
+        result: '',
+        resultOk: false,
+        save() {
+          fetch('/config', {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+            },
+            body: JSON.stringify({values: {'email.himalaya.toml': this.toml}})
+          })
+            .then(r => { this.resultOk = r.ok; return r.json(); })
+            .then(d => {
+              this.result = this.resultOk ? 'Email config saved' : (d.detail || 'Error');
+              if (this.resultOk && window.showToast) { window.showToast('Email config saved'); }
+            })
+            .catch(e => { this.resultOk = false; this.result = e.message; });
+        }
+      };
+    }
+    window.emailTab = emailTab;
+
     // Global: handle 401 by redirecting to auth gate
     document.body.addEventListener('htmx:responseError', function(e) {
       if (e.detail.xhr.status === 401) {

@@ -79,6 +79,10 @@
             @click="select('calendars')">
       Calendars
     </button>
+    <button class="tab-link" :class="tab === 'email' && 'tab-link-active'"
+            @click="select('email')">
+      Email
+    </button>
     <button class="tab-link" :class="tab === 'history' && 'tab-link-active'"
             @click="select('history')">
       History
@@ -282,6 +286,7 @@
       skills: '/partials/skills',
       jobs: '/partials/jobs',
       calendars: '/partials/calendars',
+      email: '/partials/email',
       history: '/partials/history',
       logs: '/partials/logs',
       admin: '/partials/admin',

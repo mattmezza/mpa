@@ -1,0 +1,30 @@
+{# Email tab partial #}
+<div class="space-y-6" x-data="emailTab({{ himalaya_toml|default('', true)|tojson|forceescape }})">
+  <div class="card">
+    <h2 class="text-base mb-1">Email (Himalaya)</h2>
+    <p class="text-muted text-xs mb-4">
+      Store your Himalaya TOML configuration in the config database. It is materialized into a
+      temporary file at runtime for the CLI.
+    </p>
+
+    <div class="space-y-3">
+      <div>
+        <label class="label">Himalaya config (TOML)</label>
+        <textarea class="input-sm" style="min-height: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;"
+                  x-model="toml" placeholder="[accounts.personal]\nemail = \"you@example.com\"\n..."></textarea>
+        <p class="text-muted text-xs mt-1">Saved to <code>/tmp/mpa-himalaya-config.toml</code> on change and at startup.</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2 mt-4">
+      <button class="btn-primary btn-sm"
+              @click="save()">
+        Save
+      </button>
+    </div>
+
+    <template x-if="result">
+      <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
+    </template>
+  </div>
+</div>

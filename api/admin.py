@@ -356,6 +356,7 @@ def create_admin_app(
     _YOU_PREFIX = "you."
     _VOICE_PREFIX = "voice."
     _HISTORY_PREFIX = "history."
+    _EMAIL_PREFIX = "email."
 
     def _is_managed_key(key: str) -> bool:
         """Return True if this key is managed by a dedicated tab (not Config)."""
@@ -370,6 +371,7 @@ def create_admin_app(
             _YOU_PREFIX,
             _VOICE_PREFIX,
             _HISTORY_PREFIX,
+            _EMAIL_PREFIX,
         ):
             if key.startswith(prefix):
                 return True
@@ -546,6 +548,12 @@ def create_admin_app(
         """Calendars tab partial."""
         providers = await _calendar_providers_context(config_store)
         return _render_partial("partials/calendars.html", providers=providers)
+
+    @app.get("/partials/email", dependencies=[Depends(auth)])
+    async def partial_email() -> HTMLResponse:
+        """Email tab partial."""
+        himalaya_toml = await config_store.get("email.himalaya.toml") or ""
+        return _render_partial("partials/email.html", himalaya_toml=himalaya_toml)
 
     @app.get("/partials/admin", dependencies=[Depends(auth)])
     async def partial_admin() -> HTMLResponse:
