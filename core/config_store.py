@@ -20,10 +20,12 @@ import json
 import logging
 import secrets
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import aiosqlite
 
 from core.config import Config, load_config
+from core.email_config import materialize_himalaya_config
 
 log = logging.getLogger(__name__)
 
@@ -71,10 +73,15 @@ SETUP_STEPS = [
 ]
 
 
+@runtime_checkable
+class _HasModelDump(Protocol):
+    def model_dump(self) -> dict: ...
+
+
 def _flatten(obj: object, prefix: str = "") -> dict[str, str]:
     """Flatten a nested dict/Pydantic model into dotted key-value pairs."""
     items: dict[str, str] = {}
-    if hasattr(obj, "model_dump"):
+    if isinstance(obj, _HasModelDump):
         obj = obj.model_dump()
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -135,6 +142,13 @@ def _redact(value: str) -> str:
     if not value or len(value) < 8:
         return "***" if value else ""
     return value[:4] + "***" + value[-4:]
+
+
+def _email_keys_changed(keys: list | tuple | set) -> bool:
+    for key in keys:
+        if key == "email.himalaya.toml" or str(key).startswith("email."):
+            return True
+    return False
 
 
 def _hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
@@ -228,6 +242,8 @@ class ConfigStore:
                 (key, value),
             )
             await db.commit()
+        if _email_keys_changed([key]):
+            await materialize_himalaya_config(self)
 
     async def set_many(self, values: dict[str, str]) -> None:
         """Set multiple config values atomically."""
@@ -240,6 +256,8 @@ class ConfigStore:
                     (key, str(value)),
                 )
             await db.commit()
+        if _email_keys_changed(list(values.keys())):
+            await materialize_himalaya_config(self)
 
     async def delete(self, key: str) -> bool:
         """Delete a config value. Returns True if it existed."""
@@ -247,7 +265,10 @@ class ConfigStore:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("DELETE FROM config WHERE key = ?", (key,))
             await db.commit()
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted and _email_keys_changed([key]):
+            await materialize_himalaya_config(self)
+        return deleted
 
     # -- Bulk operations -----------------------------------------------------
 

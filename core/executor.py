@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+
+from core.email_config import himalaya_env
 
 
 class ToolExecutor:
@@ -38,10 +41,15 @@ class ToolExecutor:
 
     async def _exec(self, command: str, timeout: int) -> dict:
         """Run a shell command and capture output."""
+        env = None
+        if "himalaya" in command:
+            env = os.environ.copy()
+            env.update(himalaya_env())
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
