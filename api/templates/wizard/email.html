@@ -1,16 +1,37 @@
 <div class="card">
   <h2 class="text-base mb-3">Email <span class="text-muted font-normal text-xs">(optional)</span></h2>
-  <p class="text-muted text-sm">Email is managed via Himalaya CLI config files. You can set this up later by editing <code class="text-gray-300">cli-configs/himalaya.toml</code>.</p>
+  <p class="text-muted text-sm">Paste your Himalaya TOML config. It will be stored in the config database and materialized into a temporary file at runtime.</p>
+
+  <div class="mt-4">
+    <label class="label">Himalaya config (TOML)</label>
+    <textarea class="input-sm" id="w-email-toml"
+              style="min-height: 240px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;"
+              placeholder="[accounts.personal]\nemail = \"you@example.com\"\n...">{{ step_ctx.himalaya_toml|default('', true) }}</textarea>
+  </div>
 
   <div class="flex justify-between mt-4">
     <button class="btn"
-            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
-            hx-vals='{"step": "telegram", "values": {}}'>
+            @click="
+              htmx.ajax('POST', '/setup/step', {
+                target: '#wizard-step', swap: 'innerHTML',
+                values: {
+                  step: 'telegram',
+                  'values[email.himalaya.toml]': document.getElementById('w-email-toml').value
+                }
+              })
+            ">
       Back
     </button>
     <button class="btn-primary"
-            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
-            hx-vals='{"step": "calendar", "values": {}}'>
+            @click="
+              htmx.ajax('POST', '/setup/step', {
+                target: '#wizard-step', swap: 'innerHTML',
+                values: {
+                  step: 'calendar',
+                  'values[email.himalaya.toml]': document.getElementById('w-email-toml').value
+                }
+              })
+            ">
       Next
     </button>
   </div>

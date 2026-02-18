@@ -78,6 +78,10 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             val = await config_store.get(key)
             if val:
                 ctx[var] = val
+    elif step == "email":
+        val = await config_store.get("email.himalaya.toml")
+        if val:
+            ctx["himalaya_toml"] = val
     elif step == "telegram":
         for key, var in (
             ("channels.telegram.bot_token", "bot_token"),
