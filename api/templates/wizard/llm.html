@@ -51,13 +51,12 @@
 
     <label class="label" for="w-provider">Provider</label>
     <select class="select" id="w-provider" name="provider" x-model="provider">
-      <option value="anthropic" {{ 'selected' if step_ctx.provider|default('anthropic') == 'anthropic' }} :disabled="!tests.anthropic">Anthropic</option>
-    <option value="openai" {{ 'selected' if step_ctx.provider|default('') == 'openai' }} :disabled="!tests.openai">OpenAI</option>
-    <option value="google" {{ 'selected' if step_ctx.provider|default('') == 'google' }} :disabled="!tests.google">Google Gemini</option>
-      <option value="grok" {{ 'selected' if step_ctx.provider|default('') == 'grok' }} :disabled="!tests.grok">Grok (xAI)</option>
-      <option value="deepseek" {{ 'selected' if step_ctx.provider|default('') == 'deepseek' }} :disabled="!tests.deepseek">DeepSeek</option>
+      <option value="anthropic" {{ 'selected' if step_ctx.provider|default('anthropic') == 'anthropic' }}>Anthropic</option>
+      <option value="openai" {{ 'selected' if step_ctx.provider|default('') == 'openai' }}>OpenAI</option>
+      <option value="google" {{ 'selected' if step_ctx.provider|default('') == 'google' }}>Google Gemini</option>
+      <option value="grok" {{ 'selected' if step_ctx.provider|default('') == 'grok' }}>Grok (xAI)</option>
+      <option value="deepseek" {{ 'selected' if step_ctx.provider|default('') == 'deepseek' }}>DeepSeek</option>
     </select>
-    <p class="text-muted text-xs mt-1">Options appear after each provider passes its connection test.</p>
 
   <label class="label mt-3" for="w-model">Model</label>
   <select class="select" id="w-model" name="model" x-model="model">
@@ -66,9 +65,6 @@
     </template>
   </select>
 
-    <template x-if="!tests[provider]">
-      <div class="alert-error mt-2">Test the selected provider before continuing.</div>
-    </template>
   </div>
 
   <div class="card" style="padding: 0; box-shadow: none; border: 0; margin-top: 16px;">
@@ -283,7 +279,7 @@
             hx-vals='{"step": "welcome", "values": {}}'>
       Back
     </button>
-    <button class="btn-primary" :disabled="!tests[provider]"
+    <button class="btn-primary"
             @click="
               const provider = document.getElementById('w-provider').value;
               const anthropicKey = document.getElementById('w-anthropic-key')?.value || '';

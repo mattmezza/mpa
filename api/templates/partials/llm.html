@@ -20,13 +20,12 @@
       <div>
         <label class="label">Provider</label>
         <select class="input-sm" style="max-width:500px" x-model="provider">
-          <option value="anthropic" :disabled="!tests.anthropic">Anthropic</option>
-          <option value="openai" :disabled="!tests.openai">OpenAI</option>
-          <option value="google" :disabled="!tests.google">Google Gemini</option>
-          <option value="grok" :disabled="!tests.grok">Grok (xAI)</option>
-          <option value="deepseek" :disabled="!tests.deepseek">DeepSeek</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+          <option value="google">Google Gemini</option>
+          <option value="grok">Grok (xAI)</option>
+          <option value="deepseek">DeepSeek</option>
         </select>
-        <p class="text-muted text-xs mt-1">Options appear after each provider passes its connection test.</p>
       </div>
 
       <div>
@@ -41,7 +40,7 @@
     </form>
 
     <div class="flex items-center gap-2 mt-4">
-      <button class="btn-primary btn-sm" :disabled="!tests[provider]"
+      <button class="btn-primary btn-sm"
               @click="
                 fetch('/config', {
                   method: 'PATCH',
@@ -73,10 +72,6 @@
         Save
       </button>
     </div>
-
-    <template x-if="!tests[provider]">
-      <div class="alert-error mt-2">Select a provider only after a successful connection test.</div>
-    </template>
 
     <template x-if="result">
       <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
