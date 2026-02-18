@@ -20,6 +20,14 @@ class ToolExecutor:
         "vdirsyncer",
         "sqlite3",
         "python3 /app/tools/",
+        "gh",
+        "git",
+        "w3m",
+        "pandoc",
+        "pdftotext",
+        "rg",
+        "yt-dlp",
+        "cal",
     ]
 
     async def run_command(self, command: str, timeout: int = 30) -> dict:
