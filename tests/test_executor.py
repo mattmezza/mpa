@@ -38,3 +38,27 @@ def test_parse_json_output_handles_invalid_json() -> None:
     output = executor.parse_json_output("not json")
 
     assert output == {"raw": "not json"}
+
+
+@pytest.mark.asyncio
+async def test_himalaya_command_sets_env(monkeypatch) -> None:
+    executor = ToolExecutor()
+    created = {}
+
+    async def _fake_subprocess_shell(command, stdout, stderr, env):
+        created["env"] = env
+
+        class _Proc:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        return _Proc()
+
+    monkeypatch.setattr("core.executor.asyncio.create_subprocess_shell", _fake_subprocess_shell)
+    monkeypatch.setattr("core.executor.himalaya_env", lambda: {"HIMALAYA_CONFIG": "/tmp/x"})
+
+    await executor.run_command("himalaya envelope list")
+
+    assert created["env"]["HIMALAYA_CONFIG"] == "/tmp/x"

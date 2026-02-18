@@ -40,3 +40,19 @@ async def test_set_get_delete(tmp_path) -> None:
     deleted = await store.delete("agent.name")
     assert deleted is True
     assert await store.get("agent.name") is None
+
+
+@pytest.mark.asyncio
+async def test_email_config_materializes_on_set(tmp_path, monkeypatch) -> None:
+    store = ConfigStore(db_path=str(tmp_path / "config.db"))
+    called = []
+
+    async def _fake_materialize(_store):
+        called.append(True)
+        return True
+
+    monkeypatch.setattr("core.config_store.materialize_himalaya_config", _fake_materialize)
+
+    await store.set("email.himalaya.toml", "[accounts.personal]\n")
+
+    assert called
