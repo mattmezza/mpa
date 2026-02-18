@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ChatAction
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
 if TYPE_CHECKING:
@@ -146,6 +148,32 @@ class TelegramChannel:
 
     # -- Helpers -------------------------------------------------------------
 
+    @asynccontextmanager
+    async def _typing(self, chat_id: int):
+        """Send 'typing' chat action continuously until the wrapped block completes.
+
+        Telegram's typing indicator expires after ~5 seconds, so we resend it
+        every 4 seconds to keep it visible for the duration of agent processing.
+        """
+
+        async def _send_typing():
+            try:
+                while True:
+                    await self.app.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                    await asyncio.sleep(4)
+            except asyncio.CancelledError:
+                pass
+
+        task = asyncio.create_task(_send_typing(), name=f"tg-typing-{chat_id}")
+        try:
+            yield
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
     def _is_allowed(self, user_id: int) -> bool:
         if self.config.allowed_user_ids and user_id not in self.config.allowed_user_ids:
             log.warning("Ignoring message from unauthorized user %s", user_id)
@@ -153,32 +181,38 @@ class TelegramChannel:
         return True
 
     async def _handle_text(self, text: str, user_id: int, chat_id: int) -> None:
-        response = await self.agent.process(
-            message=text,
-            channel="telegram",
-            user_id=str(user_id),
-        )
+        async with self._typing(chat_id):
+            response = await self.agent.process(
+                message=text,
+                channel="telegram",
+                user_id=str(user_id),
+            )
         await self._send_response(chat_id, response)
 
     async def _handle_voice(self, file_id: str, user_id: int, chat_id: int) -> None:
-        file = await self.app.bot.get_file(file_id)
-        audio_bytes = await file.download_as_bytearray()
+        async with self._typing(chat_id):
+            file = await self.app.bot.get_file(file_id)
+            audio_bytes = await file.download_as_bytearray()
 
-        # Transcribe via Whisper
-        log.info("Transcribing voice message from user %s (%d bytes)", user_id, len(audio_bytes))
-        transcript = await self.voice.transcribe(bytes(audio_bytes))
+            # Transcribe via Whisper
+            log.info(
+                "Transcribing voice message from user %s (%d bytes)", user_id, len(audio_bytes)
+            )
+            transcript = await self.voice.transcribe(bytes(audio_bytes))
 
-        if not transcript.strip():
-            await self.app.bot.send_message(chat_id=chat_id, text="(could not transcribe voice)")
-            return
+            if not transcript.strip():
+                await self.app.bot.send_message(
+                    chat_id=chat_id, text="(could not transcribe voice)"
+                )
+                return
 
-        log.info("Transcript: %s", transcript[:200])
+            log.info("Transcript: %s", transcript[:200])
 
-        response = await self.agent.process(
-            message=f"[voice] {transcript}",
-            channel="telegram",
-            user_id=str(user_id),
-        )
+            response = await self.agent.process(
+                message=f"[voice] {transcript}",
+                channel="telegram",
+                user_id=str(user_id),
+            )
         await self._send_response(chat_id, response)
 
     async def _send_response(self, chat_id: int, response) -> None:
