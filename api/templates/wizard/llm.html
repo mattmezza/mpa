@@ -1,84 +1,243 @@
-<div class="card" x-data="{ testResult: '', testOk: false, testing: false }">
+<div class="card" x-data="{
+  provider: {{ step_ctx.provider|default('anthropic')|tojson|forceescape }},
+  tests: { anthropic: false, openai: false, google: false, grok: false, deepseek: false },
+  testResults: { anthropic: '', openai: '', google: '', grok: '', deepseek: '' },
+  testing: false
+}">
   <h2 class="text-base mb-3">LLM Provider</h2>
 
-  <label class="label" for="w-provider">Provider</label>
-  <select class="select" id="w-provider" name="provider">
-    <option value="anthropic" {{ 'selected' if step_ctx.provider|default('anthropic') == 'anthropic' }}>Anthropic</option>
-    <option value="openai" {{ 'selected' if step_ctx.provider|default('') == 'openai' }}>OpenAI</option>
-    <option value="grok" {{ 'selected' if step_ctx.provider|default('') == 'grok' }}>Grok (xAI)</option>
-    <option value="deepseek" {{ 'selected' if step_ctx.provider|default('') == 'deepseek' }}>DeepSeek</option>
-  </select>
+  <div class="card" style="padding: 0; box-shadow: none; border: 0;">
+    <h3 class="text-sm mb-2">Active Inference Provider</h3>
+    <p class="text-muted text-xs mb-3">Select the provider used for inference after testing it.</p>
 
-  <div class="mt-3" x-show="document.getElementById('w-provider').value === 'anthropic'">
+    <label class="label" for="w-provider">Provider</label>
+    <select class="select" id="w-provider" name="provider" x-model="provider">
+      <option value="anthropic" {{ 'selected' if step_ctx.provider|default('anthropic') == 'anthropic' }} :disabled="!tests.anthropic">Anthropic</option>
+    <option value="openai" {{ 'selected' if step_ctx.provider|default('') == 'openai' }} :disabled="!tests.openai">OpenAI</option>
+    <option value="google" {{ 'selected' if step_ctx.provider|default('') == 'google' }} :disabled="!tests.google">Google Gemini</option>
+      <option value="grok" {{ 'selected' if step_ctx.provider|default('') == 'grok' }} :disabled="!tests.grok">Grok (xAI)</option>
+      <option value="deepseek" {{ 'selected' if step_ctx.provider|default('') == 'deepseek' }} :disabled="!tests.deepseek">DeepSeek</option>
+    </select>
+    <p class="text-muted text-xs mt-1">Options appear after each provider passes its connection test.</p>
+
+    <label class="label mt-3" for="w-model">Model</label>
+    <select class="select" id="w-model" name="model">
+      <option value="claude-sonnet-4-5-20250514" {{ 'selected' if step_ctx.model|default('') == 'claude-sonnet-4-5-20250514' or not step_ctx.model|default('') }}>Claude Sonnet 4.5</option>
+      <option value="claude-haiku-4-5" {{ 'selected' if step_ctx.model|default('') == 'claude-haiku-4-5' }}>Claude Haiku 4.5 (cheaper)</option>
+    <option value="gpt-4o-mini" {{ 'selected' if step_ctx.model|default('') == 'gpt-4o-mini' }}>GPT-4o mini</option>
+    <option value="gpt-4o" {{ 'selected' if step_ctx.model|default('') == 'gpt-4o' }}>GPT-4o</option>
+    <option value="gemini-3-pro" {{ 'selected' if step_ctx.model|default('') == 'gemini-3-pro' }}>Gemini 3 Pro</option>
+    <option value="gemini-3-flash" {{ 'selected' if step_ctx.model|default('') == 'gemini-3-flash' }}>Gemini 3 Flash</option>
+    <option value="grok-2-latest" {{ 'selected' if step_ctx.model|default('') == 'grok-2-latest' }}>Grok-2 Latest</option>
+    <option value="deepseek-chat" {{ 'selected' if step_ctx.model|default('') == 'deepseek-chat' }}>DeepSeek Chat</option>
+    </select>
+
+    <template x-if="!tests[provider]">
+      <div class="alert-error mt-2">Test the selected provider before continuing.</div>
+    </template>
+  </div>
+
+  <div class="card" style="padding: 0; box-shadow: none; border: 0; margin-top: 16px;">
+    <h3 class="text-sm mb-2">Anthropic</h3>
     <label class="label" for="w-anthropic-key">Anthropic API Key</label>
     <input type="password" class="input" id="w-anthropic-key" placeholder="sk-ant-..."
            value="{{ step_ctx.anthropic_api_key|default('') }}">
     <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a></p>
+
+    <div class="mt-3">
+      <button class="btn" :disabled="testing"
+              @click="
+                testing = true;
+                const provider = 'anthropic';
+                const apiKey = document.getElementById('w-anthropic-key').value;
+                fetch('/setup/test-connection', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({service: provider, api_key: apiKey})
+                })
+                .then(r => r.json())
+                .then(d => {
+                  tests[provider] = !!d.ok;
+                  testResults[provider] = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error;
+                })
+                .catch(e => {
+                  tests[provider] = false;
+                  testResults[provider] = e.message;
+                })
+                .finally(() => { testing = false; })
+              ">
+        <span x-show="testing" class="spinner mr-1"></span>
+        Test connection
+      </button>
+    </div>
+    <template x-if="testResults.anthropic">
+      <div :class="tests.anthropic ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.anthropic"></div>
+    </template>
   </div>
 
-  <div class="mt-3" x-show="document.getElementById('w-provider').value === 'openai'">
+  <div class="card" style="padding: 0; box-shadow: none; border: 0; margin-top: 16px;">
+    <h3 class="text-sm mb-2">OpenAI</h3>
     <label class="label" for="w-openai-key">OpenAI API Key</label>
     <input type="password" class="input" id="w-openai-key" placeholder="sk-..."
            value="{{ step_ctx.openai_api_key|default('') }}">
+    <label class="label mt-2" for="w-openai-base-url">OpenAI Base URL (optional)</label>
+    <input type="text" class="input" id="w-openai-base-url" placeholder="https://..."
+           value="{{ step_ctx.openai_base_url|default('') }}">
+
+    <div class="mt-3">
+      <button class="btn" :disabled="testing"
+              @click="
+                testing = true;
+                const provider = 'openai';
+                const apiKey = document.getElementById('w-openai-key').value;
+                const baseUrl = document.getElementById('w-openai-base-url').value;
+                fetch('/setup/test-connection', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({service: provider, api_key: apiKey, base_url: baseUrl})
+                })
+                .then(r => r.json())
+                .then(d => {
+                  tests[provider] = !!d.ok;
+                  testResults[provider] = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error;
+                })
+                .catch(e => {
+                  tests[provider] = false;
+                  testResults[provider] = e.message;
+                })
+                .finally(() => { testing = false; })
+              ">
+        <span x-show="testing" class="spinner mr-1"></span>
+        Test connection
+      </button>
+    </div>
+    <template x-if="testResults.openai">
+      <div :class="tests.openai ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.openai"></div>
+    </template>
   </div>
 
-  <div class="mt-3" x-show="document.getElementById('w-provider').value === 'grok'">
+  <div class="card" style="padding: 0; box-shadow: none; border: 0; margin-top: 16px;">
+    <h3 class="text-sm mb-2">Google Gemini</h3>
+    <label class="label" for="w-google-key">Google API Key</label>
+    <input type="password" class="input" id="w-google-key" placeholder="AIza..."
+           value="{{ step_ctx.google_api_key|default('') }}">
+    <label class="label mt-2" for="w-google-base-url">Google Base URL (optional)</label>
+    <input type="text" class="input" id="w-google-base-url" placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
+           value="{{ step_ctx.google_base_url|default('') }}">
+
+    <div class="mt-3">
+      <button class="btn" :disabled="testing"
+              @click="
+                testing = true;
+                const provider = 'google';
+                const apiKey = document.getElementById('w-google-key').value;
+                const baseUrl = document.getElementById('w-google-base-url').value || 'https://generativelanguage.googleapis.com/v1beta/openai';
+                fetch('/setup/test-connection', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({service: provider, api_key: apiKey, base_url: baseUrl})
+                })
+                .then(r => r.json())
+                .then(d => {
+                  tests[provider] = !!d.ok;
+                  testResults[provider] = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error;
+                })
+                .catch(e => {
+                  tests[provider] = false;
+                  testResults[provider] = e.message;
+                })
+                .finally(() => { testing = false; })
+              ">
+        <span x-show="testing" class="spinner mr-1"></span>
+        Test connection
+      </button>
+    </div>
+    <template x-if="testResults.google">
+      <div :class="tests.google ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.google"></div>
+    </template>
+  </div>
+
+  <div class="card" style="padding: 0; box-shadow: none; border: 0; margin-top: 16px;">
+    <h3 class="text-sm mb-2">Grok (xAI)</h3>
     <label class="label" for="w-grok-key">Grok API Key</label>
     <input type="password" class="input" id="w-grok-key" placeholder="xai-..."
            value="{{ step_ctx.grok_api_key|default('') }}">
+    <label class="label mt-2" for="w-grok-base-url">Grok Base URL (optional)</label>
+    <input type="text" class="input" id="w-grok-base-url" placeholder="https://api.x.ai/v1"
+           value="{{ step_ctx.grok_base_url|default('') }}">
+
+    <div class="mt-3">
+      <button class="btn" :disabled="testing"
+              @click="
+                testing = true;
+                const provider = 'grok';
+                const apiKey = document.getElementById('w-grok-key').value;
+                const baseUrl = document.getElementById('w-grok-base-url').value || 'https://api.x.ai/v1';
+                fetch('/setup/test-connection', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({service: provider, api_key: apiKey, base_url: baseUrl})
+                })
+                .then(r => r.json())
+                .then(d => {
+                  tests[provider] = !!d.ok;
+                  testResults[provider] = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error;
+                })
+                .catch(e => {
+                  tests[provider] = false;
+                  testResults[provider] = e.message;
+                })
+                .finally(() => { testing = false; })
+              ">
+        <span x-show="testing" class="spinner mr-1"></span>
+        Test connection
+      </button>
+    </div>
+    <template x-if="testResults.grok">
+      <div :class="tests.grok ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.grok"></div>
+    </template>
   </div>
 
-  <div class="mt-3" x-show="document.getElementById('w-provider').value === 'deepseek'">
+  <div class="card" style="padding: 0; box-shadow: none; border: 0; margin-top: 16px;">
+    <h3 class="text-sm mb-2">DeepSeek</h3>
     <label class="label" for="w-deepseek-key">DeepSeek API Key</label>
     <input type="password" class="input" id="w-deepseek-key" placeholder="sk-..."
            value="{{ step_ctx.deepseek_api_key|default('') }}">
-  </div>
+    <label class="label mt-2" for="w-deepseek-base-url">DeepSeek Base URL (optional)</label>
+    <input type="text" class="input" id="w-deepseek-base-url" placeholder="https://api.deepseek.com"
+           value="{{ step_ctx.deepseek_base_url|default('') }}">
 
-  <div class="mt-3" x-show="document.getElementById('w-provider').value !== 'anthropic'">
-    <label class="label" for="w-base-url">Base URL (optional)</label>
-    <input type="text" class="input" id="w-base-url" placeholder="https://..."
-           value="{{ (step_ctx.openai_base_url if step_ctx.provider|default('anthropic') == 'openai' else (step_ctx.grok_base_url if step_ctx.provider|default('anthropic') == 'grok' else step_ctx.deepseek_base_url))|default('') }}">
+    <div class="mt-3">
+      <button class="btn" :disabled="testing"
+              @click="
+                testing = true;
+                const provider = 'deepseek';
+                const apiKey = document.getElementById('w-deepseek-key').value;
+                const baseUrl = document.getElementById('w-deepseek-base-url').value || 'https://api.deepseek.com';
+                fetch('/setup/test-connection', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({service: provider, api_key: apiKey, base_url: baseUrl})
+                })
+                .then(r => r.json())
+                .then(d => {
+                  tests[provider] = !!d.ok;
+                  testResults[provider] = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error;
+                })
+                .catch(e => {
+                  tests[provider] = false;
+                  testResults[provider] = e.message;
+                })
+                .finally(() => { testing = false; })
+              ">
+        <span x-show="testing" class="spinner mr-1"></span>
+        Test connection
+      </button>
+    </div>
+    <template x-if="testResults.deepseek">
+      <div :class="tests.deepseek ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.deepseek"></div>
+    </template>
   </div>
-
-  <label class="label mt-3" for="w-model">Model</label>
-  <select class="select" id="w-model" name="model">
-    <option value="claude-sonnet-4-5-20250514" {{ 'selected' if step_ctx.model|default('') == 'claude-sonnet-4-5-20250514' or not step_ctx.model|default('') }}>Claude Sonnet 4.5</option>
-    <option value="claude-haiku-4-5" {{ 'selected' if step_ctx.model|default('') == 'claude-haiku-4-5' }}>Claude Haiku 4.5 (cheaper)</option>
-    <option value="gpt-4o-mini" {{ 'selected' if step_ctx.model|default('') == 'gpt-4o-mini' }}>GPT-4o mini</option>
-    <option value="gpt-4o" {{ 'selected' if step_ctx.model|default('') == 'gpt-4o' }}>GPT-4o</option>
-    <option value="grok-2-latest" {{ 'selected' if step_ctx.model|default('') == 'grok-2-latest' }}>Grok-2 Latest</option>
-    <option value="deepseek-chat" {{ 'selected' if step_ctx.model|default('') == 'deepseek-chat' }}>DeepSeek Chat</option>
-  </select>
-
-  <div class="mt-3">
-    <button class="btn" :disabled="testing"
-            @click="
-              testing = true; testResult = '';
-              const provider = document.getElementById('w-provider').value;
-              let apiKey = '';
-              let baseUrl = '';
-              if (provider === 'anthropic') { apiKey = document.getElementById('w-anthropic-key').value; }
-              if (provider === 'openai') { apiKey = document.getElementById('w-openai-key').value; }
-              if (provider === 'grok') { apiKey = document.getElementById('w-grok-key').value; }
-              if (provider === 'deepseek') { apiKey = document.getElementById('w-deepseek-key').value; }
-              if (provider !== 'anthropic') { baseUrl = document.getElementById('w-base-url').value; }
-              fetch('/setup/test-connection', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({service: provider, api_key: apiKey, base_url: baseUrl})
-              })
-              .then(r => r.json())
-              .then(d => { testOk = d.ok; testResult = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error; })
-              .catch(e => { testOk = false; testResult = e.message; })
-              .finally(() => { testing = false; })
-            ">
-      <span x-show="testing" class="spinner mr-1"></span>
-      Test connection
-    </button>
-  </div>
-  <template x-if="testResult">
-    <div :class="testOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResult"></div>
-  </template>
 
   <div class="flex justify-between mt-4">
     <button class="btn"
@@ -86,16 +245,21 @@
             hx-vals='{"step": "welcome", "values": {}}'>
       Back
     </button>
-    <button class="btn-primary"
+    <button class="btn-primary" :disabled="!tests[provider]"
             @click="
               const provider = document.getElementById('w-provider').value;
               const anthropicKey = document.getElementById('w-anthropic-key')?.value || '';
               const openaiKey = document.getElementById('w-openai-key')?.value || '';
+              const openaiBaseUrl = document.getElementById('w-openai-base-url')?.value || '';
+              const googleKey = document.getElementById('w-google-key')?.value || '';
+              const googleBaseUrl = document.getElementById('w-google-base-url')?.value || '';
               const grokKey = document.getElementById('w-grok-key')?.value || '';
+              const grokBaseUrl = document.getElementById('w-grok-base-url')?.value || '';
               const deepseekKey = document.getElementById('w-deepseek-key')?.value || '';
-              let baseUrl = document.getElementById('w-base-url')?.value || '';
-              if (provider === 'grok') { baseUrl = baseUrl || 'https://api.x.ai/v1'; }
-              if (provider === 'deepseek') { baseUrl = baseUrl || 'https://api.deepseek.com'; }
+              const deepseekBaseUrl = document.getElementById('w-deepseek-base-url')?.value || '';
+              const googleBaseUrlValue = googleBaseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai';
+              const grokBaseUrlValue = grokBaseUrl || 'https://api.x.ai/v1';
+              const deepseekBaseUrlValue = deepseekBaseUrl || 'https://api.deepseek.com';
               htmx.ajax('POST', '/setup/step', {
                 target: '#wizard-step', swap: 'innerHTML',
                 values: {
@@ -103,11 +267,13 @@
                   'values[agent.llm_provider]': provider,
                   'values[agent.anthropic_api_key]': anthropicKey,
                   'values[agent.openai_api_key]': openaiKey,
-                  'values[agent.openai_base_url]': baseUrl,
+                  'values[agent.openai_base_url]': openaiBaseUrl,
+                  'values[agent.google_api_key]': googleKey,
+                  'values[agent.google_base_url]': googleBaseUrlValue,
                   'values[agent.grok_api_key]': grokKey,
-                  'values[agent.grok_base_url]': baseUrl,
+                  'values[agent.grok_base_url]': grokBaseUrlValue,
                   'values[agent.deepseek_api_key]': deepseekKey,
-                  'values[agent.deepseek_base_url]': baseUrl,
+                  'values[agent.deepseek_base_url]': deepseekBaseUrlValue,
                   'values[agent.model]': document.getElementById('w-model').value
                 }
               })

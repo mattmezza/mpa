@@ -67,6 +67,8 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             ("agent.anthropic_api_key", "anthropic_api_key"),
             ("agent.openai_api_key", "openai_api_key"),
             ("agent.openai_base_url", "openai_base_url"),
+            ("agent.google_api_key", "google_api_key"),
+            ("agent.google_base_url", "google_base_url"),
             ("agent.grok_api_key", "grok_api_key"),
             ("agent.grok_base_url", "grok_base_url"),
             ("agent.deepseek_api_key", "deepseek_api_key"),
@@ -363,6 +365,8 @@ def create_admin_app(
         "agent.anthropic_api_key",
         "agent.openai_api_key",
         "agent.openai_base_url",
+        "agent.google_api_key",
+        "agent.google_base_url",
         "agent.grok_api_key",
         "agent.grok_base_url",
         "agent.deepseek_api_key",
@@ -591,6 +595,8 @@ def create_admin_app(
         anthropic_api_key = await config_store.get("agent.anthropic_api_key") or ""
         openai_api_key = await config_store.get("agent.openai_api_key") or ""
         openai_base_url = await config_store.get("agent.openai_base_url") or ""
+        google_api_key = await config_store.get("agent.google_api_key") or ""
+        google_base_url = await config_store.get("agent.google_base_url") or ""
         grok_api_key = await config_store.get("agent.grok_api_key") or ""
         grok_base_url = await config_store.get("agent.grok_base_url") or ""
         deepseek_api_key = await config_store.get("agent.deepseek_api_key") or ""
@@ -602,6 +608,8 @@ def create_admin_app(
             anthropic_api_key=anthropic_api_key,
             openai_api_key=openai_api_key,
             openai_base_url=openai_base_url,
+            google_api_key=google_api_key,
+            google_base_url=google_base_url,
             grok_api_key=grok_api_key,
             grok_base_url=grok_base_url,
             deepseek_api_key=deepseek_api_key,
@@ -1548,6 +1556,12 @@ def create_admin_app(
             return await _test_openai(
                 payload.get("api_key", ""),
                 payload.get("base_url"),
+            )
+        if service == "google":
+            return await _test_openai(
+                payload.get("api_key", ""),
+                payload.get("base_url"),
+                model="gemini-3-flash",
             )
         if service == "grok":
             return await _test_openai(

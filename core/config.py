@@ -41,6 +41,8 @@ class AgentConfig(BaseModel):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     openai_base_url: str = ""
+    google_api_key: str = ""
+    google_base_url: str = ""
     grok_api_key: str = ""
     grok_base_url: str = ""
     deepseek_api_key: str = ""

@@ -42,32 +42,102 @@
     }
     window.showToast = showToast;
 
-    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl) {
+      const currentProvider = provider || 'anthropic';
       return {
-        provider: provider || 'anthropic',
+        provider: currentProvider,
         apiKey: apiKey || '',
         model: model || '',
         openaiKey: openaiKey || '',
         openaiBaseUrl: openaiBaseUrl || '',
+        googleKey: googleKey || '',
+        googleBaseUrl: googleBaseUrl || '',
         grokKey: grokKey || '',
         grokBaseUrl: grokBaseUrl || '',
         deepseekKey: deepseekKey || '',
         deepseekBaseUrl: deepseekBaseUrl || '',
         result: '',
         resultOk: false,
-        testing: false,
-        testResult: '',
-        currentKey() {
-          if (this.provider === 'openai') return this.openaiKey;
-          if (this.provider === 'grok') return this.grokKey;
-          if (this.provider === 'deepseek') return this.deepseekKey;
+        tests: {
+          anthropic: currentProvider === 'anthropic',
+          openai: currentProvider === 'openai',
+          google: currentProvider === 'google',
+          grok: currentProvider === 'grok',
+          deepseek: currentProvider === 'deepseek'
+        },
+        testing: {
+          anthropic: false,
+          openai: false,
+          google: false,
+          grok: false,
+          deepseek: false
+        },
+        testResults: {
+          anthropic: '',
+          openai: '',
+          google: '',
+          grok: '',
+          deepseek: ''
+        },
+        keyFor(service) {
+          if (service === 'openai') return this.openaiKey;
+          if (service === 'google') return this.googleKey;
+          if (service === 'grok') return this.grokKey;
+          if (service === 'deepseek') return this.deepseekKey;
           return this.apiKey;
         },
-        currentBaseUrl() {
-          if (this.provider === 'openai') return this.openaiBaseUrl;
-          if (this.provider === 'grok') return this.grokBaseUrl;
-          if (this.provider === 'deepseek') return this.deepseekBaseUrl;
+        baseUrlFor(service) {
+          if (service === 'openai') return this.openaiBaseUrl;
+          if (service === 'google') return this.googleBaseUrl;
+          if (service === 'grok') return this.grokBaseUrl;
+          if (service === 'deepseek') return this.deepseekBaseUrl;
           return '';
+        },
+        resolvedBaseUrl(service) {
+          const base = this.baseUrlFor(service);
+          if (service === 'google') return base || 'https://generativelanguage.googleapis.com/v1beta/openai';
+          if (service === 'grok') return base || 'https://api.x.ai/v1';
+          if (service === 'deepseek') return base || 'https://api.deepseek.com';
+          return base;
+        },
+        canSelect(service) {
+          return this.tests[service] === true;
+        },
+        testProvider(service) {
+          const apiKey = this.keyFor(service);
+          if (!apiKey) {
+            this.tests[service] = false;
+            this.testResults[service] = 'Missing API key';
+            return;
+          }
+          this.testing[service] = true;
+          this.testResults[service] = '';
+          fetch('/setup/test-connection', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+            },
+            body: JSON.stringify({
+              service: service,
+              api_key: apiKey,
+              base_url: this.resolvedBaseUrl(service) || undefined
+            })
+          })
+            .then(r => r.json())
+            .then(d => {
+              this.tests[service] = !!d.ok;
+              this.testResults[service] = d.ok
+                ? 'Connection OK'
+                : ('Failed: ' + (d.error || 'unknown'));
+            })
+            .catch(e => {
+              this.tests[service] = false;
+              this.testResults[service] = 'Error: ' + e.message;
+            })
+            .finally(() => {
+              this.testing[service] = false;
+            });
         }
       };
     }

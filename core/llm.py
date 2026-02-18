@@ -11,6 +11,7 @@ from anthropic import AsyncAnthropic
 
 
 _DEFAULT_BASE_URLS = {
+    "google": "https://generativelanguage.googleapis.com/v1beta/openai",
     "grok": "https://api.x.ai/v1",
     "deepseek": "https://api.deepseek.com",
 }
@@ -80,6 +81,12 @@ class LLMClient:
                 provider,
                 getattr(config, "openai_api_key", ""),
                 getattr(config, "openai_base_url", ""),
+            )
+        if provider == "google":
+            return cls(
+                provider,
+                getattr(config, "google_api_key", ""),
+                getattr(config, "google_base_url", ""),
             )
         if provider == "grok":
             return cls(

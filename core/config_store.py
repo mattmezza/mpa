@@ -47,6 +47,7 @@ SECRET_KEYS = frozenset(
     {
         "agent.anthropic_api_key",
         "agent.openai_api_key",
+        "agent.google_api_key",
         "agent.grok_api_key",
         "agent.deepseek_api_key",
         "channels.telegram.bot_token",
