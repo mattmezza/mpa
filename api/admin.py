@@ -411,7 +411,13 @@ def create_admin_app(
         setup_complete = await config_store.is_setup_complete()
         if not setup_complete:
             return RedirectResponse("/setup", status_code=302)
-        return _render("dashboard.html")
+        owner_name = await config_store.get("agent.owner_name") or ""
+        agent_name = await config_store.get("agent.name") or ""
+        return _render(
+            "dashboard.html",
+            owner_name=owner_name,
+            agent_name=agent_name,
+        )
 
     @app.get("/admin/skills/new", response_class=HTMLResponse)
     async def admin_skill_new() -> HTMLResponse:

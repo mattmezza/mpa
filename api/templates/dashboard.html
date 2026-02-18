@@ -4,7 +4,9 @@
 {% block body %}
 <div>
   <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
-    <h1 class="text-xl text-accent">Agent Admin</h1>
+    <h1 class="text-xl text-accent" id="admin-greeting" data-owner='{{ owner_name|default('', true)|tojson }}' data-agent='{{ agent_name|default('', true)|tojson }}'>
+      Hi there! Let's configure your assistant...
+    </h1>
   </div>
 
   {# Status bar — loaded via HTMX, refreshes on lifecycle events #}
@@ -119,6 +121,18 @@
       closeAgentModal();
     }
   });
+
+  function updateAdminGreeting(ownerName, agentName) {
+    const el = document.getElementById('admin-greeting');
+    if (!el) return;
+    const currentOwner = ownerName || el.dataset.owner || '';
+    const currentAgent = agentName || el.dataset.agent || '';
+    const owner = (currentOwner || 'there').trim();
+    const agent = (currentAgent || 'your assistant').trim();
+    el.dataset.owner = currentOwner;
+    el.dataset.agent = currentAgent;
+    el.textContent = `Hi ${owner}! Let's configure ${agent}...`;
+  }
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
@@ -276,6 +290,12 @@
         const urlTab = params.get('tab');
         const initialTab = (urlTab && tabs[urlTab]) ? urlTab : 'identity';
         this.tab = initialTab;
+        const greeting = document.getElementById('admin-greeting');
+        if (greeting) {
+          const ownerName = greeting.dataset.owner || '';
+          const agentName = greeting.dataset.agent || '';
+          updateAdminGreeting(ownerName, agentName);
+        }
         if (!urlTab) {
           const url = new URL(window.location.href);
           url.searchParams.set('tab', initialTab);

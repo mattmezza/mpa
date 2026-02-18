@@ -39,6 +39,7 @@
                 .then(d => {
                   result = ok ? 'Saved' : (d.detail || 'Error');
                   if (ok && window.showToast) { window.showToast('Saved'); }
+                  if (ok && window.updateAdminGreeting) { window.updateAdminGreeting(ownerName, ''); }
                 })
                 .catch(e => { ok = false; result = e.message; })
               ">

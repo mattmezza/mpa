@@ -29,7 +29,11 @@
                   body: JSON.stringify({values: {'agent.name': agentName}})
                 })
                 .then(r => { idOk = r.ok; return r.json(); })
-                .then(d => { idResult = idOk ? 'Identity saved' : (d.detail || 'Error'); })
+                .then(d => {
+                  idResult = idOk ? 'Identity saved' : (d.detail || 'Error');
+                  if (idOk && window.showToast) { window.showToast('Identity saved'); }
+                  if (idOk && window.updateAdminGreeting) { window.updateAdminGreeting('', agentName); }
+                })
                 .catch(e => { idOk = false; idResult = e.message; })
               ">
         Save identity
