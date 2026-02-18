@@ -145,7 +145,7 @@ class PermissionEngine:
         return existed
 
     def create_approval_request(
-        self, tool_name: str, params: dict
+        self, tool_name: str | None = None, params: dict | None = None
     ) -> tuple[str, asyncio.Future[bool]]:
         """Create a pending approval request. Returns (request_id, future).
 
@@ -155,11 +155,18 @@ class PermissionEngine:
         request_id = uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
         future = loop.create_future()
+        if tool_name is None:
+            tool_name = "unknown"
+        if params is None:
+            params = {}
         self._pending[request_id] = {
             "future": future,
             "match_key": self._build_match_key(tool_name, params),
         }
         return request_id, future
+
+    def format_approval_message(self, tool_name: str, params: dict) -> str:
+        return format_approval_message(tool_name, params)
 
     def resolve_approval(self, request_id: str, approved: bool, always_allow: bool = False) -> bool:
         """Resolve a pending approval request. Returns False if not found."""

@@ -479,10 +479,13 @@ def create_admin_app(
             running = False
             channels = []
             scheduler_jobs = 0
+        status = agent_state.status
+        if running and status not in ("STARTING", "RESTARTING", "STOPPING"):
+            status = "RUNNING"
         return _render_partial(
             "partials/status.html",
             running=running,
-            status=agent_state.status,
+            status=status,
             channels=channels,
             scheduler_jobs=scheduler_jobs,
         )
