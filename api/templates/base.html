@@ -79,6 +79,44 @@
           grok: '',
           deepseek: ''
         },
+        models: {
+          anthropic: [
+            {value: 'claude-4-6-opus', label: 'Claude 4.6 Opus'},
+            {value: 'claude-4-6-sonnet', label: 'Claude 4.6 Sonnet'},
+            {value: 'claude-4-5-haiku', label: 'Claude 4.5 Haiku'}
+          ],
+          openai: [
+            {value: 'gpt-5.2-thinking', label: 'GPT-5.2 Thinking'},
+            {value: 'gpt-5.2-pro', label: 'GPT-5.2 Pro'},
+            {value: 'gpt-5.2-instant', label: 'GPT-5.2 Instant'},
+            {value: 'gpt-5-mini', label: 'GPT-5 Mini'}
+          ],
+          google: [
+            {value: 'gemini-3-deep-think', label: 'Gemini 3 Deep Think'},
+            {value: 'gemini-3-pro-latest', label: 'Gemini 3 Pro Latest'},
+            {value: 'gemini-3-flash-latest', label: 'Gemini 3 Flash Latest'}
+          ],
+          grok: [
+            {value: 'grok-4.20-beta', label: 'Grok 4.20 Beta'},
+            {value: 'grok-4-latest', label: 'Grok 4 Latest'},
+            {value: 'grok-4.1-fast', label: 'Grok 4.1 Fast'}
+          ],
+          deepseek: [
+            {value: 'deepseek-v4', label: 'DeepSeek V4'},
+            {value: 'deepseek-r1-latest', label: 'DeepSeek R1 Latest'},
+            {value: 'deepseek-vl2-latest', label: 'DeepSeek VL2 Latest'}
+          ]
+        },
+        init() {
+          this.normalizeModel();
+          this.$watch('provider', () => this.normalizeModel());
+        },
+        normalizeModel() {
+          const list = this.models[this.provider] || [];
+          if (!list.length) return;
+          const exists = list.some(item => item.value === this.model);
+          if (!exists) this.model = list[0].value;
+        },
         keyFor(service) {
           if (service === 'openai') return this.openaiKey;
           if (service === 'google') return this.googleKey;

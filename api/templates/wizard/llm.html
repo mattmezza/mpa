@@ -1,8 +1,47 @@
 <div class="card" x-data="{
   provider: {{ step_ctx.provider|default('anthropic')|tojson|forceescape }},
+  model: {{ step_ctx.model|default('', true)|tojson|forceescape }},
   tests: { anthropic: false, openai: false, google: false, grok: false, deepseek: false },
   testResults: { anthropic: '', openai: '', google: '', grok: '', deepseek: '' },
-  testing: false
+  testing: false,
+  models: {
+    anthropic: [
+      {value: 'claude-4-6-opus', label: 'Claude 4.6 Opus'},
+      {value: 'claude-4-6-sonnet', label: 'Claude 4.6 Sonnet'},
+      {value: 'claude-4-5-haiku', label: 'Claude 4.5 Haiku'}
+    ],
+    openai: [
+      {value: 'gpt-5.2-thinking', label: 'GPT-5.2 Thinking'},
+      {value: 'gpt-5.2-pro', label: 'GPT-5.2 Pro'},
+      {value: 'gpt-5.2-instant', label: 'GPT-5.2 Instant'},
+      {value: 'gpt-5-mini', label: 'GPT-5 Mini'}
+    ],
+    google: [
+      {value: 'gemini-3-deep-think', label: 'Gemini 3 Deep Think'},
+      {value: 'gemini-3-pro-latest', label: 'Gemini 3 Pro Latest'},
+      {value: 'gemini-3-flash-latest', label: 'Gemini 3 Flash Latest'}
+    ],
+    grok: [
+      {value: 'grok-4.20-beta', label: 'Grok 4.20 Beta'},
+      {value: 'grok-4-latest', label: 'Grok 4 Latest'},
+      {value: 'grok-4.1-fast', label: 'Grok 4.1 Fast'}
+    ],
+    deepseek: [
+      {value: 'deepseek-v4', label: 'DeepSeek V4'},
+      {value: 'deepseek-r1-latest', label: 'DeepSeek R1 Latest'},
+      {value: 'deepseek-vl2-latest', label: 'DeepSeek VL2 Latest'}
+    ]
+  },
+  init() {
+    this.normalizeModel();
+    this.$watch('provider', () => this.normalizeModel());
+  },
+  normalizeModel() {
+    const list = this.models[this.provider] || [];
+    if (!list.length) return;
+    const exists = list.some(item => item.value === this.model);
+    if (!exists) this.model = list[0].value;
+  }
 }">
   <h2 class="text-base mb-3">LLM Provider</h2>
 
@@ -20,17 +59,12 @@
     </select>
     <p class="text-muted text-xs mt-1">Options appear after each provider passes its connection test.</p>
 
-    <label class="label mt-3" for="w-model">Model</label>
-    <select class="select" id="w-model" name="model">
-      <option value="claude-sonnet-4-5-20250514" {{ 'selected' if step_ctx.model|default('') == 'claude-sonnet-4-5-20250514' or not step_ctx.model|default('') }}>Claude Sonnet 4.5</option>
-      <option value="claude-haiku-4-5" {{ 'selected' if step_ctx.model|default('') == 'claude-haiku-4-5' }}>Claude Haiku 4.5 (cheaper)</option>
-    <option value="gpt-4o-mini" {{ 'selected' if step_ctx.model|default('') == 'gpt-4o-mini' }}>GPT-4o mini</option>
-    <option value="gpt-4o" {{ 'selected' if step_ctx.model|default('') == 'gpt-4o' }}>GPT-4o</option>
-    <option value="gemini-3-pro" {{ 'selected' if step_ctx.model|default('') == 'gemini-3-pro' }}>Gemini 3 Pro</option>
-    <option value="gemini-3-flash" {{ 'selected' if step_ctx.model|default('') == 'gemini-3-flash' }}>Gemini 3 Flash</option>
-    <option value="grok-2-latest" {{ 'selected' if step_ctx.model|default('') == 'grok-2-latest' }}>Grok-2 Latest</option>
-    <option value="deepseek-chat" {{ 'selected' if step_ctx.model|default('') == 'deepseek-chat' }}>DeepSeek Chat</option>
-    </select>
+  <label class="label mt-3" for="w-model">Model</label>
+  <select class="select" id="w-model" name="model" x-model="model">
+    <template x-for="item in (models[provider] || [])" :key="item.value">
+      <option :value="item.value" x-text="item.label"></option>
+    </template>
+  </select>
 
     <template x-if="!tests[provider]">
       <div class="alert-error mt-2">Test the selected provider before continuing.</div>

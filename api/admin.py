@@ -1561,7 +1561,7 @@ def create_admin_app(
             return await _test_openai(
                 payload.get("api_key", ""),
                 payload.get("base_url"),
-                model="gemini-3-flash",
+                model="gemini-3-flash-latest",
             )
         if service == "grok":
             return await _test_openai(
