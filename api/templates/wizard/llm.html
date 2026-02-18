@@ -1,25 +1,71 @@
 <div class="card" x-data="{ testResult: '', testOk: false, testing: false }">
   <h2 class="text-base mb-3">LLM Provider</h2>
 
-  <label class="label" for="w-api-key">Anthropic API Key</label>
-  <input type="password" class="input" id="w-api-key" name="api_key" placeholder="sk-ant-..."
-         value="{{ step_ctx.api_key|default('') }}">
-  <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a></p>
+  <label class="label" for="w-provider">Provider</label>
+  <select class="select" id="w-provider" name="provider">
+    <option value="anthropic" {{ 'selected' if step_ctx.provider|default('anthropic') == 'anthropic' }}>Anthropic</option>
+    <option value="openai" {{ 'selected' if step_ctx.provider|default('') == 'openai' }}>OpenAI</option>
+    <option value="grok" {{ 'selected' if step_ctx.provider|default('') == 'grok' }}>Grok (xAI)</option>
+    <option value="deepseek" {{ 'selected' if step_ctx.provider|default('') == 'deepseek' }}>DeepSeek</option>
+  </select>
+
+  <div class="mt-3" x-show="document.getElementById('w-provider').value === 'anthropic'">
+    <label class="label" for="w-anthropic-key">Anthropic API Key</label>
+    <input type="password" class="input" id="w-anthropic-key" placeholder="sk-ant-..."
+           value="{{ step_ctx.anthropic_api_key|default('') }}">
+    <p class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a></p>
+  </div>
+
+  <div class="mt-3" x-show="document.getElementById('w-provider').value === 'openai'">
+    <label class="label" for="w-openai-key">OpenAI API Key</label>
+    <input type="password" class="input" id="w-openai-key" placeholder="sk-..."
+           value="{{ step_ctx.openai_api_key|default('') }}">
+  </div>
+
+  <div class="mt-3" x-show="document.getElementById('w-provider').value === 'grok'">
+    <label class="label" for="w-grok-key">Grok API Key</label>
+    <input type="password" class="input" id="w-grok-key" placeholder="xai-..."
+           value="{{ step_ctx.grok_api_key|default('') }}">
+  </div>
+
+  <div class="mt-3" x-show="document.getElementById('w-provider').value === 'deepseek'">
+    <label class="label" for="w-deepseek-key">DeepSeek API Key</label>
+    <input type="password" class="input" id="w-deepseek-key" placeholder="sk-..."
+           value="{{ step_ctx.deepseek_api_key|default('') }}">
+  </div>
+
+  <div class="mt-3" x-show="document.getElementById('w-provider').value !== 'anthropic'">
+    <label class="label" for="w-base-url">Base URL (optional)</label>
+    <input type="text" class="input" id="w-base-url" placeholder="https://..."
+           value="{{ (step_ctx.openai_base_url if step_ctx.provider|default('anthropic') == 'openai' else (step_ctx.grok_base_url if step_ctx.provider|default('anthropic') == 'grok' else step_ctx.deepseek_base_url))|default('') }}">
+  </div>
 
   <label class="label mt-3" for="w-model">Model</label>
   <select class="select" id="w-model" name="model">
     <option value="claude-sonnet-4-5-20250514" {{ 'selected' if step_ctx.model|default('') == 'claude-sonnet-4-5-20250514' or not step_ctx.model|default('') }}>Claude Sonnet 4.5</option>
     <option value="claude-haiku-4-5" {{ 'selected' if step_ctx.model|default('') == 'claude-haiku-4-5' }}>Claude Haiku 4.5 (cheaper)</option>
+    <option value="gpt-4o-mini" {{ 'selected' if step_ctx.model|default('') == 'gpt-4o-mini' }}>GPT-4o mini</option>
+    <option value="gpt-4o" {{ 'selected' if step_ctx.model|default('') == 'gpt-4o' }}>GPT-4o</option>
+    <option value="grok-2-latest" {{ 'selected' if step_ctx.model|default('') == 'grok-2-latest' }}>Grok-2 Latest</option>
+    <option value="deepseek-chat" {{ 'selected' if step_ctx.model|default('') == 'deepseek-chat' }}>DeepSeek Chat</option>
   </select>
 
   <div class="mt-3">
     <button class="btn" :disabled="testing"
             @click="
               testing = true; testResult = '';
+              const provider = document.getElementById('w-provider').value;
+              let apiKey = '';
+              let baseUrl = '';
+              if (provider === 'anthropic') { apiKey = document.getElementById('w-anthropic-key').value; }
+              if (provider === 'openai') { apiKey = document.getElementById('w-openai-key').value; }
+              if (provider === 'grok') { apiKey = document.getElementById('w-grok-key').value; }
+              if (provider === 'deepseek') { apiKey = document.getElementById('w-deepseek-key').value; }
+              if (provider !== 'anthropic') { baseUrl = document.getElementById('w-base-url').value; }
               fetch('/setup/test-connection', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({service: 'anthropic', api_key: document.getElementById('w-api-key').value})
+                body: JSON.stringify({service: provider, api_key: apiKey, base_url: baseUrl})
               })
               .then(r => r.json())
               .then(d => { testOk = d.ok; testResult = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error; })
@@ -42,11 +88,26 @@
     </button>
     <button class="btn-primary"
             @click="
+              const provider = document.getElementById('w-provider').value;
+              const anthropicKey = document.getElementById('w-anthropic-key')?.value || '';
+              const openaiKey = document.getElementById('w-openai-key')?.value || '';
+              const grokKey = document.getElementById('w-grok-key')?.value || '';
+              const deepseekKey = document.getElementById('w-deepseek-key')?.value || '';
+              let baseUrl = document.getElementById('w-base-url')?.value || '';
+              if (provider === 'grok') { baseUrl = baseUrl || 'https://api.x.ai/v1'; }
+              if (provider === 'deepseek') { baseUrl = baseUrl || 'https://api.deepseek.com'; }
               htmx.ajax('POST', '/setup/step', {
                 target: '#wizard-step', swap: 'innerHTML',
                 values: {
                   step: 'identity',
-                  'values[agent.anthropic_api_key]': document.getElementById('w-api-key').value,
+                  'values[agent.llm_provider]': provider,
+                  'values[agent.anthropic_api_key]': anthropicKey,
+                  'values[agent.openai_api_key]': openaiKey,
+                  'values[agent.openai_base_url]': baseUrl,
+                  'values[agent.grok_api_key]': grokKey,
+                  'values[agent.grok_base_url]': baseUrl,
+                  'values[agent.deepseek_api_key]': deepseekKey,
+                  'values[agent.deepseek_base_url]': baseUrl,
                   'values[agent.model]': document.getElementById('w-model').value
                 }
               })

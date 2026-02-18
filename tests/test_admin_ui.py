@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
 from api.admin import AgentState, create_admin_app
+from core.config_store import ConfigStore
 
 
 # ---------------------------------------------------------------------------
@@ -42,9 +44,6 @@ class _ConfigStoreStub:
 
     async def get_all_redacted(self) -> dict:
         return {"agent.name": "Clio", "admin.password_hash": "***", "admin.port": "8000"}
-
-    async def verify_admin_password(self, password: str) -> bool:
-        return password == "secret"
 
     async def set_admin_password(self, password: str) -> None:
         self._data["admin.password_hash"] = "hash"
@@ -85,8 +84,10 @@ class _AgentStub:
 
 def _client(setup_complete: bool = True, agent=None, step: str = "welcome") -> TestClient:
     store = _ConfigStoreStub(setup_complete=setup_complete, step=step)
-    agent_state = AgentState(agent=agent or (None if not setup_complete else _AgentStub()))
-    app, _auth = create_admin_app(agent_state, store)
+    agent_state = AgentState(
+        agent=cast(Any, agent or (None if not setup_complete else _AgentStub()))
+    )
+    app, _auth = create_admin_app(agent_state, cast(ConfigStore, store))
     return TestClient(app, follow_redirects=False)
 
 
@@ -162,7 +163,7 @@ class TestPartialRoutes:
         # Override with explicit None agent
         store = _ConfigStoreStub(setup_complete=True)
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         c = TestClient(app, follow_redirects=False)
 
         resp = c.get("/partials/status", headers=AUTH)
@@ -208,8 +209,8 @@ class TestPartialRoutes:
         store._data["agent.owner_name"] = "Matteo"
         store._data["agent.timezone"] = "Europe/Zurich"
         store._data["you.personalia"] = "Likes espresso"
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.get("/partials/you", headers=AUTH)
@@ -233,8 +234,8 @@ class TestPartialRoutes:
         store._data["calendar.providers"] = _json.dumps(
             [{"name": "work", "url": "https://cal.example.com", "username": "u", "password": "p"}]
         )
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.get("/partials/calendars", headers=AUTH)
@@ -251,8 +252,8 @@ class TestPartialRoutes:
         store = _ConfigStoreStub(setup_complete=True)
         store._data["history.db_path"] = "data/custom.db"
         store._data["history.max_turns"] = "15"
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.get("/partials/history", headers=AUTH)
@@ -323,7 +324,7 @@ class TestSetupWizard:
     def test_setup_step_saves_values(self):
         store = _ConfigStoreStub(setup_complete=False, step="welcome")
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -339,7 +340,7 @@ class TestSetupWizard:
     def test_setup_identity_step(self):
         store = _ConfigStoreStub(setup_complete=False, step="identity")
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -364,7 +365,7 @@ class TestSetupWizard:
     def test_setup_calendar_step(self):
         store = _ConfigStoreStub(setup_complete=False, step="calendar")
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -423,8 +424,8 @@ class TestConfigAPI:
 
     def test_save_character(self):
         store = _ConfigStoreStub(setup_complete=True)
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -437,8 +438,8 @@ class TestConfigAPI:
 
     def test_save_personalia(self):
         store = _ConfigStoreStub(setup_complete=True)
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -452,8 +453,8 @@ class TestConfigAPI:
     def test_get_you_personalia(self):
         store = _ConfigStoreStub(setup_complete=True)
         store._data["you.personalia"] = "# About the user"
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.get("/config/you-personalia", headers=AUTH)
@@ -468,8 +469,8 @@ class TestConfigAPI:
 
     def test_save_you_personalia(self):
         store = _ConfigStoreStub(setup_complete=True)
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -483,8 +484,8 @@ class TestConfigAPI:
 
     def test_save_calendar_providers(self):
         store = _ConfigStoreStub(setup_complete=True)
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -507,8 +508,8 @@ class TestConfigAPI:
 
     def test_save_calendar_providers_filters_empty(self):
         store = _ConfigStoreStub(setup_complete=True)
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -554,7 +555,7 @@ class TestPermissionsAPI:
     def test_permissions_require_running_agent(self):
         store = _ConfigStoreStub(setup_complete=True)
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.get("/permissions", headers=AUTH)
@@ -585,8 +586,8 @@ class TestDeleteEndpoints:
     def test_config_delete_form_encoded(self):
         store = _ConfigStoreStub(setup_complete=True)
         store._data["test.key"] = "value"
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -600,8 +601,8 @@ class TestDeleteEndpoints:
     def test_config_delete_json(self):
         store = _ConfigStoreStub(setup_complete=True)
         store._data["test.key"] = "value"
-        agent_state = AgentState(agent=_AgentStub())
-        app, _ = create_admin_app(agent_state, store)
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -672,7 +673,7 @@ class TestWizardProgress:
     def test_identity_step_includes_progress_oob(self):
         store = _ConfigStoreStub(setup_complete=False, step="identity")
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -686,7 +687,7 @@ class TestWizardProgress:
     def test_calendar_step_includes_progress_oob(self):
         store = _ConfigStoreStub(setup_complete=False, step="calendar")
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -711,7 +712,7 @@ def _client_with_config(
     store = _ConfigStoreStub(setup_complete=False, step=step)
     store._data.update(data)
     agent_state = AgentState(agent=None)
-    app, _ = create_admin_app(agent_state, store)
+    app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
     return TestClient(app, follow_redirects=False)
 
 
@@ -719,7 +720,11 @@ class TestWizardPrePopulation:
     def test_llm_step_shows_saved_api_key(self):
         """Navigating back to LLM step should show the previously saved API key."""
         client = _client_with_config(
-            {"agent.anthropic_api_key": "sk-ant-test123", "agent.model": "claude-haiku-4-5"},
+            {
+                "agent.llm_provider": "anthropic",
+                "agent.anthropic_api_key": "sk-ant-test123",
+                "agent.model": "claude-haiku-4-5",
+            },
             step="identity",
         )
         resp = client.post("/setup/step", json={"step": "llm", "values": {}})
@@ -806,6 +811,7 @@ class TestWizardPrePopulation:
         """GET /setup should pre-populate the current step with saved values."""
         client = _client_with_config(
             {
+                "agent.llm_provider": "anthropic",
                 "agent.anthropic_api_key": "sk-ant-initial",
                 "agent.model": "claude-haiku-4-5",
             },
@@ -821,7 +827,7 @@ class TestWizardPrePopulation:
         store._data["channels.telegram.bot_token"] = "pre-saved-token"
         store._data["channels.telegram.allowed_user_ids"] = "111222"
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(
@@ -837,7 +843,7 @@ class TestWizardPrePopulation:
         store = _ConfigStoreStub(setup_complete=False, step="calendar")
         store._data["search.api_key"] = "tvly-presaved"
         agent_state = AgentState(agent=None)
-        app, _ = create_admin_app(agent_state, store)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
 
         resp = client.post(

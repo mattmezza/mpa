@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import aiosqlite
 import pytest
@@ -20,18 +18,23 @@ async def store(tmp_path):
     return memory
 
 
+class _LLMStub:
+    def __init__(self, response_json):
+        self._response = json.dumps(response_json)
+
+    async def generate_text(self, *, model: str, prompt: str, max_tokens: int = 1024) -> str:
+        return self._response
+
+
 def _make_mock_llm(response_json):
-    llm = AsyncMock()
-    text_block = SimpleNamespace(type="text", text=json.dumps(response_json))
-    llm.messages.create.return_value = SimpleNamespace(content=[text_block])
-    return llm
+    return _LLMStub(response_json)
 
 
 async def _count_rows(db_path: str, table: str) -> int:
     async with aiosqlite.connect(db_path) as db:
         cursor = await db.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608
         row = await cursor.fetchone()
-        return row[0]
+        return row[0] if row else 0
 
 
 @pytest.mark.asyncio
@@ -91,10 +94,20 @@ async def test_extract_memories_skips_invalid_short_term(store) -> None:
 @pytest.mark.asyncio
 async def test_extract_memories_strips_markdown_code_fences(store) -> None:
     """LLMs sometimes wrap JSON in ```json ... ``` fences."""
-    llm = AsyncMock()
-    fenced = '```json\n[{"tier": "LONG_TERM", "category": "fact", "subject": "marco", "content": "Email is marco@example.com"}]\n```'
-    text_block = SimpleNamespace(type="text", text=fenced)
-    llm.messages.create.return_value = SimpleNamespace(content=[text_block])
+    llm = _LLMStub(
+        [
+            {
+                "tier": "LONG_TERM",
+                "category": "fact",
+                "subject": "marco",
+                "content": "Email is marco@example.com",
+            }
+        ]
+    )
+    llm._response = (
+        '```json\n[{"tier": "LONG_TERM", "category": "fact", "subject": "marco", '
+        '"content": "Email is marco@example.com"}]\n```'
+    )
 
     stored = await store.extract_memories(
         llm,

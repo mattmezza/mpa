@@ -1,0 +1,213 @@
+"""LLM client abstraction for multiple providers."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+import importlib
+from typing import Any, cast
+
+from anthropic import AsyncAnthropic
+
+
+_DEFAULT_BASE_URLS = {
+    "grok": "https://api.x.ai/v1",
+    "deepseek": "https://api.deepseek.com",
+}
+
+
+@dataclass
+class LLMToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class LLMResponse:
+    text: str
+    tool_calls: list[LLMToolCall]
+    raw: object | None = None
+
+
+def _openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    converted = []
+    for tool in tools:
+        converted.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {}),
+                },
+            }
+        )
+    return converted
+
+
+def _normalize_provider(provider: str) -> str:
+    value = (provider or "").strip().lower()
+    return value or "anthropic"
+
+
+class LLMClient:
+    def __init__(self, provider: str, api_key: str, base_url: str | None = None):
+        self.provider = _normalize_provider(provider)
+        self._client: Any
+        if self.provider == "anthropic":
+            self._client = AsyncAnthropic(api_key=api_key)
+        else:
+            resolved_base = base_url or _DEFAULT_BASE_URLS.get(self.provider)
+            try:
+                module = importlib.import_module("openai")
+                client_class = cast(Any, getattr(module, "AsyncOpenAI"))
+            except Exception as exc:
+                raise RuntimeError("openai package is required for this provider") from exc
+            client_kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "base_url": resolved_base or None,
+            }
+            self._client = cast(Any, client_class)(**client_kwargs)  # type: ignore[call-arg]
+
+    @classmethod
+    def from_agent_config(cls, config) -> "LLMClient":
+        provider = _normalize_provider(getattr(config, "llm_provider", "anthropic"))
+        if provider == "anthropic":
+            return cls(provider, getattr(config, "anthropic_api_key", ""))
+        if provider == "openai":
+            return cls(
+                provider,
+                getattr(config, "openai_api_key", ""),
+                getattr(config, "openai_base_url", ""),
+            )
+        if provider == "grok":
+            return cls(
+                provider,
+                getattr(config, "grok_api_key", ""),
+                getattr(config, "grok_base_url", ""),
+            )
+        if provider == "deepseek":
+            return cls(
+                provider,
+                getattr(config, "deepseek_api_key", ""),
+                getattr(config, "deepseek_base_url", ""),
+            )
+        return cls("anthropic", getattr(config, "anthropic_api_key", ""))
+
+    async def generate(
+        self,
+        *,
+        model: str,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int = 4096,
+    ) -> LLMResponse:
+        if self.provider == "anthropic":
+            client_any = cast(Any, self._client)
+            messages_client = cast(Any, getattr(client_any, "messages"))  # type: ignore[attr-defined]
+            response = await messages_client.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=cast(Any, messages),
+                tools=cast(Any, tools),
+            )
+            tool_calls = []
+            text_parts = []
+            for block in response.content:
+                block_any = cast(Any, block)
+                if getattr(block_any, "type", None) == "tool_use":
+                    tool_calls.append(
+                        LLMToolCall(
+                            id=getattr(block_any, "id", ""),
+                            name=getattr(block_any, "name", ""),
+                            arguments=getattr(block_any, "input", {}),
+                        )
+                    )
+                if getattr(block_any, "type", None) == "text":
+                    text_parts.append(getattr(block_any, "text", ""))
+            return LLMResponse(
+                text="\n".join(text_parts).strip(),
+                tool_calls=tool_calls,
+                raw=response.content,
+            )
+
+        openai_tools = _openai_tools(tools)
+        client_any = cast(Any, self._client)
+        full_messages = [{"role": "system", "content": system}, *messages]
+        response = await client_any.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=cast(Any, full_messages),
+            tools=cast(Any, openai_tools),
+        )
+        message = response.choices[0].message
+        tool_calls = []
+        for call in message.tool_calls or []:
+            args = {}
+            try:
+                args = json.loads(call.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append(LLMToolCall(id=call.id, name=call.function.name, arguments=args))
+        return LLMResponse(
+            text=(message.content or "").strip(),
+            tool_calls=tool_calls,
+            raw=message.model_dump(exclude_none=True),
+        )
+
+    def assistant_message(self, response: LLMResponse) -> dict[str, Any]:
+        if self.provider == "anthropic":
+            return {"role": "assistant", "content": response.raw or response.text}
+        if isinstance(response.raw, dict):
+            return response.raw
+        return {"role": "assistant", "content": response.text}
+
+    def tool_result_messages(self, tool_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self.provider == "anthropic":
+            return [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": r.get("tool_use_id", ""),
+                            "content": r.get("content", ""),
+                        }
+                        for r in tool_results
+                    ],
+                }
+            ]
+        return [
+            {
+                "role": "tool",
+                "tool_call_id": r.get("tool_use_id", ""),
+                "content": r.get("content", ""),
+            }
+            for r in tool_results
+        ]
+
+    async def generate_text(self, *, model: str, prompt: str, max_tokens: int = 1024) -> str:
+        if self.provider == "anthropic":
+            client_any = cast(Any, self._client)
+            messages_client = cast(Any, getattr(client_any, "messages"))  # type: ignore[attr-defined]
+            response = await messages_client.create(
+                model=model,
+                max_tokens=max_tokens,
+                messages=cast(Any, [{"role": "user", "content": prompt}]),
+            )
+            for block in response.content:
+                block_any = cast(Any, block)
+                if getattr(block_any, "type", None) == "text":
+                    return str(getattr(block_any, "text", "")).strip()
+            return ""
+
+        client_any = cast(Any, self._client)
+        response = await client_any.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=cast(Any, [{"role": "user", "content": prompt}]),
+        )
+        return (response.choices[0].message.content or "").strip()

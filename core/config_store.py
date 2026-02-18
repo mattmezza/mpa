@@ -46,6 +46,9 @@ INSERT OR IGNORE INTO setup_state (id, completed, current_step) VALUES (1, 0, 'w
 SECRET_KEYS = frozenset(
     {
         "agent.anthropic_api_key",
+        "agent.openai_api_key",
+        "agent.grok_api_key",
+        "agent.deepseek_api_key",
         "channels.telegram.bot_token",
         "channels.whatsapp.bridge_url",
         "admin.api_key",

@@ -10,12 +10,12 @@ import uuid
 from datetime import datetime
 from typing import Any, cast
 
-from anthropic import AsyncAnthropic
 from tavily import TavilyClient
 
 from core.config import Config
 from core.executor import ToolExecutor
 from core.history import ConversationHistory
+from core.llm import LLMClient, LLMToolCall
 from core.memory import MemoryStore
 from core.models import AgentResponse
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
@@ -197,7 +197,7 @@ TOOLS = [
 class AgentCore:
     def __init__(self, config: Config):
         self.config = config
-        self.llm = AsyncAnthropic(api_key=config.agent.anthropic_api_key)
+        self.llm: LLMClient = LLMClient.from_agent_config(config.agent)
         self.skills = SkillsEngine(
             db_path=config.agent.skills_db_path,
             seed_dir=config.agent.skills_dir,
@@ -270,7 +270,7 @@ class AgentCore:
         log.info("Processing message from %s/%s: %s", channel, user_id, message[:100])
 
         # Initial LLM call
-        response = await self.llm.messages.create(
+        response = await self.llm.generate(
             model=self.config.agent.model,
             max_tokens=4096,
             system=system,
@@ -279,27 +279,22 @@ class AgentCore:
         )
 
         # Agentic loop — keep going while the LLM wants to call tools
-        while response.stop_reason == "tool_use":
+        while response.tool_calls:
             tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    result = await self._execute_tool(block, channel, user_id)
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": json.dumps(result),
-                        }
-                    )
+            for call in response.tool_calls:
+                result = await self._execute_tool(call, channel, user_id)
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": call.id,
+                        "content": json.dumps(result),
+                    }
+                )
 
             # Feed tool results back to the LLM
-            messages.extend(
-                [
-                    {"role": "assistant", "content": response.content},
-                    {"role": "user", "content": tool_results},
-                ]
-            )
-            response = await self.llm.messages.create(
+            messages.append(self.llm.assistant_message(response))
+            messages.extend(self.llm.tool_result_messages(tool_results))
+            response = await self.llm.generate(
                 model=self.config.agent.model,
                 max_tokens=4096,
                 system=system,
@@ -307,7 +302,7 @@ class AgentCore:
                 tools=cast(Any, TOOLS),
             )
 
-        final_text = self._extract_text(response)
+        final_text = response.text
         log.info("Response: %s", final_text[:200])
 
         # Check if the LLM wants to respond with voice
@@ -335,10 +330,10 @@ class AgentCore:
 
         return AgentResponse(text=final_text, voice=voice_bytes)
 
-    async def _execute_tool(self, tool_call, channel: str, user_id: str) -> dict:
+    async def _execute_tool(self, tool_call: LLMToolCall, channel: str, user_id: str) -> dict:
         """Dispatch a tool call from the LLM, with permission checks."""
         name = tool_call.name
-        params = tool_call.input
+        params = tool_call.arguments
 
         # --- Permission check ---
         level = self.permissions.check(name, params)
@@ -654,9 +649,5 @@ Use the history only to understand context, resolve references (e.g. "that", "it
         return prompt
 
     def _extract_text(self, response) -> str:
-        """Pull the text content out of the LLM response."""
-        parts = []
-        for block in response.content:
-            if block.type == "text":
-                parts.append(block.text)
-        return "\n".join(parts) if parts else ""
+        """Deprecated: retained for backward compatibility."""
+        return response.text if hasattr(response, "text") else ""

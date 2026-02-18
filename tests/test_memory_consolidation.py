@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import aiosqlite
@@ -63,14 +62,28 @@ async def _count_rows(store: MemoryStore, table: str) -> int:
     async with aiosqlite.connect(store.db_path) as db:
         cursor = await db.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608
         row = await cursor.fetchone()
-        return row[0]
+        return row[0] if row else 0
 
 
-def _make_mock_llm(response_json: list) -> AsyncMock:
-    """Create a mock AsyncAnthropic that returns a canned JSON response."""
-    llm = AsyncMock()
-    text_block = SimpleNamespace(type="text", text=json.dumps(response_json))
-    llm.messages.create.return_value = SimpleNamespace(content=[text_block])
+class _LLMStub:
+    def __init__(self, response_json: list):
+        self._response = json.dumps(response_json)
+        self.generate_text = AsyncMock(return_value=self._response)
+        self.last_prompt: str | None = None
+        self._emit_response = self.generate_text
+
+    async def generate_text_with_prompt(
+        self, *, model: str, prompt: str, max_tokens: int = 1024
+    ) -> str:
+        self.last_prompt = prompt
+        return await self._emit_response(model=model, prompt=prompt, max_tokens=max_tokens)
+
+
+def _make_mock_llm(response_json: list) -> _LLMStub:
+    """Create a mock LLM client that returns a canned JSON response."""
+    llm = _LLMStub(response_json)
+    llm._emit_response = llm.generate_text
+    llm.generate_text = AsyncMock(side_effect=llm.generate_text_with_prompt)
     return llm
 
 
@@ -135,7 +148,7 @@ class TestConsolidateAndCleanup:
         assert result["expired_deleted"] == 1
 
         # LLM should not have been called
-        llm.messages.create.assert_not_called()
+        llm.generate_text.assert_not_called()
 
     async def test_nothing_to_do(self, store):
         """No short-term memories at all — graceful no-op."""
@@ -146,7 +159,7 @@ class TestConsolidateAndCleanup:
         assert result["active_reviewed"] == 0
         assert result["promoted_to_long_term"] == 0
         assert result["expired_deleted"] == 0
-        llm.messages.create.assert_not_called()
+        llm.generate_text.assert_not_called()
 
     async def test_dedup_prevents_duplicate_promotion(self, store):
         """A promoted memory that overlaps with existing long-term is skipped."""
@@ -191,7 +204,7 @@ class TestConsolidateAndCleanup:
         await _insert_expired_short_term(store, "Expired fact")
 
         llm = AsyncMock()
-        llm.messages.create.side_effect = RuntimeError("API down")
+        llm.generate_text.side_effect = RuntimeError("API down")
 
         result = await store.consolidate_and_cleanup(llm, "claude-haiku-4-5")
 
@@ -204,9 +217,8 @@ class TestConsolidateAndCleanup:
         await _insert_short_term(store, "Active fact")
         await _insert_expired_short_term(store, "Expired fact")
 
-        llm = AsyncMock()
-        bad_block = SimpleNamespace(type="text", text="not json at all")
-        llm.messages.create.return_value = SimpleNamespace(content=[bad_block])
+        llm = _make_mock_llm([])
+        llm.generate_text = AsyncMock(return_value="not json at all")
 
         result = await store.consolidate_and_cleanup(llm, "claude-haiku-4-5")
 
@@ -248,8 +260,7 @@ class TestConsolidateAndCleanup:
         await store.consolidate_and_cleanup(llm, "claude-haiku-4-5")
 
         # Verify the prompt contained the existing long-term memory
-        call_args = llm.messages.create.call_args
-        prompt_text = call_args.kwargs["messages"][0]["content"]
+        prompt_text = llm.last_prompt or ""
         assert "Likes espresso" in prompt_text
         assert "cortado" in prompt_text
 

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
-from anthropic import AsyncAnthropic
+from core.llm import LLMClient
 
 log = logging.getLogger(__name__)
 
@@ -164,7 +163,7 @@ class MemoryStore:
     # -- Automatic memory extraction --
 
     async def extract_memories(
-        self, llm: AsyncAnthropic, model: str, user_msg: str, agent_msg: str
+        self, llm: LLMClient, model: str, user_msg: str, agent_msg: str
     ) -> int:
         """Extract facts from a conversation turn and store them.
 
@@ -176,22 +175,10 @@ class MemoryStore:
         prompt = _EXTRACTION_PROMPT.format(user_msg=user_msg, agent_msg=agent_msg)
 
         try:
-            response = await llm.messages.create(
-                model=model,
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=1024)
         except Exception:
             log.exception("Memory extraction LLM call failed")
             return 0
-
-        raw = ""
-        for block in response.content:
-            if getattr(block, "type", None) == "text":
-                block_any: Any = block
-                text = getattr(block_any, "text", "")
-                raw = str(text).strip()
-                break
         # Strip markdown code fences if the LLM wrapped its response
         if raw.startswith("```"):
             # Remove opening fence (```json or ```)
@@ -295,7 +282,7 @@ class MemoryStore:
 
     # -- Consolidation & cleanup --
 
-    async def consolidate_and_cleanup(self, llm: AsyncAnthropic, model: str) -> dict:
+    async def consolidate_and_cleanup(self, llm: LLMClient, model: str) -> dict:
         """Consolidate short-term memories and clean up expired ones.
 
         1. Fetch all non-expired short-term memories.
@@ -338,7 +325,7 @@ class MemoryStore:
         return summary
 
     async def _run_consolidation_llm(
-        self, llm: AsyncAnthropic, model: str, short_term_rows: list[dict]
+        self, llm: LLMClient, model: str, short_term_rows: list[dict]
     ) -> int:
         """Ask the LLM which short-term memories to promote to long-term."""
         # Build the short-term entries block
@@ -364,22 +351,10 @@ class MemoryStore:
         )
 
         try:
-            response = await llm.messages.create(
-                model=model,
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=1024)
         except Exception:
             log.exception("Consolidation LLM call failed")
             return 0
-
-        raw = ""
-        for block in response.content:
-            if getattr(block, "type", None) == "text":
-                block_any: Any = block
-                text = getattr(block_any, "text", "")
-                raw = str(text).strip()
-                break
 
         try:
             promotions = json.loads(raw)

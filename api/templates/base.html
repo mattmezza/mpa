@@ -42,14 +42,33 @@
     }
     window.showToast = showToast;
 
-    function llmTab(apiKey, model) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl) {
       return {
+        provider: provider || 'anthropic',
         apiKey: apiKey || '',
         model: model || '',
+        openaiKey: openaiKey || '',
+        openaiBaseUrl: openaiBaseUrl || '',
+        grokKey: grokKey || '',
+        grokBaseUrl: grokBaseUrl || '',
+        deepseekKey: deepseekKey || '',
+        deepseekBaseUrl: deepseekBaseUrl || '',
         result: '',
         resultOk: false,
         testing: false,
-        testResult: ''
+        testResult: '',
+        currentKey() {
+          if (this.provider === 'openai') return this.openaiKey;
+          if (this.provider === 'grok') return this.grokKey;
+          if (this.provider === 'deepseek') return this.deepseekKey;
+          return this.apiKey;
+        },
+        currentBaseUrl() {
+          if (this.provider === 'openai') return this.openaiBaseUrl;
+          if (this.provider === 'grok') return this.grokBaseUrl;
+          if (this.provider === 'deepseek') return this.deepseekBaseUrl;
+          return '';
+        }
       };
     }
     window.llmTab = llmTab;

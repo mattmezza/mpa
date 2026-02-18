@@ -13,10 +13,10 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
@@ -63,7 +63,14 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
     ctx: dict[str, str] = {}
     if step == "llm":
         for key, var in (
-            ("agent.anthropic_api_key", "api_key"),
+            ("agent.llm_provider", "provider"),
+            ("agent.anthropic_api_key", "anthropic_api_key"),
+            ("agent.openai_api_key", "openai_api_key"),
+            ("agent.openai_base_url", "openai_base_url"),
+            ("agent.grok_api_key", "grok_api_key"),
+            ("agent.grok_base_url", "grok_base_url"),
+            ("agent.deepseek_api_key", "deepseek_api_key"),
+            ("agent.deepseek_base_url", "deepseek_base_url"),
             ("agent.model", "model"),
         ):
             val = await config_store.get(key)
@@ -351,7 +358,17 @@ def create_admin_app(
         "agent.owner_name",
         "agent.timezone",
     }
-    _LLM_KEYS = {"agent.anthropic_api_key", "agent.model"}
+    _LLM_KEYS = {
+        "agent.llm_provider",
+        "agent.anthropic_api_key",
+        "agent.openai_api_key",
+        "agent.openai_base_url",
+        "agent.grok_api_key",
+        "agent.grok_base_url",
+        "agent.deepseek_api_key",
+        "agent.deepseek_base_url",
+        "agent.model",
+    }
     _SEARCH_PREFIX = "search."
     _MEMORY_PREFIX = "memory."
     _CHANNEL_PREFIX = "channels."
@@ -400,8 +417,8 @@ def create_admin_app(
         """Login page for the admin dashboard."""
         return _render("login.html")
 
-    @app.get("/setup", response_class=HTMLResponse)
-    async def setup_page() -> HTMLResponse:
+    @app.get("/setup", response_model=None)
+    async def setup_page() -> Response:
         """Setup wizard page."""
         from core.config_store import SETUP_STEPS
 
@@ -413,8 +430,8 @@ def create_admin_app(
         step_ctx = await _wizard_step_context(step, config_store)
         return _render("setup.html", steps=SETUP_STEPS, current_step=step, step_ctx=step_ctx)
 
-    @app.get("/admin", response_class=HTMLResponse)
-    async def admin_page() -> HTMLResponse:
+    @app.get("/admin", response_model=None)
+    async def admin_page() -> Response:
         """Admin dashboard page."""
         setup_complete = await config_store.is_setup_complete()
         if not setup_complete:
@@ -427,8 +444,8 @@ def create_admin_app(
             agent_name=agent_name,
         )
 
-    @app.get("/admin/skills/new", response_class=HTMLResponse)
-    async def admin_skill_new() -> HTMLResponse:
+    @app.get("/admin/skills/new", response_model=None)
+    async def admin_skill_new() -> Response:
         """New skill editor page."""
         setup_complete = await config_store.is_setup_complete()
         if not setup_complete:
@@ -440,8 +457,8 @@ def create_admin_app(
             is_new=True,
         )
 
-    @app.get("/admin/skills/{name}", response_class=HTMLResponse)
-    async def admin_skill_editor(name: str) -> HTMLResponse:
+    @app.get("/admin/skills/{name}", response_model=None)
+    async def admin_skill_editor(name: str) -> Response:
         """Skill editor page."""
         setup_complete = await config_store.is_setup_complete()
         if not setup_complete:
@@ -457,7 +474,7 @@ def create_admin_app(
             is_new=False,
         )
 
-    @app.get("/", response_class=HTMLResponse)
+    @app.get("/", response_model=None)
     async def root_redirect() -> RedirectResponse:
         """Redirect root to setup or admin based on state."""
         setup_complete = await config_store.is_setup_complete()
@@ -570,11 +587,25 @@ def create_admin_app(
     @app.get("/partials/llm", dependencies=[Depends(auth)])
     async def partial_llm() -> HTMLResponse:
         """LLM tab partial."""
-        api_key = await config_store.get("agent.anthropic_api_key") or ""
+        provider = await config_store.get("agent.llm_provider") or "anthropic"
+        anthropic_api_key = await config_store.get("agent.anthropic_api_key") or ""
+        openai_api_key = await config_store.get("agent.openai_api_key") or ""
+        openai_base_url = await config_store.get("agent.openai_base_url") or ""
+        grok_api_key = await config_store.get("agent.grok_api_key") or ""
+        grok_base_url = await config_store.get("agent.grok_base_url") or ""
+        deepseek_api_key = await config_store.get("agent.deepseek_api_key") or ""
+        deepseek_base_url = await config_store.get("agent.deepseek_base_url") or ""
         model = await config_store.get("agent.model") or "claude-sonnet-4-5-20250514"
         return _render_partial(
             "partials/llm.html",
-            api_key=api_key,
+            provider=provider,
+            anthropic_api_key=anthropic_api_key,
+            openai_api_key=openai_api_key,
+            openai_base_url=openai_base_url,
+            grok_api_key=grok_api_key,
+            grok_base_url=grok_base_url,
+            deepseek_api_key=deepseek_api_key,
+            deepseek_base_url=deepseek_base_url,
             model=model,
         )
 
@@ -1248,14 +1279,14 @@ def create_admin_app(
         else:
             body = await request.json()
         tier = str(body.get("tier", ""))
-        memory_id = body.get("memory_id")
+        memory_id_raw = body.get("memory_id")
         if tier not in ("long-term", "short-term"):
             raise HTTPException(400, "Tier must be 'long-term' or 'short-term'")
-        if memory_id is None:
+        if memory_id_raw is None:
             raise HTTPException(400, "Missing 'memory_id' in request body")
         # Coerce to int (form-encoded values arrive as strings)
         try:
-            memory_id = int(memory_id)
+            memory_id = int(cast(str, memory_id_raw))
         except TypeError, ValueError:
             raise HTTPException(400, "memory_id must be an integer")
 
@@ -1513,6 +1544,23 @@ def create_admin_app(
 
         if service == "anthropic":
             return await _test_anthropic(payload.get("api_key", ""))
+        if service == "openai":
+            return await _test_openai(
+                payload.get("api_key", ""),
+                payload.get("base_url"),
+            )
+        if service == "grok":
+            return await _test_openai(
+                payload.get("api_key", ""),
+                payload.get("base_url"),
+                model="grok-2-latest",
+            )
+        if service == "deepseek":
+            return await _test_openai(
+                payload.get("api_key", ""),
+                payload.get("base_url"),
+                model="deepseek-chat",
+            )
         if service == "telegram":
             return await _test_telegram(payload.get("bot_token", ""))
         if service == "tavily":
@@ -1549,9 +1597,29 @@ async def _test_anthropic(api_key: str) -> dict:
         )
         text = ""
         for block in response.content:
-            if hasattr(block, "text"):
-                text = block.text
+            text = getattr(block, "text", "")
+            if text:
                 break
+        return {"ok": True, "response": text}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _test_openai(api_key: str, base_url: str | None, model: str = "gpt-4o-mini") -> dict:
+    if not api_key:
+        return {"ok": False, "error": "API key is empty"}
+    try:
+        import importlib
+
+        module = importlib.import_module("openai")
+        client_class = cast(Any, getattr(module, "AsyncOpenAI"))
+        client = cast(Any, client_class)(api_key=api_key, base_url=base_url or None)
+        response = await client.chat.completions.create(
+            model=model,
+            max_tokens=16,
+            messages=[{"role": "user", "content": "Say 'ok'"}],
+        )
+        text = response.choices[0].message.content or ""
         return {"ok": True, "response": text}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

@@ -23,7 +23,7 @@ MPA follows a **Python orchestrator + CLI tools** design. Python glues everythin
 
 | Concern | Tool |
 |---------|------|
-| LLM | Anthropic Claude API |
+| LLM | Anthropic Claude, OpenAI, Grok (xAI), DeepSeek |
 | Email | Himalaya CLI (Rust) |
 | Contacts | khard + vdirsyncer |
 | Calendar | python-caldav |
@@ -157,7 +157,7 @@ Create new skills by adding `.md` files to the `skills/` directory or through th
 ## Tech stack
 
 - **Python 3.14** with **uv** for package management
-- **Anthropic Claude** (Sonnet) as the LLM backend
+- **Anthropic Claude**, **OpenAI**, **Grok (xAI)**, or **DeepSeek** as the LLM backend
 - **SQLite** via aiosqlite for all persistence
 - **FastAPI** + **Jinja2** + **HTMX** + **Alpine.js** + **Tailwind CSS v4** for the admin UI
 - **python-telegram-bot** for the Telegram channel

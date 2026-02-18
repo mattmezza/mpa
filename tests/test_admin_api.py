@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 from fastapi.testclient import TestClient
 
 from api.admin import AgentState, create_admin_app
+from core.config_store import ConfigStore
 
 
 class _ConfigStoreStub:
@@ -57,14 +59,14 @@ class _AgentStub:
 def _client(setup_complete: bool = True) -> TestClient:
     store = _ConfigStoreStub(setup_complete=setup_complete)
     agent_state = AgentState(agent=None)
-    app, _auth = create_admin_app(agent_state, store)
+    app, _auth = create_admin_app(agent_state, cast(ConfigStore, store))
     return TestClient(app)
 
 
 def test_health_reports_setup_and_running() -> None:
     store = _ConfigStoreStub(setup_complete=True)
-    agent_state = AgentState(agent=_AgentStub())
-    app, _auth = create_admin_app(agent_state, store)
+    agent_state = AgentState(agent=cast(Any, _AgentStub()))
+    app, _auth = create_admin_app(agent_state, cast(ConfigStore, store))
     client = TestClient(app)
     resp = client.get("/health")
 
@@ -100,8 +102,8 @@ def test_config_patch_updates_values() -> None:
 
 def test_agent_status_reports_channels_and_jobs() -> None:
     store = _ConfigStoreStub(setup_complete=True)
-    agent_state = AgentState(agent=_AgentStub())
-    app, _auth = create_admin_app(agent_state, store)
+    agent_state = AgentState(agent=cast(Any, _AgentStub()))
+    app, _auth = create_admin_app(agent_state, cast(ConfigStore, store))
     client = TestClient(app)
     headers = {"Authorization": "Bearer secret"}
     resp = client.get("/agent/status", headers=headers)
