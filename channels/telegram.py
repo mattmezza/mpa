@@ -14,6 +14,7 @@ from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filt
 if TYPE_CHECKING:
     from core.agent import AgentCore
     from core.config import TelegramConfig
+    from core.models import Attachment
     from voice.pipeline import VoicePipeline
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class TelegramChannel:
         self.app = Application.builder().token(config.bot_token).concurrent_updates(8).build()
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
+        self.app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, self._on_photo))
         self.app.add_handler(CallbackQueryHandler(self._on_approval_callback))
 
     # -- Incoming handlers ---------------------------------------------------
@@ -85,6 +87,40 @@ class TelegramChannel:
         asyncio.create_task(
             self._handle_voice(voice_msg.file_id, user_id, chat_id),
             name=f"tg-voice-{user_id}",
+        )
+
+    async def _on_photo(self, update: Update, context) -> None:
+        """Handle incoming photos and image documents."""
+        user = update.effective_user
+        message = update.message
+        chat = update.effective_chat
+        if not user or not message:
+            return
+        user_id = user.id
+        if chat:
+            self._last_chat_for_user[user_id] = chat.id
+        if not self._is_allowed(user_id):
+            return
+
+        chat_id = chat.id if chat else user_id
+        caption = message.caption or ""
+
+        # Collect file IDs to download.
+        # Photos: Telegram sends multiple sizes; pick the largest (last).
+        # Document: a single file with a known mime type.
+        file_ids: list[tuple[str, str | None]] = []  # (file_id, mime_type | None)
+        if message.photo:
+            largest = message.photo[-1]
+            file_ids.append((largest.file_id, None))  # Telegram photos are always JPEG
+        if message.document and message.document.mime_type:
+            file_ids.append((message.document.file_id, message.document.mime_type))
+
+        if not file_ids:
+            return
+
+        asyncio.create_task(
+            self._handle_photo(file_ids, caption, user_id, chat_id),
+            name=f"tg-photo-{user_id}",
         )
 
     async def _on_approval_callback(self, update: Update, context) -> None:
@@ -212,6 +248,48 @@ class TelegramChannel:
                 message=f"[voice] {transcript}",
                 channel="telegram",
                 user_id=str(user_id),
+            )
+        await self._send_response(chat_id, response)
+
+    async def _handle_photo(
+        self,
+        file_ids: list[tuple[str, str | None]],
+        caption: str,
+        user_id: int,
+        chat_id: int,
+    ) -> None:
+        from core.models import IMAGE_MIME_TYPES, Attachment
+
+        async with self._typing(chat_id):
+            attachments: list[Attachment] = []
+            for file_id, mime_type in file_ids:
+                file = await self.app.bot.get_file(file_id)
+                data = bytes(await file.download_as_bytearray())
+                # Telegram photos are always JPEG; documents carry their own mime.
+                resolved_mime = mime_type or "image/jpeg"
+                if resolved_mime not in IMAGE_MIME_TYPES:
+                    log.info("Skipping non-image attachment: %s", resolved_mime)
+                    continue
+                attachments.append(Attachment(data=data, mime_type=resolved_mime))
+                log.info(
+                    "Downloaded image from user %s (%d bytes, %s)",
+                    user_id,
+                    len(data),
+                    resolved_mime,
+                )
+
+            if not attachments:
+                await self.app.bot.send_message(
+                    chat_id=chat_id,
+                    text="Sorry, I can only process image files (JPEG, PNG, GIF, WebP) for now.",
+                )
+                return
+
+            response = await self.agent.process(
+                message=caption,
+                channel="telegram",
+                user_id=str(user_id),
+                attachments=attachments,
             )
         await self._send_response(chat_id, response)
 

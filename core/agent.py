@@ -17,7 +17,7 @@ from core.executor import ToolExecutor
 from core.history import ConversationHistory
 from core.llm import LLMClient, LLMToolCall
 from core.memory import MemoryStore
-from core.models import AgentResponse
+from core.models import AgentResponse, Attachment
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
 from core.scheduler import AgentScheduler
 from core.skills import SkillsEngine
@@ -226,7 +226,13 @@ class AgentCore:
             self.search_client = None
             log.info("Web search disabled (no API key or not enabled)")
 
-    async def process(self, message: str, channel: str, user_id: str) -> AgentResponse:
+    async def process(
+        self,
+        message: str,
+        channel: str,
+        user_id: str,
+        attachments: list[Attachment] | None = None,
+    ) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop."""
         system = await self._build_system_prompt()
 
@@ -265,7 +271,21 @@ class AgentCore:
             )
 
         # The actual current request — always the last user message.
-        messages.append({"role": "user", "content": message})
+        # When image attachments are present, build a multimodal content
+        # block list instead of a plain string.
+        image_attachments = [a for a in (attachments or []) if a.is_image]
+        if image_attachments:
+            content_blocks: list[dict] = []
+            if message:
+                content_blocks.append({"type": "text", "text": message})
+            for att in image_attachments:
+                if self.llm.provider == "anthropic":
+                    content_blocks.append(att.to_anthropic_block())
+                else:
+                    content_blocks.append(att.to_openai_block())
+            messages.append({"role": "user", "content": content_blocks})
+        else:
+            messages.append({"role": "user", "content": message})
 
         log.info("Processing message from %s/%s: %s", channel, user_id, message[:100])
 
@@ -316,7 +336,14 @@ class AgentCore:
             final_text = clean_text
 
         # Persist the turn (user message + final assistant text only)
-        await self.history.add_turn(channel, user_id, "user", message)
+        # For messages with attachments, include a text note so history has context.
+        history_message = message
+        if image_attachments:
+            n = len(image_attachments)
+            label = "image" if n == 1 else f"{n} images"
+            suffix = f" [{label} attached]"
+            history_message = (message + suffix) if message else suffix.strip()
+        await self.history.add_turn(channel, user_id, "user", history_message)
         await self.history.add_turn(channel, user_id, "assistant", final_text)
 
         # Automatic memory extraction (fire-and-forget, non-blocking)
