@@ -4,7 +4,7 @@
 {% block body %}
 <div>
   <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
-    <h1 class="text-xl text-accent" id="admin-greeting" data-owner='{{ owner_name|default('', true)|tojson }}' data-agent='{{ agent_name|default('', true)|tojson }}'>
+    <h1 class="text-xl text-accent" id="admin-greeting" data-owner="{{ owner_name|default('', true)|e }}" data-agent="{{ agent_name|default('', true)|e }}">
       Hi there! Let's configure your assistant...
     </h1>
   </div>
