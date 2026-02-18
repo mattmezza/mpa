@@ -72,7 +72,7 @@
 
   {# Add / edit job form #}
   <h3 class="text-xs text-muted uppercase tracking-wider mt-5 mb-2" x-text="editing ? 'Edit job' : 'Add new job'">Add new job</h3>
-  <form hx-post="/jobs" hx-target="#tab-content" hx-swap="innerHTML" @submit="resetForm()">
+  <form hx-post="/jobs" hx-target="#tab-content" hx-swap="innerHTML">
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div>
         <label class="label">Job ID</label>
@@ -166,11 +166,6 @@ function jobsTab() {
       });
     },
     cancelEdit() {
-      this.editing = false;
-      this.form = { id: '', cron: '', type: 'agent', task: '', channel: 'telegram' };
-    },
-    resetForm() {
-      // reset after successful submit (HTMX will replace the content anyway)
       this.editing = false;
       this.form = { id: '', cron: '', type: 'agent', task: '', channel: 'telegram' };
     }
