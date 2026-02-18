@@ -114,6 +114,7 @@
     <label class="label" for="w-openai-key">OpenAI API Key</label>
     <input type="password" class="input" id="w-openai-key" placeholder="sk-..."
            value="{{ step_ctx.openai_api_key|default('') }}">
+    <p class="hint">Create one in <a href="https://platform.openai.com/account/api-keys" target="_blank">platform.openai.com</a></p>
     <label class="label mt-2" for="w-openai-base-url">OpenAI Base URL (optional)</label>
     <input type="text" class="input" id="w-openai-base-url" placeholder="https://..."
            value="{{ step_ctx.openai_base_url|default('') }}">
@@ -155,6 +156,7 @@
     <label class="label" for="w-google-key">Google API Key</label>
     <input type="password" class="input" id="w-google-key" placeholder="AIza..."
            value="{{ step_ctx.google_api_key|default('') }}">
+    <p class="hint">Create a key in <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a></p>
     <label class="label mt-2" for="w-google-base-url">Google Base URL (optional)</label>
     <input type="text" class="input" id="w-google-base-url" placeholder="https://generativelanguage.googleapis.com/v1beta/openai"
            value="{{ step_ctx.google_base_url|default('') }}">
@@ -196,6 +198,7 @@
     <label class="label" for="w-grok-key">Grok API Key</label>
     <input type="password" class="input" id="w-grok-key" placeholder="xai-..."
            value="{{ step_ctx.grok_api_key|default('') }}">
+    <p class="hint">Create a key in <a href="https://console.x.ai/" target="_blank">console.x.ai</a></p>
     <label class="label mt-2" for="w-grok-base-url">Grok Base URL (optional)</label>
     <input type="text" class="input" id="w-grok-base-url" placeholder="https://api.x.ai/v1"
            value="{{ step_ctx.grok_base_url|default('') }}">
@@ -237,6 +240,7 @@
     <label class="label" for="w-deepseek-key">DeepSeek API Key</label>
     <input type="password" class="input" id="w-deepseek-key" placeholder="sk-..."
            value="{{ step_ctx.deepseek_api_key|default('') }}">
+    <p class="hint">Create a key in <a href="https://platform.deepseek.com/api_keys" target="_blank">platform.deepseek.com</a></p>
     <label class="label mt-2" for="w-deepseek-base-url">DeepSeek Base URL (optional)</label>
     <input type="text" class="input" id="w-deepseek-base-url" placeholder="https://api.deepseek.com"
            value="{{ step_ctx.deepseek_base_url|default('') }}">

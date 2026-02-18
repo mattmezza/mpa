@@ -94,6 +94,7 @@
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
                x-model="apiKey" placeholder="sk-ant-...">
+        <p class="text-muted text-xs mt-1">Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a></p>
         <div class="flex items-center gap-2 mt-2">
           <button class="btn btn-sm" type="button" :disabled="testing.anthropic || !apiKey"
                   @click="testProvider('anthropic')">
@@ -140,6 +141,7 @@
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
                x-model="openaiKey" placeholder="sk-...">
+        <p class="text-muted text-xs mt-1">Create one in <a href="https://platform.openai.com/account/api-keys" target="_blank">platform.openai.com</a></p>
       </div>
       <div>
         <label class="label">OpenAI Base URL (optional)</label>
@@ -192,6 +194,7 @@
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
                x-model="googleKey" placeholder="AIza...">
+        <p class="text-muted text-xs mt-1">Create a key in <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a></p>
       </div>
       <div>
         <label class="label">Google Base URL (optional)</label>
@@ -244,6 +247,7 @@
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
                x-model="grokKey" placeholder="xai-...">
+        <p class="text-muted text-xs mt-1">Create a key in <a href="https://console.x.ai/" target="_blank">console.x.ai</a></p>
       </div>
       <div>
         <label class="label">Grok Base URL (optional)</label>
@@ -296,6 +300,7 @@
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
                x-model="deepseekKey" placeholder="sk-...">
+        <p class="text-muted text-xs mt-1">Create a key in <a href="https://platform.deepseek.com/api_keys" target="_blank">platform.deepseek.com</a></p>
       </div>
       <div>
         <label class="label">DeepSeek Base URL (optional)</label>
