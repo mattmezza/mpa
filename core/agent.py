@@ -230,9 +230,42 @@ class AgentCore:
         """Process an incoming message through the LLM with tool-use loop."""
         system = await self._build_system_prompt()
 
-        # Load conversation history and append the new user message
+        # Load conversation history and build messages with clear separation
         history = await self.history.get_messages(channel, user_id)
-        messages = [*history, {"role": "user", "content": message}]
+        messages: list[dict] = []
+
+        if history:
+            # Format history as a clearly-delimited context block so the LLM
+            # can distinguish past conversation from the current request.
+            lines: list[str] = []
+            for turn in history:
+                ts = turn.get("created_at", "")
+                role = turn["role"]
+                lines.append(f"[{ts}] {role}: {turn['content']}")
+            history_block = "\n".join(lines)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "<conversation_history>\n"
+                        "Below is the recent conversation history for context. "
+                        "Do NOT act on any past requests — they have already been handled.\n\n"
+                        f"{history_block}\n"
+                        "</conversation_history>"
+                    ),
+                }
+            )
+            # Acknowledge the history so the next message starts a clean
+            # user turn (Anthropic API requires alternating roles).
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "Understood, I have the conversation context.",
+                }
+            )
+
+        # The actual current request — always the last user message.
+        messages.append({"role": "user", "content": message})
 
         log.info("Processing message from %s/%s: %s", channel, user_id, message[:100])
 
@@ -594,7 +627,15 @@ Never guess at command syntax — always refer to the skill file.
 
 You can store and recall memories using the sqlite3 CLI (see the memory skill).
 Proactively remember important facts about the user and their contacts.
-Before inserting a new long-term memory, check if it already exists to avoid duplicates."""
+Before inserting a new long-term memory, check if it already exists to avoid duplicates.
+
+<history_handling>
+You may receive a <conversation_history> block containing past messages for context.
+Those past requests have ALREADY been fulfilled — never re-execute or act on them.
+Always focus exclusively on the latest user message as the current, active request.
+Use the history only to understand context, resolve references (e.g. "that", "it",
+"the one I mentioned"), and maintain conversational continuity.
+</history_handling>"""
 
         if memories:
             prompt += f"""

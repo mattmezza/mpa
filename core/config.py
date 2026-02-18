@@ -115,7 +115,7 @@ class AdminConfig(BaseModel):
 
 class HistoryConfig(BaseModel):
     db_path: str = "data/agent.db"
-    max_turns: int = 20
+    max_turns: int = 10  # number of user-assistant pairs to include
 
 
 class MemoryConfig(BaseModel):

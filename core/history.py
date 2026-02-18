@@ -41,24 +41,41 @@ class ConversationHistory:
         self._ready = True
 
     async def get_messages(self, channel: str, user_id: str) -> list[dict]:
-        """Return the last N turns as Anthropic-format messages."""
+        """Return the last *max_turns* user-assistant **pairs** with timestamps.
+
+        Each returned dict has ``role``, ``content`` and ``created_at`` keys.
+        The limit is applied to *pairs* (not individual rows) so the history
+        never starts with an orphaned assistant reply.
+        """
         await self._ensure_schema()
+        # We select the N most-recent *user* rows by id and then grab every
+        # row whose id >= the smallest of those.  Because the assistant reply
+        # is always inserted right after the user message, this guarantees we
+        # never slice in the middle of a pair.
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 """
-                SELECT role, content FROM (
-                    SELECT role, content, created_at
-                    FROM conversation_turns
-                    WHERE channel = ? AND user_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                ) sub ORDER BY created_at ASC
+                SELECT role, content, created_at FROM conversation_turns
+                WHERE channel = ? AND user_id = ?
+                  AND id >= (
+                      SELECT MIN(id) FROM (
+                          SELECT id
+                          FROM conversation_turns
+                          WHERE channel = ? AND user_id = ? AND role = 'user'
+                          ORDER BY id DESC
+                          LIMIT ?
+                      )
+                  )
+                ORDER BY id ASC
                 """,
-                (channel, user_id, self.max_turns),
+                (channel, user_id, channel, user_id, self.max_turns),
             )
             rows = await cursor.fetchall()
 
-        return [{"role": role, "content": json.loads(content)} for role, content in rows]
+        return [
+            {"role": role, "content": json.loads(content), "created_at": created_at}
+            for role, content, created_at in rows
+        ]
 
     async def add_turn(self, channel: str, user_id: str, role: str, content: str) -> None:
         """Store a single message (user or assistant text)."""

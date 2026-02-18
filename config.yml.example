@@ -64,7 +64,7 @@ search:
 
 history:
   db_path: "data/agent.db"
-  max_turns: 20
+  max_turns: 10  # number of user-assistant pairs (not individual messages)
 
 memory:
   db_path: "data/memory.db"
