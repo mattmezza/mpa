@@ -355,6 +355,7 @@ def create_admin_app(
     _CALENDAR_PREFIX = "calendar."
     _YOU_PREFIX = "you."
     _VOICE_PREFIX = "voice."
+    _HISTORY_PREFIX = "history."
 
     def _is_managed_key(key: str) -> bool:
         """Return True if this key is managed by a dedicated tab (not Config)."""
@@ -368,6 +369,7 @@ def create_admin_app(
             _CALENDAR_PREFIX,
             _YOU_PREFIX,
             _VOICE_PREFIX,
+            _HISTORY_PREFIX,
         ):
             if key.startswith(prefix):
                 return True
@@ -618,6 +620,17 @@ def create_admin_app(
             memory_long_term_limit=memory_long_term_limit,
             memory_extraction_model=memory_extraction_model,
             memory_consolidation_model=memory_consolidation_model,
+        )
+
+    @app.get("/partials/history", dependencies=[Depends(auth)])
+    async def partial_history() -> HTMLResponse:
+        """History tab partial."""
+        db_path = await config_store.get("history.db_path") or "data/agent.db"
+        max_turns = await config_store.get("history.max_turns") or "10"
+        return _render_partial(
+            "partials/history.html",
+            db_path=db_path,
+            max_turns=max_turns,
         )
 
     @app.get("/partials/logs", dependencies=[Depends(auth)])

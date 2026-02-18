@@ -79,6 +79,10 @@
             @click="select('calendars')">
       Calendars
     </button>
+    <button class="tab-link" :class="tab === 'history' && 'tab-link-active'"
+            @click="select('history')">
+      History
+    </button>
     <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
             @click="select('logs')">
       Logs
@@ -278,6 +282,7 @@
       skills: '/partials/skills',
       jobs: '/partials/jobs',
       calendars: '/partials/calendars',
+      history: '/partials/history',
       logs: '/partials/logs',
       admin: '/partials/admin',
       config: '/partials/config'
