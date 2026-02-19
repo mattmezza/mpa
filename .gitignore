@@ -36,3 +36,4 @@ data/
 
 # Tailwind CSS standalone CLI binary
 tailwindcss
+node_modules
