@@ -151,6 +151,9 @@ async def main() -> None:
         log_level="info",
     )
     server = uvicorn.Server(uvi_config)
+    # Prevent uvicorn from installing its own signal handlers — we manage
+    # shutdown ourselves so that Ctrl-C / SIGTERM cleanly stops everything.
+    server.install_signal_handlers = lambda: None  # type: ignore[assignment]
     log.info("Starting admin API on port %s…", port)
 
     # Graceful shutdown
@@ -179,11 +182,9 @@ async def main() -> None:
         await _stop_agent(agent_state.agent)
         agent_state.status = "STOPPED"
 
-    server_task.cancel()
-    try:
-        await server_task
-    except asyncio.CancelledError:
-        pass
+    # Tell uvicorn to exit gracefully and wait for it to finish
+    server.should_exit = True
+    await server_task
 
 
 def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentState, auth) -> None:
