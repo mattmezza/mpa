@@ -48,6 +48,12 @@ run:
 dev:
 	@trap 'kill 0' EXIT; \
 	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --watch & \
+	if [ -d tools/wa-bridge ]; then \
+		if [ ! -d tools/wa-bridge/node_modules ]; then \
+			npm --prefix tools/wa-bridge install; \
+		fi; \
+		npm --prefix tools/wa-bridge run start & \
+	fi; \
 	$(UV) run watchfiles --filter python 'python -m core.main' api core channels schema skills tools voice & \
 	wait
 
