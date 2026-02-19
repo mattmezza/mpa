@@ -31,6 +31,7 @@
       <div>
         <label class="label">Model</label>
         <select class="input-sm" style="max-width:500px" x-model="model">
+          <option x-show="customModel" :value="customModel" x-text="customModel + ' (custom)'"></option>
           <template x-for="item in (models[provider] || [])" :key="item.value">
             <option :value="item.value" x-text="item.label"></option>
           </template>

@@ -48,6 +48,7 @@
         provider: currentProvider,
         apiKey: apiKey || '',
         model: model || '',
+        customModel: '',
         openaiKey: openaiKey || '',
         openaiBaseUrl: openaiBaseUrl || '',
         googleKey: googleKey || '',
@@ -114,8 +115,15 @@
         normalizeModel() {
           const list = this.models[this.provider] || [];
           if (!list.length) return;
-          const exists = list.some(item => item.value === this.model);
-          if (!exists) this.model = list[0].value;
+          const current = (this.model || '').trim();
+          if (!current) {
+            this.model = list[0].value;
+            this.customModel = '';
+            return;
+          }
+          const exists = list.some(item => item.value === current);
+          this.model = current;
+          this.customModel = exists ? '' : current;
         },
         keyFor(service) {
           if (service === 'openai') return this.openaiKey;
