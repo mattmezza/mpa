@@ -85,7 +85,7 @@ DEFAULT_RULES: dict[str, str] = {
 class PermissionEngine:
     """Check tool actions against permission rules using glob patterns."""
 
-    def __init__(self, db_path: str = "data/agent.db") -> None:
+    def __init__(self, db_path: str = "data/config.db") -> None:
         self.db_path = db_path
         self.rules: dict[str, str] = dict(DEFAULT_RULES)
         self._ready = False

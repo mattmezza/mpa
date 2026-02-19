@@ -8,7 +8,7 @@ reload.
 Config values are stored as key-value pairs with dotted paths
 (e.g. "agent.name", "channels.telegram.bot_token").  Secrets are
 stored alongside plain values — the database file should live on an
-encrypted volume (same as memory.db and agent.db).
+encrypted volume (same as memory.db).
 """
 
 from __future__ import annotations

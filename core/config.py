@@ -123,7 +123,7 @@ class AdminConfig(BaseModel):
 
 
 class HistoryConfig(BaseModel):
-    db_path: str = "data/agent.db"
+    db_path: str = "data/history.db"
     max_turns: int = 10  # number of user-assistant pairs to include
 
 

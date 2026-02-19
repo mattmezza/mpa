@@ -213,8 +213,9 @@ class AgentCore:
         )
         self.channels: dict = {}
         self.voice: VoicePipeline | None = None
-        self.scheduler = AgentScheduler(config.history.db_path, self)
-        self.permissions = PermissionEngine(db_path=config.history.db_path)
+        config_db = "data/config.db"
+        self.scheduler = AgentScheduler(config_db, self)
+        self.permissions = PermissionEngine(db_path=config_db)
 
         # Web search (Tavily)
         if config.search.enabled and config.search.api_key:

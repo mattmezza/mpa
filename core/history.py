@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_turns_lookup
 class ConversationHistory:
     """Stores and retrieves conversation turns per user+channel."""
 
-    def __init__(self, db_path: str = "data/agent.db", max_turns: int = 20):
+    def __init__(self, db_path: str = "data/history.db", max_turns: int = 20):
         self.db_path = db_path
         self.max_turns = max_turns
         self._ready = False
