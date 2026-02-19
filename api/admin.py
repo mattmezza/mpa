@@ -178,6 +178,9 @@ async def _channel_wizard_context(
         if user_ids:
             ctx["user_ids"] = user_ids
     if channel == "whatsapp":
+        enabled_raw = await config_store.get("channels.whatsapp.enabled")
+        enabled = str(enabled_raw).lower() != "false"
+        ctx["enabled"] = "true" if enabled else "false"
         bridge_url = await config_store.get("channels.whatsapp.bridge_url")
         allowed_numbers = await config_store.get("channels.whatsapp.allowed_numbers")
         if bridge_url:
@@ -295,6 +298,10 @@ class PasswordChangeIn(BaseModel):
 
 class CalendarProvidersIn(BaseModel):
     providers: list[dict[str, str]]
+
+
+class WhatsAppTestIn(BaseModel):
+    bridge_url: str
 
 
 # ---------------------------------------------------------------------------
@@ -1170,6 +1177,39 @@ def create_admin_app(
         await config_store.set_many(values)
         channel_data = await _channel_list_context(config_store)
         return _render_partial("partials/channels.html", **channel_data)
+
+    @app.post("/channels/whatsapp/test", dependencies=[Depends(auth)])
+    async def test_channel_whatsapp(body: WhatsAppTestIn) -> dict:
+        bridge_url = body.bridge_url.strip().rstrip("/")
+        if not bridge_url:
+            raise HTTPException(400, "Bridge URL is required")
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(f"{bridge_url}/health")
+                data = resp.json()
+                ok = data.get("ok") is True or data.get("status") == "ok"
+                return {"ok": ok, "response": data}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/webhook/whatsapp")
+    async def whatsapp_webhook(request: Request) -> dict:
+        """Webhook for the WhatsApp bridge sidecar."""
+        if agent_state.agent is None:
+            raise HTTPException(503, "Agent not running")
+
+        body = await request.json()
+        channel = agent_state.agent.channels.get("whatsapp")
+        if not channel:
+            raise HTTPException(404, "WhatsApp channel not enabled")
+
+        try:
+            return await channel.handle_webhook(body)
+        except Exception as exc:
+            log.exception("WhatsApp webhook failed")
+            raise HTTPException(500, f"Webhook error: {exc}")
 
     @app.delete("/channels/{channel}", dependencies=[Depends(auth)])
     async def delete_channel(channel: str) -> HTMLResponse:

@@ -14,7 +14,7 @@
   <label class="label mt-3" for="ch-tg-users">Allowed user IDs</label>
   <input type="text" class="input" id="ch-tg-users" placeholder="123456789"
          value="{{ user_ids|default('') }}">
-  <div class="hint">Comma-separated IDs. Only these users can message the agent.</div>
+  <div class="hint">Comma-separated IDs. Leave empty to allow any user.</div>
 
   <div class="flex items-center gap-2 mt-3">
     <button class="btn btn-sm" type="button" onclick="testTelegram()">Test connection</button>

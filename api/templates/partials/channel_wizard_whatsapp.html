@@ -1,21 +1,48 @@
 <div>
-  <h3 class="text-base mb-2">WhatsApp setup</h3>
-  <ol class="text-xs text-muted list-disc ml-5 space-y-1 mb-3">
-    <li>Run the WhatsApp bridge service on your server.</li>
-    <li>Set the bridge URL and allowed numbers below.</li>
-    <li>Save and enable the channel.</li>
-  </ol>
+  <div class="flex items-start justify-between gap-3 flex-wrap">
+    <div>
+      <h3 class="text-base mb-1">WhatsApp setup</h3>
+      <p class="text-xs text-muted">Connect your WhatsApp bridge and restrict who can message the agent.</p>
+    </div>
+    <div class="badge-off">Bridge required</div>
+  </div>
 
-  <label class="label" for="ch-wa-bridge">Bridge URL</label>
-  <input type="text" class="input" id="ch-wa-bridge" placeholder="http://localhost:3001"
-         value="{{ bridge_url|default('http://localhost:3001') }}">
+  <div class="grid grid-cols-1 gap-3 mt-3">
+    <div class="card" style="padding: 0.75rem;">
+      <div class="text-xs text-muted uppercase tracking-wider">Step 1</div>
+      <div class="text-xs mt-1">Run your WhatsApp bridge service (Node sidecar) and keep it online.</div>
+    </div>
+    <div class="card" style="padding: 0.75rem;">
+      <div class="text-xs text-muted uppercase tracking-wider">Step 2</div>
+      <div class="text-xs mt-1">Paste the bridge URL and choose which numbers can reach the agent.</div>
+    </div>
+  </div>
 
-  <label class="label mt-3" for="ch-wa-numbers">Allowed numbers</label>
-  <input type="text" class="input" id="ch-wa-numbers" placeholder="+14155551234"
-         value="{{ allowed_numbers|default('') }}">
-  <div class="hint">Comma-separated phone numbers in international format.</div>
+  <div class="mt-3">
+    <label class="label" for="ch-wa-bridge">Bridge URL</label>
+    <input type="text" class="input" id="ch-wa-bridge" placeholder="http://localhost:3001"
+           value="{{ bridge_url|default('http://localhost:3001') }}">
+    <div class="hint">Must be reachable from this server. Example: http://192.168.1.10:3001</div>
+  </div>
 
-  <div class="flex items-center gap-2 mt-3">
+  <div class="mt-3">
+    <label class="label" for="ch-wa-numbers">Allowed numbers</label>
+    <input type="text" class="input" id="ch-wa-numbers" placeholder="+14155551234, +442071838750"
+           value="{{ allowed_numbers|default('') }}">
+    <div class="hint">Comma-separated international numbers. Leave empty to allow any sender.</div>
+  </div>
+
+  <div class="mt-3">
+    <label class="label" for="ch-wa-enabled">Channel status</label>
+    <div class="flex items-center gap-2 text-xs">
+      <input type="checkbox" id="ch-wa-enabled" class="input-sm" style="width: auto;"
+             {% if enabled|default('true') == 'true' %}checked{% endif %}>
+      <span>Enable WhatsApp channel</span>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-2 mt-4">
+    <button class="btn btn-sm" type="button" onclick="testWhatsApp()">Test bridge</button>
     <button class="btn-primary btn-sm" type="button" onclick="saveWhatsApp()">Save</button>
   </div>
   <div id="channel-wizard-result" class="mt-2 text-xs"></div>
@@ -26,6 +53,7 @@
     const result = document.getElementById('channel-wizard-result');
     const bridgeUrl = document.getElementById('ch-wa-bridge').value.trim();
     const numbers = document.getElementById('ch-wa-numbers').value.trim();
+    const enabled = document.getElementById('ch-wa-enabled').checked;
     if (!bridgeUrl) {
       result.textContent = 'Bridge URL is required.';
       result.className = 'alert-error';
@@ -37,15 +65,46 @@
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
       },
-      body: JSON.stringify({bridge_url: bridgeUrl, allowed_numbers: numbers, enabled: true})
+      body: JSON.stringify({bridge_url: bridgeUrl, allowed_numbers: numbers, enabled: enabled})
     })
       .then(r => r.text())
       .then(html => {
         document.getElementById('tab-content').innerHTML = html;
         closeChannelWizard();
+        if (window.showToast) { window.showToast('WhatsApp channel saved'); }
       })
       .catch(e => {
         result.textContent = e.message;
+        result.className = 'alert-error';
+      });
+  }
+
+  function testWhatsApp() {
+    const result = document.getElementById('channel-wizard-result');
+    const bridgeUrl = document.getElementById('ch-wa-bridge').value.trim();
+    if (!bridgeUrl) {
+      result.textContent = 'Bridge URL is required.';
+      result.className = 'alert-error';
+      return;
+    }
+    result.textContent = 'Testing bridge...';
+    result.className = 'alert-info';
+    fetch('/channels/whatsapp/test', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      },
+      body: JSON.stringify({ bridge_url: bridgeUrl })
+    })
+      .then(r => r.json())
+      .then(d => {
+        const ok = d && d.ok === true;
+        result.textContent = ok ? 'Bridge is reachable.' : (d.error || 'Bridge not reachable.');
+        result.className = ok ? 'alert-success' : 'alert-error';
+      })
+      .catch(e => {
+        result.textContent = e.message || 'Bridge not reachable.';
         result.className = 'alert-error';
       });
   }

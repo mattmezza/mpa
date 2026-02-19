@@ -34,6 +34,7 @@ install_log_buffer()
 async def _start_agent(config_store: ConfigStore):
     """Build and start the full agent (channels, scheduler, voice)."""
     from channels.telegram import TelegramChannel
+    from channels.whatsapp import WhatsAppChannel
     from core.agent import AgentCore
     from voice.pipeline import VoicePipeline
 
@@ -72,6 +73,12 @@ async def _start_agent(config_store: ConfigStore):
         updater = tg.app.updater
         if updater is not None:
             await updater.start_polling()
+
+    # -- WhatsApp --
+    if config.channels.whatsapp.enabled and config.channels.whatsapp.bridge_url:
+        wa = WhatsAppChannel(config.channels.whatsapp, agent)
+        agent.channels["whatsapp"] = wa
+        log.info("WhatsApp channel enabled (bridge: %s)", config.channels.whatsapp.bridge_url)
 
     # -- Scheduler --
     if config.scheduler.jobs:
