@@ -19,7 +19,7 @@
     <div class="card" style="padding: 0.75rem;">
       <div class="text-xs text-muted uppercase tracking-wider">Step 3</div>
       <div class="text-xs mt-1">
-        Set the bridge webhook to <code class="px-1.5 py-0.5 bg-surface-active rounded text-accent text-[0.7rem]">/webhook/whatsapp</code>
+        Set the bridge webhook to <code id="wa-webhook-url" class="px-1.5 py-0.5 bg-surface-active rounded text-accent text-[0.7rem]">/webhook/whatsapp</code>
         on this server.
       </div>
     </div>
@@ -63,6 +63,16 @@
 </div>
 
 <script>
+  (function setWebhookUrl() {
+    const el = document.getElementById('wa-webhook-url');
+    if (!el) return;
+    try {
+      el.textContent = window.location.origin + '/webhook/whatsapp';
+    } catch (e) {
+      el.textContent = '/webhook/whatsapp';
+    }
+  })();
+
   function saveWhatsApp() {
     const result = document.getElementById('channel-wizard-result');
     const bridgeUrl = document.getElementById('ch-wa-bridge').value.trim();
