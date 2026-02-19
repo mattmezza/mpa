@@ -1,4 +1,4 @@
-.PHONY: setup install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css cssd
+.PHONY: setup install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css
 
 PYTHON := uv run python
 UV := uv
@@ -89,7 +89,3 @@ release:
 # Build minified CSS (production)
 css:
 	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --minify
-
-# Watch CSS files and rebuild on change (development)
-cssd:
-	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --watch
