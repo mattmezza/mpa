@@ -241,8 +241,17 @@ app.post("/send", async (req, res) => {
     res.status(400).json({ ok: false, error: "Missing 'to' or 'text'" });
     return;
   }
+  const normalizeRecipient = (value) => {
+    if (!value) return "";
+    const raw = String(value).trim();
+    if (raw.includes("@")) return raw;
+    const digits = raw.replace(/[^0-9]/g, "");
+    if (!digits) return raw;
+    return `${digits}@c.us`;
+  };
+  const recipient = normalizeRecipient(to);
   try {
-    await client.sendMessage(to, text);
+    await client.sendMessage(recipient, text);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message || String(err) });
@@ -252,7 +261,12 @@ app.post("/send", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`WhatsApp bridge listening on :${PORT}`);
   console.log(`Posting inbound messages to ${AGENT_WEBHOOK}`);
-  if (AUTO_START) {
+  const shouldAutoStart = AUTO_START;
+  if (shouldAutoStart) {
     startClient();
+    return;
   }
+  fs.access(path.resolve(AUTH_PATH))
+    .then(() => startClient())
+    .catch(() => {});
 });
