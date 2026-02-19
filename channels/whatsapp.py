@@ -102,8 +102,8 @@ class WhatsAppChannel:
             await self.send(sender, "Missing approval ID. Reply with: approve <id>.")
             return True
 
-        approved = action in _APPROVE_ACTIONS
         always_allow = action in _ALWAYS_ACTIONS
+        approved = action in _APPROVE_ACTIONS or always_allow
         resolved = self.agent.permissions.resolve_approval(
             request_id, approved, always_allow=always_allow
         )
