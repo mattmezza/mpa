@@ -47,7 +47,7 @@ class AgentConfig(BaseModel):
     grok_base_url: str = ""
     deepseek_api_key: str = ""
     deepseek_base_url: str = ""
-    model: str = "claude-sonnet-4-5-20250514"
+    model: str = "claude-4-6-sonnet"
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
     skills_db_path: str = "data/skills.db"

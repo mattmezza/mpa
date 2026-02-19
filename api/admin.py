@@ -176,7 +176,7 @@ async def _channel_list_context(config_store: ConfigStore) -> dict[str, list[dic
                     if data.get("authenticated") is True:
                         wa_auth_status = "Auth ok"
                         wa_auth_class = "badge-ok"
-                    elif data.get("started") is False:
+                    elif data.get("running") is False:
                         wa_auth_status = "Auth stopped"
                         wa_auth_class = "badge-off"
                     else:
@@ -559,14 +559,6 @@ def create_admin_app(
             scheduler_jobs=scheduler_jobs,
         )
 
-    @app.get("/partials/config", dependencies=[Depends(auth)])
-    async def partial_config() -> HTMLResponse:
-        """Config tab partial."""
-        data = await config_store.get_all_redacted()
-        filtered = {k: v for k, v in data.items() if not _is_managed_key(k)}
-        config_items = sorted(filtered.items())
-        return _render_partial("partials/config.html", config_items=config_items)
-
     @app.get("/partials/identity", dependencies=[Depends(auth)])
     async def partial_identity() -> HTMLResponse:
         """Agent identity tab partial."""
@@ -649,7 +641,7 @@ def create_admin_app(
         grok_base_url = await config_store.get("agent.grok_base_url") or ""
         deepseek_api_key = await config_store.get("agent.deepseek_api_key") or ""
         deepseek_base_url = await config_store.get("agent.deepseek_base_url") or ""
-        model = await config_store.get("agent.model") or "claude-sonnet-4-5-20250514"
+        model = await config_store.get("agent.model") or "claude-4-6-sonnet"
         extraction_provider = await config_store.get("memory.extraction_provider") or "anthropic"
         extraction_model = await config_store.get("memory.extraction_model") or "claude-4-5-haiku"
         consolidation_provider = (
@@ -730,12 +722,10 @@ def create_admin_app(
     async def partial_history() -> HTMLResponse:
         """History tab partial."""
         mode = await config_store.get("history.mode") or "injection"
-        db_path = await config_store.get("history.db_path") or "data/history.db"
         max_turns = await config_store.get("history.max_turns") or "10"
         return _render_partial(
             "partials/history.html",
             mode=mode,
-            db_path=db_path,
             max_turns=max_turns,
         )
 

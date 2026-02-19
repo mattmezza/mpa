@@ -1,7 +1,6 @@
 {# History tab partial #}
 <div class="space-y-6" x-data="{
   mode: {{ mode|default('injection', true)|tojson|forceescape }},
-  dbPath: {{ db_path|default('data/agent.db', true)|tojson|forceescape }},
   maxTurns: {{ max_turns|default('10', true)|tojson|forceescape }},
   result: '',
   resultOk: false
@@ -29,13 +28,6 @@
         <p class="text-muted text-xs mt-1" x-show="mode === 'session'">A persistent session is maintained per channel. The full conversation is sent to the LLM, preserving tool call history and enabling prompt caching. Reset via the channel's clear command.</p>
       </div>
 
-      <div>
-        <label class="label">Database path</label>
-        <input type="text" class="input-sm" style="max-width:500px"
-               x-model="dbPath" placeholder="data/agent.db">
-        <p class="text-muted text-xs mt-1">SQLite database file for storing conversation turns.</p>
-      </div>
-
       <div x-show="mode === 'injection'" x-transition>
         <label class="label">Max turns</label>
         <input type="number" class="input-sm" style="max-width:120px"
@@ -49,7 +41,6 @@
               @click="
                 const vals = {
                   'history.mode': mode,
-                  'history.db_path': dbPath,
                   'history.max_turns': String(maxTurns)
                 };
                 fetch('/config', {

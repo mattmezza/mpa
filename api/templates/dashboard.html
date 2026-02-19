@@ -64,13 +64,17 @@
             @click="select('llm')">
       LLM
     </button>
-    <button class="tab-link" :class="tab === 'channels' && 'tab-link-active'"
-            @click="select('channels')">
-      Channels
-    </button>
     <button class="tab-link" :class="tab === 'memory' && 'tab-link-active'"
             @click="select('memory')">
       Memory
+    </button>
+    <button class="tab-link" :class="tab === 'history' && 'tab-link-active'"
+            @click="select('history')">
+      History
+    </button>
+    <button class="tab-link" :class="tab === 'channels' && 'tab-link-active'"
+            @click="select('channels')">
+      Channels
     </button>
     <button class="tab-link" :class="tab === 'search' && 'tab-link-active'"
             @click="select('search')">
@@ -96,21 +100,13 @@
             @click="select('email')">
       Email
     </button>
-    <button class="tab-link" :class="tab === 'history' && 'tab-link-active'"
-            @click="select('history')">
-      History
-    </button>
-    <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
-            @click="select('logs')">
-      Logs
-    </button>
     <button class="tab-link" :class="tab === 'admin' && 'tab-link-active'"
             @click="select('admin')">
       Admin
     </button>
-    <button class="tab-link" :class="tab === 'config' && 'tab-link-active'"
-            @click="select('config')">
-      Config
+    <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
+            @click="select('logs')">
+      Logs
     </button>
   </div>
 
@@ -122,7 +118,14 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+  <script>
+  (function ensureQrLibrary() {
+    if (window.QRCode) return;
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    script.async = true;
+    document.head.appendChild(script);
+  })();
   function agentControl() {
     return {
       busy: false,
@@ -570,7 +573,7 @@
         if (status.latest_qr_at) {
           qrDelay = Date.now() - status.latest_qr_at < 5000 ? 1500 : 3000;
         }
-        if (status.started === false) {
+        if (status.running === false) {
           panel.style.display = 'none';
           result.textContent = 'Auth not started. Click "Start auth" to begin.';
           result.className = 'alert-info';
@@ -580,6 +583,14 @@
           panel.style.display = 'none';
           result.textContent = 'WhatsApp authenticated.';
           result.className = 'alert-success';
+          try {
+            await fetch(bridgeUrl + '/sync/start', {
+              method: 'POST',
+              headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+            });
+          } catch (e) {
+            // ignore sync start errors
+          }
           return;
         }
         panel.style.display = 'block';
@@ -588,8 +599,22 @@
         });
         if (qrResp.ok) {
           const qrData = await qrResp.json();
-          if (qrData && qrData.data_url) {
-            qrBox.innerHTML = '<img src="' + qrData.data_url + '" alt="WhatsApp QR" style="max-width: 320px; background: #fff; padding: 8px; border-radius: 6px;" />';
+          if (qrData && qrData.qr) {
+            qrBox.innerHTML = '<div id="wa-qr-container"></div>';
+            if (window.QRCode) {
+              const el = document.getElementById('wa-qr-container');
+              el.innerHTML = '';
+              new QRCode(el, {
+                text: qrData.qr,
+                width: 300,
+                height: 300,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.H
+              });
+            } else {
+              qrBox.textContent = 'QR library missing.';
+            }
           } else {
             qrBox.textContent = 'Waiting for QR...';
           }
@@ -623,15 +648,29 @@
         result.className = 'alert-success';
         return;
       }
-      if (status.started) {
+      if (status.running) {
         panel.style.display = 'block';
         const qrResp = await fetch(bridgeUrl + '/auth/qr?ts=' + Date.now(), {
           headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
         });
         if (qrResp.ok) {
           const qrData = await qrResp.json();
-          if (qrData && qrData.data_url) {
-            qrBox.innerHTML = '<img src="' + qrData.data_url + '" alt="WhatsApp QR" style="max-width: 320px; background: #fff; padding: 8px; border-radius: 6px;" />';
+          if (qrData && qrData.qr) {
+            qrBox.innerHTML = '<div id="wa-qr-container"></div>';
+            if (window.QRCode) {
+              const el = document.getElementById('wa-qr-container');
+              el.innerHTML = '';
+              new QRCode(el, {
+                text: qrData.qr,
+                width: 300,
+                height: 300,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.H
+              });
+            } else {
+              qrBox.textContent = 'QR library missing.';
+            }
           } else {
             qrBox.textContent = 'Waiting for QR...';
           }
@@ -662,18 +701,17 @@
       identity: '/partials/identity',
       you: '/partials/you',
       llm: '/partials/llm',
-      channels: '/partials/channels',
       memory: '/partials/memory',
+      history: '/partials/history',
+      channels: '/partials/channels',
       search: '/partials/search',
       permissions: '/partials/permissions',
       skills: '/partials/skills',
       jobs: '/partials/jobs',
       calendars: '/partials/calendars',
       email: '/partials/email',
-      history: '/partials/history',
-      logs: '/partials/logs',
       admin: '/partials/admin',
-      config: '/partials/config'
+      logs: '/partials/logs'
     };
 
     return {

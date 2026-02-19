@@ -170,14 +170,6 @@ class TestPartialRoutes:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
 
-    def test_config_partial(self):
-        client = _client(setup_complete=True)
-        resp = client.get("/partials/config", headers=AUTH)
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        # Should contain config data
-        assert "agent.name" in resp.text
-
     def test_identity_partial(self):
         client = _client(setup_complete=True)
         resp = client.get("/partials/identity", headers=AUTH)
@@ -251,7 +243,6 @@ class TestPartialRoutes:
     def test_history_partial(self):
         store = _ConfigStoreStub(setup_complete=True)
         store._data["history.mode"] = "session"
-        store._data["history.db_path"] = "data/custom.db"
         store._data["history.max_turns"] = "15"
         agent_state = AgentState(agent=cast(Any, _AgentStub()))
         app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
@@ -260,7 +251,6 @@ class TestPartialRoutes:
         resp = client.get("/partials/history", headers=AUTH)
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
-        assert "data/custom.db" in resp.text
         assert "15" in resp.text
         assert "session" in resp.text
 
@@ -275,7 +265,6 @@ class TestPartialRoutes:
         client = _client(setup_complete=True)
         for path in [
             "/partials/status",
-            "/partials/config",
             "/partials/identity",
             "/partials/you",
             "/partials/calendars",
