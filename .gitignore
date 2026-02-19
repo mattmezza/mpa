@@ -34,8 +34,9 @@ data/
 .pytest_cache/
 .ruff_cache/
 
-# Tailwind CSS standalone CLI binary
+# Tailwind CSS standalone CLI binary + compiled output (built in Docker & via `make css`)
 tailwindcss
+api/static/style.css
 node_modules
 
 # WhatsApp bridge auth/session data
