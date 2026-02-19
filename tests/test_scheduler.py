@@ -44,16 +44,23 @@ async def test_run_system_command_logs_nonzero_exit(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_run_memory_consolidation_calls_store(monkeypatch) -> None:
     memory = SimpleNamespace(consolidate_and_cleanup=AsyncMock(return_value={}))
+    llm_sentinel = object()
     agent = SimpleNamespace(
         memory=memory,
-        llm=object(),
-        config=SimpleNamespace(memory=SimpleNamespace(consolidation_model="model")),
+        llm=llm_sentinel,
+        config=SimpleNamespace(
+            memory=SimpleNamespace(
+                consolidation_model="model",
+                consolidation_provider="anthropic",
+            ),
+        ),
+        _memory_llm=lambda self_provider: llm_sentinel,
     )
     set_agent_context(agent)
 
     await run_memory_consolidation()
 
-    memory.consolidate_and_cleanup.assert_awaited_once_with(llm=agent.llm, model="model")
+    memory.consolidate_and_cleanup.assert_awaited_once_with(llm=llm_sentinel, model="model")
 
 
 @pytest.mark.asyncio

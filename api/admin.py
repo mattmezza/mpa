@@ -650,6 +650,14 @@ def create_admin_app(
         deepseek_api_key = await config_store.get("agent.deepseek_api_key") or ""
         deepseek_base_url = await config_store.get("agent.deepseek_base_url") or ""
         model = await config_store.get("agent.model") or "claude-sonnet-4-5-20250514"
+        extraction_provider = await config_store.get("memory.extraction_provider") or "anthropic"
+        extraction_model = await config_store.get("memory.extraction_model") or "claude-4-5-haiku"
+        consolidation_provider = (
+            await config_store.get("memory.consolidation_provider") or "anthropic"
+        )
+        consolidation_model = (
+            await config_store.get("memory.consolidation_model") or "claude-4-5-haiku"
+        )
         return _render_partial(
             "partials/llm.html",
             provider=provider,
@@ -663,6 +671,10 @@ def create_admin_app(
             deepseek_api_key=deepseek_api_key,
             deepseek_base_url=deepseek_base_url,
             model=model,
+            extraction_provider=extraction_provider,
+            extraction_model=extraction_model,
+            consolidation_provider=consolidation_provider,
+            consolidation_model=consolidation_model,
         )
 
     @app.get("/partials/search", dependencies=[Depends(auth)])
@@ -684,14 +696,7 @@ def create_admin_app(
     async def partial_memory() -> HTMLResponse:
         """Memory tab partial."""
         # Memory config
-        memory_db_path = await config_store.get("memory.db_path") or "data/memory.db"
         memory_long_term_limit = await config_store.get("memory.long_term_limit") or "50"
-        memory_extraction_model = (
-            await config_store.get("memory.extraction_model") or "claude-haiku-4-5"
-        )
-        memory_consolidation_model = (
-            await config_store.get("memory.consolidation_model") or "claude-haiku-4-5"
-        )
 
         # Memory data
         agent = agent_state.agent
@@ -718,10 +723,7 @@ def create_admin_app(
             "partials/memory.html",
             long_term=long_term,
             short_term=short_term,
-            memory_db_path=memory_db_path,
             memory_long_term_limit=memory_long_term_limit,
-            memory_extraction_model=memory_extraction_model,
-            memory_consolidation_model=memory_consolidation_model,
         )
 
     @app.get("/partials/history", dependencies=[Depends(auth)])
@@ -1425,14 +1427,7 @@ def create_admin_app(
                 raise HTTPException(404, f"Memory {memory_id} not found in {tier}")
 
         # Return refreshed memory partial
-        memory_db_path = await config_store.get("memory.db_path") or "data/memory.db"
         memory_long_term_limit = await config_store.get("memory.long_term_limit") or "50"
-        memory_extraction_model = (
-            await config_store.get("memory.extraction_model") or "claude-haiku-4-5"
-        )
-        memory_consolidation_model = (
-            await config_store.get("memory.consolidation_model") or "claude-haiku-4-5"
-        )
         long_term = []
         short_term = []
         cols = "id, category, subject, content, source, confidence, created_at, updated_at"
@@ -1450,10 +1445,7 @@ def create_admin_app(
             "partials/memory.html",
             long_term=long_term,
             short_term=short_term,
-            memory_db_path=memory_db_path,
             memory_long_term_limit=memory_long_term_limit,
-            memory_extraction_model=memory_extraction_model,
-            memory_consolidation_model=memory_consolidation_model,
         )
 
     @app.post("/memory/consolidate", dependencies=[Depends(auth)])
@@ -1462,7 +1454,7 @@ def create_admin_app(
         if not agent:
             raise HTTPException(503, "Agent not running")
         result = await agent.memory.consolidate_and_cleanup(
-            llm=agent.llm,
+            llm=agent._memory_llm(agent.config.memory.consolidation_provider),
             model=agent.config.memory.consolidation_model,
         )
         promoted = result.get("promoted_to_long_term", 0)

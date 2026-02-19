@@ -132,8 +132,10 @@ class HistoryConfig(BaseModel):
 class MemoryConfig(BaseModel):
     db_path: str = "data/memory.db"
     long_term_limit: int = 50
-    extraction_model: str = "claude-haiku-4-5"
-    consolidation_model: str = "claude-haiku-4-5"
+    extraction_provider: str = "anthropic"
+    extraction_model: str = "claude-4-5-haiku"
+    consolidation_provider: str = "anthropic"
+    consolidation_model: str = "claude-4-5-haiku"
 
 
 class SearchConfig(BaseModel):

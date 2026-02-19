@@ -51,7 +51,7 @@
   </div>
 
   {# Tab navigation #}
-  <div class="flex border-b border-border mb-4 overflow-x-auto" x-data="adminTabs()" x-init="init()">
+  <div class="flex border-b border-border mb-4 overflow-x-auto" x-data="adminTabs()" x-init="init()" @switch-tab.window="select($event.detail)">
     <button class="tab-link" :class="tab === 'identity' && 'tab-link-active'"
             @click="select('identity')">
       Assistant

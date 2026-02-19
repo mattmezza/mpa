@@ -42,7 +42,7 @@
     }
     window.showToast = showToast;
 
-    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel) {
       const currentProvider = provider || 'anthropic';
       return {
         provider: currentProvider,
@@ -57,6 +57,14 @@
         grokBaseUrl: grokBaseUrl || '',
         deepseekKey: deepseekKey || '',
         deepseekBaseUrl: deepseekBaseUrl || '',
+        extractionProvider: extractionProvider || 'anthropic',
+        extractionModel: extractionModel || 'claude-4-5-haiku',
+        extractionCustomModel: '',
+        consolidationProvider: consolidationProvider || 'anthropic',
+        consolidationModel: consolidationModel || 'claude-4-5-haiku',
+        consolidationCustomModel: '',
+        memoryResult: '',
+        memoryResultOk: false,
         result: '',
         resultOk: false,
         tests: {
@@ -111,6 +119,10 @@
         init() {
           this.normalizeModel();
           this.$watch('provider', () => this.normalizeModel());
+          this.normalizeMemoryModel('extraction');
+          this.normalizeMemoryModel('consolidation');
+          this.$watch('extractionProvider', () => this.normalizeMemoryModel('extraction'));
+          this.$watch('consolidationProvider', () => this.normalizeMemoryModel('consolidation'));
         },
         normalizeModel() {
           const list = this.models[this.provider] || [];
@@ -124,6 +136,21 @@
           const exists = list.some(item => item.value === current);
           this.model = current;
           this.customModel = exists ? '' : current;
+        },
+        normalizeMemoryModel(kind) {
+          const prov = kind === 'extraction' ? this.extractionProvider : this.consolidationProvider;
+          const list = this.models[prov] || [];
+          if (!list.length) return;
+          const current = (kind === 'extraction' ? this.extractionModel : this.consolidationModel) || '';
+          const trimmed = current.trim();
+          if (!trimmed) {
+            if (kind === 'extraction') { this.extractionModel = list[0].value; this.extractionCustomModel = ''; }
+            else { this.consolidationModel = list[0].value; this.consolidationCustomModel = ''; }
+            return;
+          }
+          const exists = list.some(item => item.value === trimmed);
+          if (kind === 'extraction') { this.extractionModel = trimmed; this.extractionCustomModel = exists ? '' : trimmed; }
+          else { this.consolidationModel = trimmed; this.consolidationCustomModel = exists ? '' : trimmed; }
         },
         keyFor(service) {
           if (service === 'openai') return this.openaiKey;

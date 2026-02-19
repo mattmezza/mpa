@@ -1,52 +1,20 @@
 {# Memory tab partial #}
   <div x-data="{
-    dbPath: {{ memory_db_path|default('data/memory.db', true)|tojson|forceescape }},
     longTermLimit: {{ memory_long_term_limit|default('50', true)|tojson|forceescape }},
-    extractionModel: {{ memory_extraction_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
-    consolidationModel: {{ memory_consolidation_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
     cfgResult: '',
     cfgOk: false
   }">
   {# Memory config section #}
   <div class="card mb-6">
     <h2 class="text-base mb-1">Memory Settings</h2>
-    <p class="text-muted text-xs mb-3">Configure memory storage and the models used for extraction and consolidation.</p>
+    <p class="text-muted text-xs mb-3">Configure memory storage behaviour.</p>
 
     <div class="space-y-3">
-      <div>
-        <label class="label">Database path</label>
-        <input type="text" class="input-sm" style="max-width:400px"
-               x-model="dbPath" placeholder="data/memory.db">
-      </div>
       <div>
         <label class="label">Long-term limit</label>
         <input type="number" class="input-sm" style="max-width:120px"
                x-model="longTermLimit" min="1" max="500">
         <p class="text-muted text-xs mt-1">Maximum number of long-term memories before consolidation triggers cleanup.</p>
-      </div>
-      <div>
-        <label class="label">Extraction model</label>
-        <select class="input-sm" style="max-width:400px" x-model="extractionModel">
-          <option value="claude-opus-4-6">Claude Opus 4.6</option>
-          <option value="claude-opus-4-5">Claude Opus 4.5</option>
-          <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-          <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
-          <option value="claude-sonnet-4-5-20250514">Claude Sonnet 4.5</option>
-          <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-        </select>
-        <p class="text-muted text-xs mt-1">Model used to extract memories from conversations.</p>
-      </div>
-      <div>
-        <label class="label">Consolidation model</label>
-        <select class="input-sm" style="max-width:400px" x-model="consolidationModel">
-          <option value="claude-opus-4-6">Claude Opus 4.6</option>
-          <option value="claude-opus-4-5">Claude Opus 4.5</option>
-          <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-          <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
-          <option value="claude-sonnet-4-5-20250514">Claude Sonnet 4.5</option>
-          <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-        </select>
-        <p class="text-muted text-xs mt-1">Model used to consolidate and merge duplicate memories.</p>
       </div>
     </div>
 
@@ -54,10 +22,7 @@
       <button class="btn-primary btn-sm"
               @click="
                 const vals = {
-                  'memory.db_path': dbPath,
-                  'memory.long_term_limit': String(longTermLimit),
-                  'memory.extraction_model': extractionModel,
-                  'memory.consolidation_model': consolidationModel
+                  'memory.long_term_limit': String(longTermLimit)
                 };
                 fetch('/config', {
                   method: 'PATCH',
@@ -80,6 +45,11 @@
     <template x-if="cfgResult">
       <div :class="cfgOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="cfgResult"></div>
     </template>
+
+    <p class="text-muted text-xs mt-4">
+      The models used for memory extraction and consolidation can be configured in the
+      <a href="#" class="text-link" @click.prevent="$dispatch('switch-tab', 'llm')">LLM tab</a>.
+    </p>
   </div>
 
   {# Memory data #}

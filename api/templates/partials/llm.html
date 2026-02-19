@@ -10,7 +10,11 @@
   {{ grok_api_key|default('', true)|tojson|forceescape }},
   {{ grok_base_url|default('', true)|tojson|forceescape }},
   {{ deepseek_api_key|default('', true)|tojson|forceescape }},
-  {{ deepseek_base_url|default('', true)|tojson|forceescape }}
+  {{ deepseek_base_url|default('', true)|tojson|forceescape }},
+  {{ extraction_provider|default('anthropic', true)|tojson|forceescape }},
+  {{ extraction_model|default('claude-4-5-haiku', true)|tojson|forceescape }},
+  {{ consolidation_provider|default('anthropic', true)|tojson|forceescape }},
+  {{ consolidation_model|default('claude-4-5-haiku', true)|tojson|forceescape }}
 )">
   <div class="card">
     <h2 class="text-base mb-1">Active Inference Provider</h2>
@@ -76,6 +80,87 @@
 
     <template x-if="result">
       <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
+    </template>
+  </div>
+
+  <div class="card">
+    <h2 class="text-base mb-1">Memory Models</h2>
+    <p class="text-muted text-xs mb-4">Choose which provider and model to use for memory extraction and consolidation. These can differ from the main inference model.</p>
+
+    <form class="space-y-4" @submit.prevent>
+      <div>
+        <label class="label">Extraction provider</label>
+        <select class="input-sm" style="max-width:500px" x-model="extractionProvider">
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+          <option value="google">Google Gemini</option>
+          <option value="grok">Grok (xAI)</option>
+          <option value="deepseek">DeepSeek</option>
+        </select>
+      </div>
+      <div>
+        <label class="label">Extraction model</label>
+        <select class="input-sm" style="max-width:500px" x-model="extractionModel">
+          <option x-show="extractionCustomModel" :value="extractionCustomModel" x-text="extractionCustomModel + ' (custom)'"></option>
+          <template x-for="item in (models[extractionProvider] || [])" :key="'ext-' + item.value">
+            <option :value="item.value" x-text="item.label"></option>
+          </template>
+        </select>
+        <p class="text-muted text-xs mt-1">Model used to extract memories from conversations.</p>
+      </div>
+
+      <hr class="border-border">
+
+      <div>
+        <label class="label">Consolidation provider</label>
+        <select class="input-sm" style="max-width:500px" x-model="consolidationProvider">
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+          <option value="google">Google Gemini</option>
+          <option value="grok">Grok (xAI)</option>
+          <option value="deepseek">DeepSeek</option>
+        </select>
+      </div>
+      <div>
+        <label class="label">Consolidation model</label>
+        <select class="input-sm" style="max-width:500px" x-model="consolidationModel">
+          <option x-show="consolidationCustomModel" :value="consolidationCustomModel" x-text="consolidationCustomModel + ' (custom)'"></option>
+          <template x-for="item in (models[consolidationProvider] || [])" :key="'con-' + item.value">
+            <option :value="item.value" x-text="item.label"></option>
+          </template>
+        </select>
+        <p class="text-muted text-xs mt-1">Model used to consolidate and merge duplicate memories.</p>
+      </div>
+    </form>
+
+    <div class="flex items-center gap-2 mt-4">
+      <button class="btn-primary btn-sm"
+              @click="
+                fetch('/config', {
+                  method: 'PATCH',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+                  },
+                  body: JSON.stringify({values: {
+                    'memory.extraction_provider': extractionProvider,
+                    'memory.extraction_model': extractionModel,
+                    'memory.consolidation_provider': consolidationProvider,
+                    'memory.consolidation_model': consolidationModel
+                  }})
+                })
+                .then(r => { memoryResultOk = r.ok; return r.json(); })
+                .then(d => {
+                  memoryResult = memoryResultOk ? 'Memory model settings saved' : (d.detail || 'Error');
+                  if (memoryResultOk && window.showToast) { window.showToast('Memory model settings saved'); }
+                })
+                .catch(e => { memoryResultOk = false; memoryResult = e.message; })
+              ">
+        Save memory models
+      </button>
+    </div>
+    <template x-if="memoryResult">
+      <div :class="memoryResultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="memoryResult"></div>
     </template>
   </div>
 

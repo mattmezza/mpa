@@ -696,8 +696,9 @@ class AgentCore:
         main agent loop.
         """
         try:
+            llm = self._memory_llm(self.config.memory.extraction_provider)
             stored = await self.memory.extract_memories(
-                llm=self.llm,
+                llm=llm,
                 model=self.config.memory.extraction_model,
                 user_msg=user_msg,
                 agent_msg=agent_msg,
@@ -706,6 +707,22 @@ class AgentCore:
                 log.info("Background memory extraction stored %d memories", stored)
         except Exception:
             log.exception("Background memory extraction failed")
+
+    def _memory_llm(self, provider: str) -> LLMClient:
+        """Return an LLM client for memory operations.
+
+        If the requested provider matches the main inference provider the
+        existing client is reused; otherwise a new one is created using the
+        API key / base-URL already stored in the agent config.
+        """
+        if provider == self.llm.provider:
+            return self.llm
+        cfg = self.config.agent
+        return LLMClient(
+            provider=provider,
+            api_key=getattr(cfg, f"{provider}_api_key", ""),
+            base_url=getattr(cfg, f"{provider}_base_url", None),
+        )
 
     async def _build_system_prompt(self) -> str:
         cfg = self.config.agent

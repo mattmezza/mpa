@@ -115,8 +115,9 @@ async def run_memory_consolidation() -> None:
 
     log.info("Scheduler running memory consolidation")
     try:
+        llm = agent._memory_llm(agent.config.memory.consolidation_provider)
         result = await agent.memory.consolidate_and_cleanup(
-            llm=agent.llm,
+            llm=llm,
             model=agent.config.memory.consolidation_model,
         )
         log.info(
