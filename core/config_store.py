@@ -52,6 +52,7 @@ SECRET_KEYS = frozenset(
         "agent.deepseek_api_key",
         "channels.telegram.bot_token",
         "channels.whatsapp.bridge_url",
+        "channels.whatsapp.bridge_token",
         "admin.api_key",
         "admin.password_hash",
         "admin.password_salt",

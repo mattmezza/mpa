@@ -115,6 +115,7 @@ voice/          Voice pipeline
 tools/          CLI helper scripts
   calendar_read.py   CalDAV event reader
   calendar_write.py  CalDAV event creator
+  wa-bridge/          WhatsApp Node sidecar (bridge)
 skills/         Markdown skill files
 schema/         Database schemas
 tests/          Test suite
@@ -153,6 +154,11 @@ Example skills included:
 - `jq.md` — JSON processing
 
 Create new skills by adding `.md` files to the `skills/` directory or through the admin UI's skill editor.
+
+## WhatsApp bridge
+
+MPA uses a small Node sidecar to connect WhatsApp Web and forward messages to the agent.
+See `tools/wa-bridge/README.md` for the minimal bridge, API contract, and setup steps.
 
 ## Tech stack
 

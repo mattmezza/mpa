@@ -182,9 +182,12 @@ async def _channel_wizard_context(
         enabled = str(enabled_raw).lower() != "false"
         ctx["enabled"] = "true" if enabled else "false"
         bridge_url = await config_store.get("channels.whatsapp.bridge_url")
+        bridge_token = await config_store.get("channels.whatsapp.bridge_token")
         allowed_numbers = await config_store.get("channels.whatsapp.allowed_numbers")
         if bridge_url:
             ctx["bridge_url"] = bridge_url
+        if bridge_token:
+            ctx["bridge_token"] = bridge_token
         if allowed_numbers:
             ctx["allowed_numbers"] = allowed_numbers
     return ctx
@@ -302,6 +305,7 @@ class CalendarProvidersIn(BaseModel):
 
 class WhatsAppTestIn(BaseModel):
     bridge_url: str
+    bridge_token: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1165,6 +1169,7 @@ def create_admin_app(
     async def save_channel_whatsapp(request: Request) -> HTMLResponse:
         body = await request.json()
         bridge_url = str(body.get("bridge_url", "")).strip()
+        bridge_token = str(body.get("bridge_token", "")).strip()
         allowed_numbers = str(body.get("allowed_numbers", "")).strip()
         enabled = str(body.get("enabled", "true")).lower() == "true"
         if not bridge_url:
@@ -1172,6 +1177,7 @@ def create_admin_app(
         values = {
             "channels.whatsapp.enabled": str(enabled).lower(),
             "channels.whatsapp.bridge_url": bridge_url,
+            "channels.whatsapp.bridge_token": bridge_token,
             "channels.whatsapp.allowed_numbers": allowed_numbers,
         }
         await config_store.set_many(values)
@@ -1187,7 +1193,8 @@ def create_admin_app(
             import httpx
 
             async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{bridge_url}/health")
+                headers = {"X-WA-Bridge-Token": body.bridge_token} if body.bridge_token else None
+                resp = await client.get(f"{bridge_url}/health", headers=headers)
                 data = resp.json()
                 ok = data.get("ok") is True or data.get("status") == "ok"
                 return {"ok": ok, "response": data}
@@ -1199,6 +1206,12 @@ def create_admin_app(
         """Webhook for the WhatsApp bridge sidecar."""
         if agent_state.agent is None:
             raise HTTPException(503, "Agent not running")
+
+        bridge_token = await config_store.get("channels.whatsapp.bridge_token") or ""
+        if bridge_token:
+            provided = request.headers.get("X-WA-Bridge-Token", "")
+            if provided != bridge_token:
+                raise HTTPException(401, "Unauthorized")
 
         body = await request.json()
         channel = agent_state.agent.channels.get("whatsapp")

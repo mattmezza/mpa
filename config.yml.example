@@ -23,6 +23,7 @@ channels:
   whatsapp:
     enabled: false
     bridge_url: "http://localhost:3001"
+    bridge_token: "${WHATSAPP_BRIDGE_TOKEN}"
     allowed_numbers: "${WHATSAPP_ALLOWED_NUMBERS}"
 
 calendar:

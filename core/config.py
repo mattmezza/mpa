@@ -72,6 +72,7 @@ class TelegramConfig(BaseModel):
 class WhatsAppConfig(BaseModel):
     enabled: bool = False
     bridge_url: str = "http://localhost:3001"
+    bridge_token: str = ""
     allowed_numbers: list[str] = Field(default_factory=list)
 
     @field_validator("allowed_numbers", mode="before")

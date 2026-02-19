@@ -35,11 +35,17 @@ class WhatsAppChannel:
         self.agent = agent
         self.bridge_url = config.bridge_url.rstrip("/")
         self.allowed_numbers = {_normalize_number(n) for n in (config.allowed_numbers or []) if n}
+        self.bridge_token = getattr(config, "bridge_token", "") or ""
 
     async def send(self, to: str, text: str) -> None:
         payload = {"to": to, "text": text}
+        headers = {"X-WA-Bridge-Token": self.bridge_token} if self.bridge_token else None
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(f"{self.bridge_url}/send", json=payload)
+            resp = await client.post(
+                f"{self.bridge_url}/send",
+                json=payload,
+                headers=headers,
+            )
             resp.raise_for_status()
 
     async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
