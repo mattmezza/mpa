@@ -1,7 +1,7 @@
 import express from "express";
 import qrcode from "qrcode-terminal";
 import dotenv from "dotenv";
-import { Client, LocalAuth } from "whatsapp-web.js";
+import whatsappWeb from "whatsapp-web.js";
 
 dotenv.config();
 
@@ -11,6 +11,8 @@ const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || "";
 
 const app = express();
 app.use(express.json());
+
+const { Client, LocalAuth } = whatsappWeb;
 
 const client = new Client({
   authStrategy: new LocalAuth(),

@@ -37,3 +37,6 @@ data/
 # Tailwind CSS standalone CLI binary
 tailwindcss
 node_modules
+
+# WhatsApp bridge auth/session data
+tools/wa-bridge/.wwebjs_auth/
