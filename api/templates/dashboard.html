@@ -331,6 +331,323 @@
       });
   }
 
+  function saveWhatsApp() {
+    const result = document.getElementById('channel-wizard-result');
+    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
+    const bridgeTokenInput = document.getElementById('ch-wa-token');
+    const numbersInput = document.getElementById('ch-wa-numbers');
+    const enabledInput = document.getElementById('ch-wa-enabled');
+    if (!result || !bridgeUrlInput || !bridgeTokenInput || !numbersInput || !enabledInput) return;
+    const bridgeUrl = bridgeUrlInput.value.trim();
+    const bridgeToken = bridgeTokenInput.value.trim();
+    const numbers = numbersInput.value.trim();
+    const enabled = enabledInput.checked;
+    if (!bridgeUrl) {
+      result.textContent = 'Bridge URL is missing in config.';
+      result.className = 'alert-error';
+      return;
+    }
+    fetch('/channels/whatsapp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      },
+      body: JSON.stringify({bridge_url: bridgeUrl, bridge_token: bridgeToken, allowed_numbers: numbers, enabled: enabled})
+    })
+      .then(r => r.text())
+      .then(html => {
+        document.getElementById('tab-content').innerHTML = html;
+        closeChannelWizard();
+        if (window.showToast) { window.showToast('WhatsApp channel saved'); }
+      })
+      .catch(e => {
+        result.textContent = e.message;
+        result.className = 'alert-error';
+      });
+  }
+
+  function testWhatsApp() {
+    const result = document.getElementById('channel-wizard-result');
+    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
+    const bridgeTokenInput = document.getElementById('ch-wa-token');
+    if (!result || !bridgeUrlInput || !bridgeTokenInput) return;
+    const bridgeUrl = bridgeUrlInput.value.trim();
+    const bridgeToken = bridgeTokenInput.value.trim();
+    if (!bridgeUrl) {
+      result.textContent = 'Bridge URL is missing in config.';
+      result.className = 'alert-error';
+      return;
+    }
+    result.textContent = 'Testing bridge...';
+    result.className = 'alert-info';
+    fetch('/channels/whatsapp/test', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+      },
+      body: JSON.stringify({ bridge_url: bridgeUrl, bridge_token: bridgeToken })
+    })
+      .then(r => r.json())
+      .then(d => {
+        const ok = d && d.ok === true;
+        result.textContent = ok ? 'Bridge is reachable.' : (d.error || 'Bridge not reachable.');
+        result.className = ok ? 'alert-success' : 'alert-error';
+      })
+      .catch(e => {
+        result.textContent = e.message || 'Bridge not reachable.';
+        result.className = 'alert-error';
+      });
+  }
+
+  function sendWhatsAppTestMessage() {
+    const result = document.getElementById('channel-wizard-result');
+    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
+    const bridgeTokenInput = document.getElementById('ch-wa-token');
+    const numbersInput = document.getElementById('ch-wa-numbers');
+    if (!result || !bridgeUrlInput || !bridgeTokenInput || !numbersInput) return;
+    const bridgeUrl = bridgeUrlInput.value.trim().replace(/\/$/, '');
+    const bridgeToken = bridgeTokenInput.value.trim();
+    const numbersRaw = numbersInput.value.trim();
+    const firstNumber = numbersRaw.split(',').map((n) => n.trim()).filter(Boolean)[0];
+    if (!bridgeUrl) {
+      result.textContent = 'Bridge URL is missing in config.';
+      result.className = 'alert-error';
+      return;
+    }
+    if (!firstNumber) {
+      result.textContent = 'Add at least one allowed number to send a test message.';
+      result.className = 'alert-error';
+      return;
+    }
+    result.textContent = 'Sending test message...';
+    result.className = 'alert-info';
+    fetch(bridgeUrl + '/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-WA-Bridge-Token': bridgeToken
+      },
+      body: JSON.stringify({ to: firstNumber, text: 'Test message from MPA' })
+    })
+      .then(r => r.json())
+      .then(d => {
+        const ok = d && d.ok === true;
+        result.textContent = ok ? 'Test message sent.' : (d.error || 'Failed to send test message.');
+        result.className = ok ? 'alert-success' : 'alert-error';
+      })
+      .catch(e => {
+        result.textContent = e.message || 'Failed to send test message.';
+        result.className = 'alert-error';
+      });
+  }
+
+  async function startWhatsAppBridge() {
+    const result = document.getElementById('channel-wizard-result');
+    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
+    const bridgeTokenInput = document.getElementById('ch-wa-token');
+    if (!result || !bridgeUrlInput || !bridgeTokenInput) return;
+    result.textContent = 'Starting WhatsApp bridge...';
+    result.className = 'alert-info';
+    try {
+      const bridgeUrl = bridgeUrlInput.value.trim().replace(/\/$/, '');
+      if (!bridgeUrl) {
+        result.textContent = 'Bridge URL is missing in config.';
+        result.className = 'alert-error';
+        return;
+      }
+      const r = await fetch(bridgeUrl + '/auth/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-WA-Bridge-Token': bridgeTokenInput.value.trim()
+        }
+      });
+      if (!r.ok) {
+        throw new Error('Bridge start failed');
+      }
+      await pollWhatsAppAuth();
+    } catch (e) {
+      result.textContent = e.message || 'Bridge start failed.';
+      result.className = 'alert-error';
+    }
+  }
+
+  async function stopWhatsAppBridge() {
+    const result = document.getElementById('channel-wizard-result');
+    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
+    const bridgeTokenInput = document.getElementById('ch-wa-token');
+    if (!result || !bridgeUrlInput || !bridgeTokenInput) return;
+    result.textContent = 'Stopping WhatsApp bridge...';
+    result.className = 'alert-info';
+    try {
+      const bridgeUrl = bridgeUrlInput.value.trim().replace(/\/$/, '');
+      if (!bridgeUrl) {
+        result.textContent = 'Bridge URL is missing in config.';
+        result.className = 'alert-error';
+        return;
+      }
+      const r = await fetch(bridgeUrl + '/auth/stop', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-WA-Bridge-Token': bridgeTokenInput.value.trim()
+        }
+      });
+      if (!r.ok) {
+        throw new Error('Bridge stop failed');
+      }
+      const panel = document.getElementById('wa-auth-panel');
+      const qrBox = document.getElementById('wa-auth-qr');
+      if (panel) panel.style.display = 'none';
+      if (qrBox) qrBox.textContent = '';
+      result.textContent = 'WhatsApp auth stopped.';
+      result.className = 'alert-success';
+    } catch (e) {
+      result.textContent = e.message || 'Bridge stop failed.';
+      result.className = 'alert-error';
+    }
+  }
+
+  async function logoutWhatsAppBridge() {
+    const result = document.getElementById('channel-wizard-result');
+    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
+    const bridgeTokenInput = document.getElementById('ch-wa-token');
+    if (!result || !bridgeUrlInput || !bridgeTokenInput) return;
+    result.textContent = 'Logging out WhatsApp auth...';
+    result.className = 'alert-info';
+    try {
+      const bridgeUrl = bridgeUrlInput.value.trim().replace(/\/$/, '');
+      if (!bridgeUrl) {
+        result.textContent = 'Bridge URL is missing in config.';
+        result.className = 'alert-error';
+        return;
+      }
+      const r = await fetch(bridgeUrl + '/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-WA-Bridge-Token': bridgeTokenInput.value.trim()
+        }
+      });
+      if (!r.ok) {
+        throw new Error('Logout failed');
+      }
+      const panel = document.getElementById('wa-auth-panel');
+      const qrBox = document.getElementById('wa-auth-qr');
+      if (panel) panel.style.display = 'none';
+      if (qrBox) qrBox.textContent = '';
+      result.textContent = 'WhatsApp auth cleared.';
+      result.className = 'alert-success';
+    } catch (e) {
+      result.textContent = e.message || 'Logout failed.';
+      result.className = 'alert-error';
+    }
+  }
+
+  async function pollWhatsAppAuth() {
+    const result = document.getElementById('channel-wizard-result');
+    const panel = document.getElementById('wa-auth-panel');
+    const qrBox = document.getElementById('wa-auth-qr');
+    let attempts = 0;
+    const maxAttempts = 60;
+
+    const tick = async () => {
+      attempts += 1;
+      if (attempts > maxAttempts) {
+        result.textContent = 'QR timed out. Try starting the bridge again.';
+        result.className = 'alert-error';
+        return;
+      }
+      let qrDelay = 2000;
+      try {
+        const bridgeUrl = document.getElementById('ch-wa-bridge').value.trim().replace(/\/$/, '');
+        const r = await fetch(bridgeUrl + '/auth/status', {
+          headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+        });
+        const status = await r.json();
+        if (status.latest_qr_at) {
+          qrDelay = Date.now() - status.latest_qr_at < 5000 ? 1500 : 3000;
+        }
+        if (status.started === false) {
+          panel.style.display = 'none';
+          result.textContent = 'Auth not started. Click "Start auth" to begin.';
+          result.className = 'alert-info';
+          return;
+        }
+        if (status.authenticated) {
+          panel.style.display = 'none';
+          result.textContent = 'WhatsApp authenticated.';
+          result.className = 'alert-success';
+          return;
+        }
+        panel.style.display = 'block';
+        const qrResp = await fetch(bridgeUrl + '/auth/qr?ts=' + Date.now(), {
+          headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+        });
+        if (qrResp.ok) {
+          const qrData = await qrResp.json();
+          if (qrData && qrData.data_url) {
+            qrBox.innerHTML = '<img src="' + qrData.data_url + '" alt="WhatsApp QR" style="max-width: 320px; background: #fff; padding: 8px; border-radius: 6px;" />';
+          } else {
+            qrBox.textContent = 'Waiting for QR...';
+          }
+        } else {
+          qrBox.textContent = 'Waiting for QR...';
+        }
+      } catch (e) {
+        result.textContent = e.message || 'Failed to fetch auth status.';
+        result.className = 'alert-error';
+      }
+      setTimeout(tick, qrDelay);
+    };
+
+    tick();
+  }
+
+  async function refreshWhatsAppAuth() {
+    const result = document.getElementById('channel-wizard-result');
+    const panel = document.getElementById('wa-auth-panel');
+    const qrBox = document.getElementById('wa-auth-qr');
+    try {
+      const bridgeUrl = document.getElementById('ch-wa-bridge').value.trim().replace(/\/$/, '');
+      if (!bridgeUrl) return;
+      const r = await fetch(bridgeUrl + '/auth/status', {
+        headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+      });
+      const status = await r.json();
+      if (status.authenticated) {
+        panel.style.display = 'none';
+        result.textContent = 'WhatsApp already authenticated.';
+        result.className = 'alert-success';
+        return;
+      }
+      if (status.started) {
+        panel.style.display = 'block';
+        const qrResp = await fetch(bridgeUrl + '/auth/qr?ts=' + Date.now(), {
+          headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+        });
+        if (qrResp.ok) {
+          const qrData = await qrResp.json();
+          if (qrData && qrData.data_url) {
+            qrBox.innerHTML = '<img src="' + qrData.data_url + '" alt="WhatsApp QR" style="max-width: 320px; background: #fff; padding: 8px; border-radius: 6px;" />';
+          } else {
+            qrBox.textContent = 'Waiting for QR...';
+          }
+        } else {
+          qrBox.textContent = 'Waiting for QR...';
+        }
+        result.textContent = 'Waiting for WhatsApp QR...';
+        result.className = 'alert-info';
+      }
+    } catch (e) {
+      result.textContent = e.message || 'Failed to fetch auth status.';
+      result.className = 'alert-error';
+    }
+  }
+
+
   document.addEventListener('click', (event) => {
     const modal = document.getElementById('channel-modal');
     if (!modal || modal.style.display !== 'flex') return;

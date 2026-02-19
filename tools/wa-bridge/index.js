@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import whatsappWeb from "whatsapp-web.js";
 import fs from "fs/promises";
 import path from "path";
+import cors from "cors";
 
 dotenv.config();
 
@@ -15,9 +16,17 @@ const AUTH_PATH = process.env.AUTH_PATH || ".wwebjs_auth";
 const CACHE_PATH = process.env.CACHE_PATH || ".wwebjs_cache";
 const CLIENT_ID = process.env.CLIENT_ID || "mpa";
 const AUTO_START = (process.env.AUTO_START || "").toLowerCase() === "true";
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:8000";
 
 const app = express();
 app.use(express.json());
+app.use(
+  cors({
+    origin: CORS_ORIGIN.split(",").map((value) => value.trim()),
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "X-WA-Bridge-Token"],
+  })
+);
 
 const { Client, LocalAuth } = whatsappWeb;
 
@@ -53,7 +62,12 @@ client.on("qr", (qr) => {
   authState.latestQrAt = Date.now();
   authState.latestQrDataUrl = "";
   qrcode
-    .toDataURL(qr, { margin: 1, width: 280 })
+    .toDataURL(qr, {
+      margin: 2,
+      width: 360,
+      errorCorrectionLevel: "H",
+      color: { dark: "#000000", light: "#ffffff" },
+    })
     .then((dataUrl) => {
       authState.latestQrDataUrl = dataUrl;
     })
@@ -177,16 +191,28 @@ app.post("/auth/restart", async (req, res) => {
   }
 });
 
-app.get("/auth/qr", (req, res) => {
+app.get("/auth/qr", async (req, res) => {
   if (!requireToken(req, res)) return;
   if (!authState.latestQr) {
     res.status(404).json({ ok: false, error: "No QR available" });
     return;
   }
+  res.setHeader("Cache-Control", "no-store");
+  let dataUrl = authState.latestQrDataUrl;
+  try {
+    dataUrl = await qrcode.toDataURL(authState.latestQr, {
+      margin: 2,
+      width: 360,
+      errorCorrectionLevel: "H",
+      color: { dark: "#000000", light: "#ffffff" },
+    });
+  } catch (err) {
+    console.error("QR encode error:", err.message || err);
+  }
   res.json({
     ok: true,
     qr: authState.latestQr,
-    data_url: authState.latestQrDataUrl,
+    data_url: dataUrl,
     latest_qr_at: authState.latestQrAt,
   });
 });

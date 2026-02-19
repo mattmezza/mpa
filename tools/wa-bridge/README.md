@@ -107,6 +107,11 @@ You will be prompted with a QR code or a pairing code on first run.
 By default the bridge starts in idle mode and waits for `/auth/start`.
 Set `AUTO_START=true` if you want it to initialize the WhatsApp session on boot.
 
+## CORS
+
+If you use the admin UI from another origin, set `CORS_ORIGIN` to allow that host.
+Example: `CORS_ORIGIN=http://localhost:8000` or a comma-separated list.
+
 ## Notes
 
 - This uses WhatsApp Web automation and may violate WhatsApp terms.

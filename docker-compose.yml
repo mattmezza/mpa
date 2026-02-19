@@ -30,6 +30,7 @@ services:
       AUTH_PATH: /app/.wwebjs_auth
       CACHE_PATH: /app/.wwebjs_cache
       CLIENT_ID: mpa
+      CORS_ORIGIN: ${WA_BRIDGE_CORS_ORIGIN:-http://localhost:8000}
     volumes:
       - ./data/wa-bridge-auth:/app/.wwebjs_auth
       - ./data/wa-bridge-cache:/app/.wwebjs_cache
