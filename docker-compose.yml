@@ -16,3 +16,22 @@ services:
       - ./cli-configs/vdirsyncer.conf:/root/.config/vdirsyncer/config:ro
       - ./data/vdirsyncer:/root/.local/share/vdirsyncer
     env_file: .env
+
+  wa-bridge:
+    build:
+      context: ./tools/wa-bridge
+    container_name: mpa-wa-bridge
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      AGENT_WEBHOOK: http://agent:8000/webhook/whatsapp
+      BRIDGE_TOKEN: ${WA_BRIDGE_TOKEN:-}
+      AUTH_PATH: /app/.wwebjs_auth
+      CACHE_PATH: /app/.wwebjs_cache
+      CLIENT_ID: mpa
+    volumes:
+      - ./data/wa-bridge-auth:/app/.wwebjs_auth
+      - ./data/wa-bridge-cache:/app/.wwebjs_cache
+    depends_on:
+      - agent

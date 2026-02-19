@@ -29,7 +29,12 @@
               <span class="badge-off">Disabled</span>
             {% endif %}
           </td>
-          <td class="text-xs text-muted">{{ channel.detail }}</td>
+          <td class="text-xs text-muted">
+            {{ channel.detail }}
+            {% if channel.key == 'whatsapp' and channel.auth_status %}
+              <span class="{{ channel.auth_class }} ml-0.5">{{ channel.auth_status }}</span>
+            {% endif %}
+          </td>
           <td class="whitespace-nowrap">
             <button class="btn btn-sm" onclick="openChannelWizard('{{ channel.key }}')">Edit</button>
             <button class="btn-danger btn-sm ml-0.5" onclick="removeChannel('{{ channel.key }}')">Remove</button>

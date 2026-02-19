@@ -157,17 +157,45 @@ async def _channel_list_context(config_store: ConfigStore) -> dict[str, list[dic
     wa_enabled = str(wa_enabled_raw).lower() == "true"
     wa_bridge = await config_store.get("channels.whatsapp.bridge_url")
     wa_numbers = await config_store.get("channels.whatsapp.allowed_numbers")
+    wa_token = await config_store.get("channels.whatsapp.bridge_token") or ""
     wa_detail = "Not configured"
+    wa_auth_status = ""
+    wa_auth_class = "badge-off"
     if wa_bridge:
         wa_detail = f"Bridge: {wa_bridge}"
         if wa_numbers:
             wa_detail = f"Bridge: {wa_bridge} · Numbers: {wa_numbers}"
+        try:
+            import httpx
+
+            headers = {"X-WA-Bridge-Token": wa_token} if wa_token else None
+            async with httpx.AsyncClient(timeout=3) as client:
+                resp = await client.get(f"{wa_bridge.rstrip('/')}/auth/status", headers=headers)
+                if resp.status_code < 400:
+                    data = resp.json()
+                    if data.get("authenticated") is True:
+                        wa_auth_status = "Auth ok"
+                        wa_auth_class = "badge-ok"
+                    elif data.get("started") is False:
+                        wa_auth_status = "Auth stopped"
+                        wa_auth_class = "badge-off"
+                    else:
+                        wa_auth_status = "Auth required"
+                        wa_auth_class = "badge-warn"
+                else:
+                    wa_auth_status = "Auth unknown"
+                    wa_auth_class = "badge-off"
+        except Exception:
+            wa_auth_status = "Auth unknown"
+            wa_auth_class = "badge-off"
     channels.append(
         {
             "key": "whatsapp",
             "label": "WhatsApp",
             "enabled": wa_enabled,
             "detail": wa_detail,
+            "auth_status": wa_auth_status,
+            "auth_class": wa_auth_class,
         }
     )
 
@@ -1192,6 +1220,15 @@ def create_admin_app(
             "channels.whatsapp.allowed_numbers": allowed_numbers,
         }
         await config_store.set_many(values)
+        if not enabled:
+            try:
+                import httpx
+
+                headers = {"X-WA-Bridge-Token": bridge_token} if bridge_token else None
+                async with httpx.AsyncClient(timeout=5) as client:
+                    await client.post(f"{bridge_url.rstrip('/')}/auth/stop", headers=headers)
+            except Exception as exc:
+                log.warning("Failed to stop WhatsApp bridge auth: %s", exc)
         channel_data = await _channel_list_context(config_store)
         return _render_partial("partials/channels.html", **channel_data)
 
@@ -1246,10 +1283,25 @@ def create_admin_app(
                 "channels.telegram.allowed_user_ids": "",
             }
         elif key == "whatsapp":
+            bridge_url = await config_store.get("channels.whatsapp.bridge_url") or ""
+            bridge_token = await config_store.get("channels.whatsapp.bridge_token") or ""
+            if bridge_url:
+                try:
+                    import httpx
+
+                    headers = {"X-WA-Bridge-Token": bridge_token} if bridge_token else None
+                    async with httpx.AsyncClient(timeout=5) as client:
+                        await client.post(
+                            f"{bridge_url.rstrip('/')}/auth/logout",
+                            headers=headers,
+                        )
+                except Exception as exc:
+                    log.warning("Failed to logout WhatsApp bridge auth: %s", exc)
             values = {
                 "channels.whatsapp.enabled": "false",
                 "channels.whatsapp.bridge_url": "",
                 "channels.whatsapp.allowed_numbers": "",
+                "channels.whatsapp.bridge_token": "",
             }
         else:
             raise HTTPException(400, f"Unknown channel: {channel}")
