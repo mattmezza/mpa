@@ -250,6 +250,7 @@ class TestPartialRoutes:
 
     def test_history_partial(self):
         store = _ConfigStoreStub(setup_complete=True)
+        store._data["history.mode"] = "session"
         store._data["history.db_path"] = "data/custom.db"
         store._data["history.max_turns"] = "15"
         agent_state = AgentState(agent=cast(Any, _AgentStub()))
@@ -261,6 +262,7 @@ class TestPartialRoutes:
         assert "text/html" in resp.headers["content-type"]
         assert "data/custom.db" in resp.text
         assert "15" in resp.text
+        assert "session" in resp.text
 
     def test_history_partial_defaults(self):
         client = _client(setup_complete=True)

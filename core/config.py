@@ -126,6 +126,7 @@ class AdminConfig(BaseModel):
 class HistoryConfig(BaseModel):
     db_path: str = "data/history.db"
     max_turns: int = 10  # number of user-assistant pairs to include
+    mode: str = "injection"  # "injection" (windowed history) or "session" (sticky per channel)
 
 
 class MemoryConfig(BaseModel):

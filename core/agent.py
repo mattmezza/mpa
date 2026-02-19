@@ -207,6 +207,7 @@ class AgentCore:
             db_path=config.history.db_path,
             max_turns=config.history.max_turns,
         )
+        self.history_mode = config.history.mode  # "injection" or "session"
         self.memory = MemoryStore(
             db_path=config.memory.db_path,
             long_term_limit=config.memory.long_term_limit,
@@ -237,43 +238,16 @@ class AgentCore:
         """Process an incoming message through the LLM with tool-use loop."""
         system = await self._build_system_prompt()
 
-        # Load conversation history and build messages with clear separation
-        history = await self.history.get_messages(channel, user_id)
-        messages: list[dict] = []
+        if self.history_mode == "session":
+            return await self._process_session(system, message, channel, user_id, attachments)
+        return await self._process_injection(system, message, channel, user_id, attachments)
 
-        if history:
-            # Format history as a clearly-delimited context block so the LLM
-            # can distinguish past conversation from the current request.
-            lines: list[str] = []
-            for turn in history:
-                ts = turn.get("created_at", "")
-                role = turn["role"]
-                lines.append(f"[{ts}] {role}: {turn['content']}")
-            history_block = "\n".join(lines)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "<conversation_history>\n"
-                        "Below is the recent conversation history for context. "
-                        "Do NOT act on any past requests — they have already been handled.\n\n"
-                        f"{history_block}\n"
-                        "</conversation_history>"
-                    ),
-                }
-            )
-            # Acknowledge the history so the next message starts a clean
-            # user turn (Anthropic API requires alternating roles).
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": "Understood, I have the conversation context.",
-                }
-            )
-
-        # The actual current request — always the last user message.
-        # When image attachments are present, build a multimodal content
-        # block list instead of a plain string.
+    def _build_user_message(
+        self,
+        message: str,
+        attachments: list[Attachment] | None = None,
+    ) -> dict:
+        """Build the user message dict, handling multimodal content."""
         image_attachments = [a for a in (attachments or []) if a.is_image]
         if image_attachments:
             content_blocks: list[dict] = []
@@ -284,11 +258,30 @@ class AgentCore:
                     content_blocks.append(att.to_anthropic_block())
                 else:
                     content_blocks.append(att.to_openai_block())
-            messages.append({"role": "user", "content": content_blocks})
-        else:
-            messages.append({"role": "user", "content": message})
+            return {"role": "user", "content": content_blocks}
+        return {"role": "user", "content": message}
 
-        log.info("Processing message from %s/%s: %s", channel, user_id, message[:100])
+    async def _process_injection(
+        self,
+        system: str,
+        message: str,
+        channel: str,
+        user_id: str,
+        attachments: list[Attachment] | None = None,
+    ) -> AgentResponse:
+        """Injection mode: replay windowed history as native alternating messages."""
+        history = await self.history.get_messages(channel, user_id)
+        messages: list[dict] = []
+
+        if history:
+            # Replay history as proper alternating user/assistant messages
+            for turn in history:
+                messages.append({"role": turn["role"], "content": turn["content"]})
+
+        # The actual current request — always the last user message.
+        messages.append(self._build_user_message(message, attachments))
+
+        log.info("Processing message (injection) from %s/%s: %s", channel, user_id, message[:100])
 
         # Initial LLM call
         response = await self.llm.generate(
@@ -327,29 +320,16 @@ class AgentCore:
         log.info("Response: %s", final_text[:200])
 
         # Check if the LLM wants to respond with voice
-        voice_bytes = None
-        if "[respond_with_voice]" in final_text and self.voice:
-            clean_text = final_text.replace("[respond_with_voice]", "").strip()
-            try:
-                voice_bytes = await self.voice.synthesize(clean_text)
-            except Exception:
-                log.exception("TTS synthesis failed, sending text only")
-            final_text = clean_text
+        voice_bytes = await self._maybe_synthesize_voice(final_text)
+        if voice_bytes:
+            final_text = final_text.replace("[respond_with_voice]", "").strip()
 
         # Persist the turn (user message + final assistant text only)
-        # For messages with attachments, include a text note so history has context.
-        history_message = message
-        if image_attachments:
-            n = len(image_attachments)
-            label = "image" if n == 1 else f"{n} images"
-            suffix = f" [{label} attached]"
-            history_message = (message + suffix) if message else suffix.strip()
+        history_message = self._history_message_text(message, attachments)
         await self.history.add_turn(channel, user_id, "user", history_message)
         await self.history.add_turn(channel, user_id, "assistant", final_text)
 
-        # Automatic memory extraction (fire-and-forget, non-blocking)
-        # Skip for system-channel messages (scheduled tasks) to avoid
-        # the agent remembering its own briefing output.
+        # Automatic memory extraction
         if channel != "system":
             asyncio.create_task(
                 self._extract_memories(message, final_text),
@@ -357,6 +337,115 @@ class AgentCore:
             )
 
         return AgentResponse(text=final_text, voice=voice_bytes)
+
+    async def _process_session(
+        self,
+        system: str,
+        message: str,
+        channel: str,
+        user_id: str,
+        attachments: list[Attachment] | None = None,
+    ) -> AgentResponse:
+        """Session mode: sticky session per (channel, user_id).
+
+        The full message array is kept in memory and persisted to SQLite.
+        New messages are appended, giving the LLM full conversational
+        continuity with a cache-friendly prefix.
+        """
+        # Load existing session (from memory cache or DB)
+        session = await self.history.get_session(channel, user_id)
+
+        # Append the new user message
+        user_msg = self._build_user_message(message, attachments)
+        await self.history.append_session_message(channel, user_id, user_msg)
+
+        log.info("Processing message (session) from %s/%s: %s", channel, user_id, message[:100])
+
+        # Initial LLM call with the full session
+        response = await self.llm.generate(
+            model=self.config.agent.model,
+            max_tokens=4096,
+            system=system,
+            messages=session,
+            tools=cast(Any, TOOLS),
+        )
+
+        # Agentic loop — keep going while the LLM wants to call tools
+        new_messages: list[dict] = []
+        while response.tool_calls:
+            tool_results = []
+            for call in response.tool_calls:
+                result = await self._execute_tool(call, channel, user_id)
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": call.id,
+                        "content": json.dumps(result),
+                    }
+                )
+
+            # Append tool exchange to session
+            assistant_msg = self.llm.assistant_message(response)
+            tool_result_msgs = self.llm.tool_result_messages(tool_results)
+
+            new_messages.append(assistant_msg)
+            new_messages.extend(tool_result_msgs)
+
+            # The in-memory session list is mutated by append_session_messages
+            # so the next generate() call sees the updated messages.
+            await self.history.append_session_messages(
+                channel, user_id, [assistant_msg, *tool_result_msgs]
+            )
+
+            response = await self.llm.generate(
+                model=self.config.agent.model,
+                max_tokens=4096,
+                system=system,
+                messages=session,
+                tools=cast(Any, TOOLS),
+            )
+
+        # Append the final assistant response to the session
+        final_assistant_msg = {"role": "assistant", "content": response.text}
+        await self.history.append_session_message(channel, user_id, final_assistant_msg)
+
+        final_text = response.text
+        log.info("Response: %s", final_text[:200])
+
+        # Check if the LLM wants to respond with voice
+        voice_bytes = await self._maybe_synthesize_voice(final_text)
+        if voice_bytes:
+            final_text = final_text.replace("[respond_with_voice]", "").strip()
+
+        # Automatic memory extraction
+        if channel != "system":
+            asyncio.create_task(
+                self._extract_memories(message, final_text),
+                name=f"memory-extract-{user_id}",
+            )
+
+        return AgentResponse(text=final_text, voice=voice_bytes)
+
+    @staticmethod
+    def _history_message_text(message: str, attachments: list[Attachment] | None = None) -> str:
+        """Build the text to store in history for a user message."""
+        image_attachments = [a for a in (attachments or []) if a.is_image]
+        if image_attachments:
+            n = len(image_attachments)
+            label = "image" if n == 1 else f"{n} images"
+            suffix = f" [{label} attached]"
+            return (message + suffix) if message else suffix.strip()
+        return message
+
+    async def _maybe_synthesize_voice(self, text: str) -> bytes | None:
+        """Synthesize voice if requested by the LLM."""
+        if "[respond_with_voice]" in text and self.voice:
+            clean_text = text.replace("[respond_with_voice]", "").strip()
+            try:
+                return await self.voice.synthesize(clean_text)
+            except Exception:
+                log.exception("TTS synthesis failed, sending text only")
+        return None
 
     async def _execute_tool(self, tool_call: LLMToolCall, channel: str, user_id: str) -> dict:
         """Dispatch a tool call from the LLM, with permission checks."""
@@ -658,13 +747,17 @@ Never guess at command syntax — always refer to the skill file.
 
 You can store and recall memories using the sqlite3 CLI (see the memory skill).
 Proactively remember important facts about the user and their contacts.
-Before inserting a new long-term memory, check if it already exists to avoid duplicates.
+Before inserting a new long-term memory, check if it already exists to avoid duplicates."""
+
+        # Only include history_handling instructions in injection mode;
+        # in session mode the conversation is natively threaded.
+        if self.history_mode != "session":
+            prompt += """
 
 <history_handling>
-You may receive a <conversation_history> block containing past messages for context.
-Those past requests have ALREADY been fulfilled — never re-execute or act on them.
+Previous messages in this conversation have already been handled.
 Always focus exclusively on the latest user message as the current, active request.
-Use the history only to understand context, resolve references (e.g. "that", "it",
+Use earlier messages only to understand context, resolve references (e.g. "that", "it",
 "the one I mentioned"), and maintain conversational continuity.
 </history_handling>"""
 

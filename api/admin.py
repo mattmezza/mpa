@@ -699,10 +699,12 @@ def create_admin_app(
     @app.get("/partials/history", dependencies=[Depends(auth)])
     async def partial_history() -> HTMLResponse:
         """History tab partial."""
+        mode = await config_store.get("history.mode") or "injection"
         db_path = await config_store.get("history.db_path") or "data/history.db"
         max_turns = await config_store.get("history.max_turns") or "10"
         return _render_partial(
             "partials/history.html",
+            mode=mode,
             db_path=db_path,
             max_turns=max_turns,
         )
