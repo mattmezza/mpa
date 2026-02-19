@@ -70,6 +70,7 @@ SETUP_STEPS = [
     "llm",
     "identity",
     "telegram",
+    "whatsapp",
     "email",
     "calendar",
     "search",

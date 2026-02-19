@@ -1,0 +1,108 @@
+<div class="card" x-data="{ testResult: '', testOk: false, testing: false }">
+  <h2 class="text-base mb-3">WhatsApp <span class="text-muted font-normal text-xs">(optional)</span></h2>
+  <p class="text-muted text-sm">Connect a WhatsApp bridge to receive and send messages.</p>
+
+  <div class="mt-3">
+    <label class="label" for="w-wa-bridge">Bridge URL</label>
+    <input type="text" class="input" id="w-wa-bridge" placeholder="http://localhost:3001"
+           value="{{ step_ctx.bridge_url|default('http://localhost:3001') }}">
+    <p class="hint">Must be reachable from this server.</p>
+  </div>
+
+  <div class="mt-3">
+    <label class="label" for="w-wa-token">Bridge token (optional)</label>
+    <input type="password" class="input" id="w-wa-token" placeholder="shared secret"
+           value="{{ step_ctx.bridge_token|default('') }}">
+    <p class="hint">Must match the bridge's token, if set.</p>
+  </div>
+
+  <div class="mt-3">
+    <label class="label" for="w-wa-numbers">Allowed numbers</label>
+    <input type="text" class="input" id="w-wa-numbers" placeholder="+14155551234, +442071838750"
+           value="{{ step_ctx.allowed_numbers|default('') }}">
+    <p class="hint">Comma-separated. Leave empty to allow any sender.</p>
+  </div>
+
+  <div class="mt-3">
+    <label class="label" for="w-wa-webhook">Webhook URL</label>
+    <input type="text" class="input" id="w-wa-webhook" readonly>
+    <p class="hint">Configure this URL in your bridge for inbound messages.</p>
+  </div>
+
+  <div class="mt-3">
+    <button class="btn" :disabled="testing"
+            @click="
+              testing = true; testResult = '';
+              fetch('/channels/whatsapp/test', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+                },
+                body: JSON.stringify({
+                  bridge_url: document.getElementById('w-wa-bridge').value,
+                  bridge_token: document.getElementById('w-wa-token').value
+                })
+              })
+              .then(r => r.json())
+              .then(d => { testOk = d.ok; testResult = d.ok ? 'Bridge reachable' : (d.error || 'Bridge not reachable'); })
+              .catch(e => { testOk = false; testResult = e.message; })
+              .finally(() => { testing = false; })
+            ">
+      <span x-show="testing" class="spinner mr-1"></span>
+      Test bridge
+    </button>
+  </div>
+  <template x-if="testResult">
+    <div :class="testOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResult"></div>
+  </template>
+
+  <div class="flex justify-between mt-4">
+    <button class="btn"
+            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+            hx-vals='{"step": "telegram", "values": {}}'>
+      Back
+    </button>
+    <div class="flex gap-2">
+      <button class="btn"
+            @click="
+              htmx.ajax('POST', '/setup/step', {
+                target: '#wizard-step', swap: 'innerHTML',
+                values: {
+                  step: 'email',
+                  'values[channels.whatsapp.enabled]': 'false'
+                }
+              })
+            ">
+      Skip
+      </button>
+      <button class="btn-primary"
+              @click="
+                htmx.ajax('POST', '/setup/step', {
+                  target: '#wizard-step', swap: 'innerHTML',
+                  values: {
+                    step: 'email',
+                    'values[channels.whatsapp.enabled]': 'true',
+                    'values[channels.whatsapp.bridge_url]': document.getElementById('w-wa-bridge').value,
+                    'values[channels.whatsapp.bridge_token]': document.getElementById('w-wa-token').value,
+                    'values[channels.whatsapp.allowed_numbers]': document.getElementById('w-wa-numbers').value
+                  }
+                })
+              ">
+        Next
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function setWebhookUrl() {
+    const el = document.getElementById('w-wa-webhook');
+    if (!el) return;
+    try {
+      el.value = window.location.origin + '/webhook/whatsapp';
+    } catch (e) {
+      el.value = '/webhook/whatsapp';
+    }
+  })();
+</script>

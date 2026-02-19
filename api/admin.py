@@ -99,6 +99,15 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             val = await config_store.get(key)
             if val:
                 ctx[var] = val
+    elif step == "whatsapp":
+        for key, var in (
+            ("channels.whatsapp.bridge_url", "bridge_url"),
+            ("channels.whatsapp.bridge_token", "bridge_token"),
+            ("channels.whatsapp.allowed_numbers", "allowed_numbers"),
+        ):
+            val = await config_store.get(key)
+            if val:
+                ctx[var] = val
     elif step == "calendar":
         raw = await config_store.get("calendar.providers")
         if raw:
