@@ -29,7 +29,7 @@
     <label class="label" for="ch-wa-token">Bridge token (optional)</label>
     <input type="password" class="input" id="ch-wa-token" placeholder="shared secret"
            value="{{ bridge_token|default('') }}">
-    <div class="hint">Shared secret required by the bridge for inbound/outbound requests.</div>
+    <div class="hint">Optional shared secret. Must match the bridge's token.</div>
   </div>
 
   <div class="mt-3">
