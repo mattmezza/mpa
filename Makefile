@@ -1,4 +1,4 @@
-.PHONY: setup install install-dev sync lock lint format test run dev clean release css cssd
+.PHONY: setup install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css cssd
 
 PYTHON := uv run python
 UV := uv
@@ -44,18 +44,37 @@ test:
 run:
 	$(UV) run python -m core.main
 
-# Run in dev mode: auto-restart agent on code changes + CSS watch
+# Run in dev mode: instructions for running services in separate shells
 dev:
-	@trap 'kill 0' EXIT; \
-	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --watch & \
-	if [ -d tools/wa-bridge ]; then \
-		if [ ! -d tools/wa-bridge/node_modules ]; then \
-			npm --prefix tools/wa-bridge install; \
-		fi; \
-		npm --prefix tools/wa-bridge run start & \
-	fi; \
-	$(UV) run watchfiles --filter python 'python -m core.main' api core channels schema skills tools voice & \
-	wait
+	@echo ""
+	@echo "Run each service in its own terminal (Ctrl-C stops each one cleanly):"
+	@echo ""
+	@echo "  1. Agent (auto-restart on code changes):"
+	@echo "     make dev-agent"
+	@echo ""
+	@echo "  2. Tailwind CSS watcher:"
+	@echo "     make dev-css"
+	@echo ""
+	@if [ -d tools/wa-bridge ]; then \
+		echo "  3. WhatsApp bridge:"; \
+		echo "     make dev-wa"; \
+		echo ""; \
+	fi
+
+# Dev: agent with auto-restart on Python file changes
+dev-agent:
+	$(UV) run watchfiles --filter python 'python -m core.main' api core channels schema skills tools voice
+
+# Dev: Tailwind CSS watcher
+dev-css:
+	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --watch
+
+# Dev: WhatsApp bridge
+dev-wa:
+	@if [ ! -d tools/wa-bridge/node_modules ]; then \
+		npm --prefix tools/wa-bridge install; \
+	fi
+	npm --prefix tools/wa-bridge run start
 
 # Remove venv and caches
 clean:

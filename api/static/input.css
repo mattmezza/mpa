@@ -1,9 +1,5 @@
-@import "tailwindcss";
-
-/*
- * MPA Admin — Custom theme
- * Tailwind CSS v4 with @theme for design tokens
- */
+@import "tailwindcss" source(none);
+@source "../templates/";
 
 @theme {
   --color-surface: #151515;
