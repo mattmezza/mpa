@@ -765,6 +765,14 @@ def create_admin_app(
         consolidation_model = (
             await config_store.get("memory.consolidation_model") or "claude-4-5-haiku"
         )
+        gd_enabled = await config_store.get("goal_decomposition.enabled")
+        gd_enabled = gd_enabled if gd_enabled is not None else "true"
+        gd_provider = await config_store.get("goal_decomposition.provider") or "anthropic"
+        gd_model = await config_store.get("goal_decomposition.model") or "claude-4-5-haiku"
+        tr_enabled = await config_store.get("task_reflection.enabled")
+        tr_enabled = tr_enabled if tr_enabled is not None else "true"
+        tr_provider = await config_store.get("task_reflection.provider") or "anthropic"
+        tr_model = await config_store.get("task_reflection.model") or "claude-4-5-haiku"
         return _render_partial(
             "partials/llm.html",
             provider=provider,
@@ -782,6 +790,12 @@ def create_admin_app(
             extraction_model=extraction_model,
             consolidation_provider=consolidation_provider,
             consolidation_model=consolidation_model,
+            gd_enabled=gd_enabled,
+            gd_provider=gd_provider,
+            gd_model=gd_model,
+            tr_enabled=tr_enabled,
+            tr_provider=tr_provider,
+            tr_model=tr_model,
         )
 
     @app.get("/partials/search", dependencies=[Depends(auth)])

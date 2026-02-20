@@ -42,7 +42,7 @@
     }
     window.showToast = showToast;
 
-    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel) {
       const currentProvider = provider || 'anthropic';
       return {
         providerOptions: [
@@ -67,8 +67,18 @@
         extractionModel: extractionModel || 'claude-4-5-haiku',
         consolidationProvider: consolidationProvider || 'anthropic',
         consolidationModel: consolidationModel || 'claude-4-5-haiku',
+        gdEnabled: gdEnabled === 'true' || gdEnabled === true,
+        gdProvider: gdProvider || 'anthropic',
+        gdModel: gdModel || 'claude-4-5-haiku',
+        trEnabled: trEnabled === 'true' || trEnabled === true,
+        trProvider: trProvider || 'anthropic',
+        trModel: trModel || 'claude-4-5-haiku',
         memoryResult: '',
         memoryResultOk: false,
+        gdResult: '',
+        gdResultOk: false,
+        trResult: '',
+        trResultOk: false,
         result: '',
         resultOk: false,
         tests: {
@@ -127,15 +137,21 @@
           const savedModel = this.model;
           const savedExtraction = this.extractionModel;
           const savedConsolidation = this.consolidationModel;
+          const savedGdModel = this.gdModel;
+          const savedTrModel = this.trModel;
           this.$nextTick(() => {
             const validProvider = this.providerOptions.some(item => item.value === savedProvider);
             this.provider = validProvider ? savedProvider : 'anthropic';
             this.model = savedModel;
             this.extractionModel = savedExtraction;
             this.consolidationModel = savedConsolidation;
+            this.gdModel = savedGdModel;
+            this.trModel = savedTrModel;
             this.resetModel();
             this.resetMemoryModel('extraction');
             this.resetMemoryModel('consolidation');
+            this.resetBackgroundModel('gd');
+            this.resetBackgroundModel('tr');
           });
         },
         resetModel() {
@@ -159,6 +175,22 @@
           const current = this.consolidationModel || '';
           if (!list.some(item => item.value === current)) {
             this.consolidationModel = list[0].value;
+          }
+        },
+        resetBackgroundModel(kind) {
+          const prov = kind === 'gd' ? this.gdProvider : this.trProvider;
+          const list = this.models[prov] || [];
+          if (!list.length) return;
+          if (kind === 'gd') {
+            const current = this.gdModel || '';
+            if (!list.some(item => item.value === current)) {
+              this.gdModel = list[0].value;
+            }
+            return;
+          }
+          const current = this.trModel || '';
+          if (!list.some(item => item.value === current)) {
+            this.trModel = list[0].value;
           }
         },
         keyFor(service) {
