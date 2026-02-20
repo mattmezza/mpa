@@ -61,6 +61,7 @@ SECRET_KEYS = frozenset(
         "calendar.google_oauth_client_secret",
         "calendar.google_oauth_token",
         "contacts.providers",
+        "contacts.google_oauth_token",
         "calendar.google_oauth_token",
         "calendar.google_oauth_client_id",
         "calendar.google_oauth_client_secret",

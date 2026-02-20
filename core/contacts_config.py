@@ -11,6 +11,8 @@ log = logging.getLogger(__name__)
 VDIRSYNCER_CONFIG_PATH = Path("/tmp/mpa-vdirsyncer-config")
 VDIRSYNCER_XDG_DIR = Path("/tmp/mpa-vdirsyncer-xdg")
 VDIRSYNCER_XDG_CONFIG_PATH = VDIRSYNCER_XDG_DIR / "vdirsyncer" / "config"
+VDIRSYNCER_TOKEN_DIR = VDIRSYNCER_XDG_DIR / "vdirsyncer" / "tokens"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
 def vdirsyncer_env() -> dict[str, str]:
@@ -26,14 +28,25 @@ def _sanitize_slug(value: str, fallback: str) -> str:
     return slug or fallback
 
 
-def _render_provider(provider: dict[str, str], idx: int, taken: set[str]) -> tuple[str, str] | None:
-    name = str(provider.get("name", "")).strip()
-    provider_type = str(provider.get("type", "carddav")).strip() or "carddav"
+def contact_provider_slug(name: str, idx: int, taken: set[str]) -> str:
     base_slug = _sanitize_slug(name or f"provider-{idx + 1}", f"provider-{idx + 1}")
     slug = base_slug
     if slug in taken:
         slug = f"{base_slug}-{idx + 1}"
     taken.add(slug)
+    return slug
+
+
+def _token_path(slug: str) -> Path:
+    return VDIRSYNCER_TOKEN_DIR / f"{slug}_google"
+
+
+def _render_provider(
+    provider: dict[str, str], idx: int, taken: set[str]
+) -> tuple[str, str, str | None] | None:
+    name = str(provider.get("name", "")).strip()
+    provider_type = str(provider.get("type", "carddav")).strip() or "carddav"
+    slug = contact_provider_slug(name, idx, taken)
 
     if provider_type == "google_contacts":
         client_id = str(provider.get("client_id", "")).strip()
@@ -44,7 +57,7 @@ def _render_provider(provider: dict[str, str], idx: int, taken: set[str]) -> tup
         remote = f"contacts_google_{slug}"
         pair = f"contacts_{slug}"
         local_path = f"~/.local/share/vdirsyncer/contacts/{slug}/"
-        token_path = f"~/.local/share/vdirsyncer/tokens/{slug}_google"
+        token_path = str(_token_path(slug))
         return (
             pair,
             "\n".join(
@@ -66,6 +79,7 @@ def _render_provider(provider: dict[str, str], idx: int, taken: set[str]) -> tup
                     f'client_secret = "{client_secret}"',
                 ]
             ),
+            slug,
         )
 
     url = str(provider.get("url", "")).strip()
@@ -98,6 +112,7 @@ def _render_provider(provider: dict[str, str], idx: int, taken: set[str]) -> tup
                 f'password = "{password}"',
             ]
         ),
+        None,
     )
 
 
@@ -133,16 +148,19 @@ async def materialize_vdirsyncer_config(config_store) -> bool:
     ]
     pairs: list[str] = []
     taken: set[str] = set()
+    google_slugs: list[str] = []
     for idx, provider in enumerate(providers):
         if not isinstance(provider, dict):
             continue
         rendered = _render_provider(provider, idx, taken)
         if not rendered:
             continue
-        pair_name, body = rendered
+        pair_name, body, google_slug = rendered
         pairs.append(pair_name)
         blocks.append(body)
         blocks.append("")
+        if google_slug:
+            google_slugs.append(google_slug)
 
     if not pairs:
         removed = False
@@ -158,5 +176,20 @@ async def materialize_vdirsyncer_config(config_store) -> bool:
     VDIRSYNCER_CONFIG_PATH.write_text(content)
     VDIRSYNCER_XDG_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     VDIRSYNCER_XDG_CONFIG_PATH.write_text(content)
+    if google_slugs:
+        VDIRSYNCER_TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    token_raw = await config_store.get("contacts.google_oauth_token")
+    token_payload: dict | None = None
+    if token_raw:
+        try:
+            parsed = json.loads(token_raw)
+            if isinstance(parsed, dict):
+                token_payload = dict(parsed)
+        except Exception:
+            token_payload = None
+    if token_payload:
+        token_payload.setdefault("token_uri", GOOGLE_TOKEN_URL)
+        for slug in google_slugs:
+            _token_path(slug).write_text(json.dumps(token_payload, indent=2))
     log.info("Materialized vdirsyncer config to %s", VDIRSYNCER_CONFIG_PATH)
     return True

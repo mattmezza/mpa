@@ -43,6 +43,7 @@ log = logging.getLogger(__name__)
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+_GOOGLE_CONTACTS_SCOPES = ["https://www.googleapis.com/auth/contacts"]
 
 # In-memory PKCE state (short-lived, per auth attempt)
 _oauth_pending: dict[str, dict] = {}  # state -> {code_verifier, client_id, client_secret}
@@ -1225,12 +1226,7 @@ def create_admin_app(
         await config_store.set("calendar.google_oauth_client_secret", body.client_secret.strip())
         return {"ok": True}
 
-    @app.get("/calendar/google/oauth/start", dependencies=[Depends(auth)])
-    async def google_oauth_start(request: Request) -> dict:
-        """Initiate the Google OAuth 2.0 flow.
-
-        Returns the authorization URL for the frontend to open in a popup.
-        """
+    async def _start_google_oauth(request: Request, *, scope: list[str], kind: str) -> dict:
         client_id = await config_store.get("calendar.google_oauth_client_id")
         client_secret = await config_store.get("calendar.google_oauth_client_secret")
         if not client_id or not client_secret:
@@ -1242,21 +1238,21 @@ def create_admin_app(
         code_verifier, code_challenge = _generate_pkce()
         state = secrets.token_urlsafe(32)
 
-        # Build the callback URL based on the current request
-        callback_url = str(request.base_url).rstrip("/") + "/calendar/google/oauth/callback"
+        callback_url = str(request.base_url).rstrip("/") + f"/google/oauth/callback?kind={kind}"
 
         _oauth_pending[state] = {
             "code_verifier": code_verifier,
             "client_id": client_id,
             "client_secret": client_secret,
             "redirect_uri": callback_url,
+            "kind": kind,
         }
 
         params = {
             "client_id": client_id,
             "redirect_uri": callback_url,
             "response_type": "code",
-            "scope": " ".join(_GOOGLE_CALENDAR_SCOPES),
+            "scope": " ".join(scope),
             "access_type": "offline",
             "prompt": "consent",
             "code_challenge_method": "S256",
@@ -1266,8 +1262,20 @@ def create_admin_app(
         auth_url = f"{_GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
         return {"auth_url": auth_url}
 
-    @app.get("/calendar/google/oauth/callback")
-    async def google_oauth_callback(code: str = "", state: str = "", error: str = ""):
+    @app.get("/calendar/google/oauth/start", dependencies=[Depends(auth)])
+    async def google_oauth_start(request: Request) -> dict:
+        """Initiate the Google OAuth 2.0 flow for calendars."""
+        return await _start_google_oauth(request, scope=_GOOGLE_CALENDAR_SCOPES, kind="calendar")
+
+    @app.get("/contacts/google/oauth/start", dependencies=[Depends(auth)])
+    async def google_contacts_oauth_start(request: Request) -> dict:
+        """Initiate the Google OAuth 2.0 flow for contacts."""
+        return await _start_google_oauth(request, scope=_GOOGLE_CONTACTS_SCOPES, kind="contacts")
+
+    @app.get("/google/oauth/callback")
+    async def google_oauth_callback(
+        kind: str = "calendar", code: str = "", state: str = "", error: str = ""
+    ):
         """Handle the OAuth 2.0 callback from Google.
 
         This is opened in a popup window — no auth header needed since
@@ -1327,11 +1335,20 @@ def create_admin_app(
             "refresh_token": token_data["refresh_token"],
             "token_type": "Bearer",
         }
-        await config_store.set("calendar.google_oauth_token", json.dumps(token_out))
-        log.info("Google Calendar OAuth token saved to config store")
+        if pending.get("kind") == "contacts" or kind == "contacts":
+            await config_store.set("contacts.google_oauth_token", json.dumps(token_out))
+            log.info("Google Contacts OAuth token saved to config store")
+        else:
+            await config_store.set("calendar.google_oauth_token", json.dumps(token_out))
+            log.info("Google Calendar OAuth token saved to config store")
 
+        title = (
+            "Google Contacts connected!"
+            if (pending.get("kind") == "contacts")
+            else "Google Calendar connected!"
+        )
         return HTMLResponse(
-            "<html><body><h2>Google Calendar connected!</h2>"
+            f"<html><body><h2>{title}</h2>"
             "<p>You can close this window.</p>"
             "<script>window.opener && window.opener.postMessage("
             "{type:'google-oauth-success'},'*');"
@@ -1342,6 +1359,14 @@ def create_admin_app(
     async def google_oauth_status() -> dict:
         """Check if a Google OAuth token is stored."""
         token_raw = await config_store.get("calendar.google_oauth_token")
+        has_token = bool(token_raw)
+        client_id = await config_store.get("calendar.google_oauth_client_id") or ""
+        return {"connected": has_token, "client_id": client_id}
+
+    @app.get("/contacts/google/oauth/status", dependencies=[Depends(auth)])
+    async def google_contacts_oauth_status() -> dict:
+        """Check if a Google Contacts OAuth token is stored."""
+        token_raw = await config_store.get("contacts.google_oauth_token")
         has_token = bool(token_raw)
         client_id = await config_store.get("calendar.google_oauth_client_id") or ""
         return {"connected": has_token, "client_id": client_id}

@@ -51,13 +51,19 @@
             <label class="label">Google Client Secret</label>
             <input type="password" class="input-sm" x-model="provider.client_secret" placeholder="GOCSPX-..." autocomplete="new-password">
           </div>
+          <div x-show="provider.type === 'google_contacts'" class="flex items-center gap-2">
+            <button class="btn btn-sm" type="button" @click="startGoogleOAuth(provider)">
+              Connect Google Contacts
+            </button>
+            <span class="text-xs text-muted" x-text="provider.oauth_status"></span>
+          </div>
         </div>
 
         <div class="mt-3 text-xs text-muted">
           <strong>Notes</strong>
           <ul class="list-disc ml-5 mt-1 space-y-1">
             <li>CardDAV providers include iCloud, Fastmail, and most work accounts.</li>
-            <li>Google Contacts requires an OAuth client ID/secret; vdirsyncer will prompt on first sync.</li>
+            <li>Google Contacts requires an OAuth client ID/secret and a one-time authorization.</li>
             <li>Each provider syncs into its own folder under <code>~/.local/share/vdirsyncer/contacts/</code>.</li>
           </ul>
         </div>

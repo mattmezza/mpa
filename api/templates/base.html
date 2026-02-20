@@ -402,7 +402,8 @@
           username: p.username || '',
           password: p.password || '',
           client_id: p.client_id || '',
-          client_secret: p.client_secret || ''
+          client_secret: p.client_secret || '',
+          oauth_status: ''
         })),
         status: '',
         result: '',
@@ -463,6 +464,60 @@
               this.ok = false;
               this.result = e.message || 'Network error';
               this.status = '';
+            });
+        }
+        ,
+        startGoogleOAuth(provider) {
+          if (!provider || !provider.client_id || !provider.client_secret) {
+            this.ok = false;
+            this.result = 'Google client ID and secret are required.';
+            return;
+          }
+          provider.oauth_status = 'Starting OAuth...';
+          fetch('/calendar/google/oauth/save-credentials', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+            },
+            body: JSON.stringify({client_id: provider.client_id, client_secret: provider.client_secret})
+          })
+            .then(r => r.json())
+            .then(d => {
+              if (!d || d.ok !== true) {
+                throw new Error(d.error || 'Failed to save OAuth credentials');
+              }
+              return fetch('/contacts/google/oauth/start', {
+                headers: {
+                  'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+                }
+              });
+            })
+            .then(r => r.json())
+            .then(d => {
+              if (!d || !d.auth_url) {
+                throw new Error(d.error || 'Missing auth URL');
+              }
+              const w = window.open(d.auth_url, 'google-oauth', 'width=600,height=720');
+              if (!w) {
+                throw new Error('Popup blocked. Allow popups to continue.');
+              }
+              provider.oauth_status = 'Waiting for Google authorization...';
+              const handler = (evt) => {
+                if (!evt || !evt.data || typeof evt.data.type !== 'string') return;
+                if (evt.data.type === 'google-oauth-success') {
+                  provider.oauth_status = 'Connected.';
+                  window.removeEventListener('message', handler);
+                }
+                if (evt.data.type === 'google-oauth-error') {
+                  provider.oauth_status = evt.data.error || 'Authorization failed.';
+                  window.removeEventListener('message', handler);
+                }
+              };
+              window.addEventListener('message', handler);
+            })
+            .catch(e => {
+              provider.oauth_status = e.message || 'OAuth failed.';
             });
         }
       };
