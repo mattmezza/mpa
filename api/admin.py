@@ -116,9 +116,23 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             if val:
                 ctx[var] = val
     elif step == "email":
-        val = await config_store.get("email.himalaya.toml")
-        if val:
-            ctx["himalaya_toml"] = val
+        raw = await config_store.get("email.providers")
+        if raw:
+            try:
+                providers = json.loads(raw)
+                if providers and isinstance(providers, list) and providers:
+                    p = providers[0]
+                    ctx["email_name"] = p.get("name", "")
+                    ctx["email_addr"] = p.get("email", "")
+                    ctx["email_display_name"] = p.get("display_name", "")
+                    ctx["email_imap_host"] = p.get("imap_host", "")
+                    ctx["email_imap_port"] = p.get("imap_port", "993")
+                    ctx["email_smtp_host"] = p.get("smtp_host", "")
+                    ctx["email_smtp_port"] = p.get("smtp_port", "465")
+                    ctx["email_login"] = p.get("login", "")
+                    ctx["email_password"] = p.get("password", "")
+            except json.JSONDecodeError, TypeError:
+                pass
     elif step == "telegram":
         for key, var in (
             ("channels.telegram.bot_token", "bot_token"),
@@ -1982,6 +1996,49 @@ def create_admin_app(
         log.info("Setup identity: saved %d values", len(values))
 
         next_step = "telegram"
+        await config_store.set_setup_step(next_step)
+        ctx = await _wizard_step_context(next_step, config_store)
+        return _render_wizard_step(next_step, SETUP_STEPS, ctx)
+
+    @app.post("/setup/step/email")
+    async def setup_save_email(request: Request) -> HTMLResponse:
+        """Handle email step form submission."""
+        from core.config_store import SETUP_STEPS
+
+        form_data = await request.form()
+        name = str(form_data.get("name", "")).strip()
+        email_addr = str(form_data.get("email", "")).strip()
+        display_name = str(form_data.get("display_name", "")).strip()
+        imap_host = str(form_data.get("imap_host", "")).strip()
+        imap_port = str(form_data.get("imap_port", "993")).strip() or "993"
+        smtp_host = str(form_data.get("smtp_host", "")).strip()
+        smtp_port = str(form_data.get("smtp_port", "465")).strip() or "465"
+        login = str(form_data.get("login", "")).strip()
+        password = str(form_data.get("password", "")).strip()
+
+        values: dict[str, str] = {}
+        if name and email_addr and imap_host and smtp_host:
+            values["email.providers"] = json.dumps(
+                [
+                    {
+                        "name": name,
+                        "email": email_addr,
+                        "display_name": display_name,
+                        "imap_host": imap_host,
+                        "imap_port": imap_port,
+                        "smtp_host": smtp_host,
+                        "smtp_port": smtp_port,
+                        "login": login,
+                        "password": password,
+                    }
+                ]
+            )
+
+        if values:
+            await config_store.set_many(values)
+            log.info("Setup email: saved %d values", len(values))
+
+        next_step = "calendar"
         await config_store.set_setup_step(next_step)
         ctx = await _wizard_step_context(next_step, config_store)
         return _render_wizard_step(next_step, SETUP_STEPS, ctx)

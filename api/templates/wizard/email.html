@@ -1,38 +1,80 @@
 <div class="card">
   <h2 class="text-base mb-3">Email <span class="text-muted font-normal text-xs">(optional)</span></h2>
-  <p class="text-muted text-sm">Paste your Himalaya TOML config. It will be stored in the config database and materialized into a temporary file at runtime.</p>
+  <p class="text-muted text-sm">Configure an IMAP/SMTP email account. You can add more accounts later from the admin panel.</p>
 
-  <div class="mt-4">
-    <label class="label">Himalaya config (TOML)</label>
-    <textarea class="input-sm" id="w-email-toml"
-              style="min-height: 240px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;"
-              placeholder="[accounts.personal]\nemail = \"you@example.com\"\n...">{{ step_ctx.himalaya_toml|default('', true) }}</textarea>
-  </div>
+  <form id="email-form" hx-post="/setup/step/email" hx-target="#wizard-step" hx-swap="innerHTML">
+    <div class="grid gap-3 mt-4" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+      <div>
+        <label class="label" for="w-email-name">Account name</label>
+        <input type="text" class="input" id="w-email-name" name="name" placeholder="personal"
+               value="{{ step_ctx.email_name|default('') }}">
+        <p class="hint">A short slug, e.g. personal, work.</p>
+      </div>
+      <div>
+        <label class="label" for="w-email-addr">Email address</label>
+        <input type="email" class="input" id="w-email-addr" name="email" placeholder="you@example.com"
+               value="{{ step_ctx.email_addr|default('') }}">
+      </div>
+      <div>
+        <label class="label" for="w-email-display">Display name</label>
+        <input type="text" class="input" id="w-email-display" name="display_name" placeholder="Your Name"
+               value="{{ step_ctx.email_display_name|default('') }}">
+        <p class="hint">Sender name in outgoing mail (optional).</p>
+      </div>
+    </div>
 
-  <div class="flex justify-between mt-4">
-    <button class="btn"
-            @click="
-              htmx.ajax('POST', '/setup/step', {
-                target: '#wizard-step', swap: 'innerHTML',
-                values: {
-                  step: 'whatsapp',
-                  'values[email.himalaya.toml]': document.getElementById('w-email-toml').value
-                }
-              })
-            ">
-      Back
-    </button>
-    <button class="btn-primary"
-            @click="
-              htmx.ajax('POST', '/setup/step', {
-                target: '#wizard-step', swap: 'innerHTML',
-                values: {
-                  step: 'calendar',
-                  'values[email.himalaya.toml]': document.getElementById('w-email-toml').value
-                }
-              })
-            ">
-      Next
-    </button>
-  </div>
+    <div class="grid gap-3 mt-3" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+      <div>
+        <label class="label" for="w-email-imap-host">IMAP host</label>
+        <input type="text" class="input" id="w-email-imap-host" name="imap_host" placeholder="imap.example.com"
+               value="{{ step_ctx.email_imap_host|default('') }}">
+      </div>
+      <div>
+        <label class="label" for="w-email-imap-port">IMAP port</label>
+        <input type="number" class="input" id="w-email-imap-port" name="imap_port" placeholder="993"
+               value="{{ step_ctx.email_imap_port|default('993') }}">
+      </div>
+      <div>
+        <label class="label" for="w-email-smtp-host">SMTP host</label>
+        <input type="text" class="input" id="w-email-smtp-host" name="smtp_host" placeholder="smtp.example.com"
+               value="{{ step_ctx.email_smtp_host|default('') }}">
+      </div>
+      <div>
+        <label class="label" for="w-email-smtp-port">SMTP port</label>
+        <input type="number" class="input" id="w-email-smtp-port" name="smtp_port" placeholder="465"
+               value="{{ step_ctx.email_smtp_port|default('465') }}">
+      </div>
+    </div>
+
+    <div class="grid gap-3 mt-3" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+      <div>
+        <label class="label" for="w-email-login">Login username</label>
+        <input type="text" class="input" id="w-email-login" name="login" placeholder="you@example.com"
+               value="{{ step_ctx.email_login|default('') }}">
+        <p class="hint">Defaults to your email address if blank.</p>
+      </div>
+      <div>
+        <label class="label" for="w-email-pass">App password</label>
+        <input type="password" class="input" id="w-email-pass" name="password" placeholder="xxxx-xxxx-xxxx-xxxx"
+               value="{{ step_ctx.email_password|default('') }}">
+        <p class="hint">Use an app-specific password, not your main login.</p>
+      </div>
+    </div>
+
+    <div class="flex justify-between mt-4">
+      <button type="button" class="btn"
+              hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+              hx-vals='{"step": "whatsapp", "values": {}}'>
+        Back
+      </button>
+      <div class="flex gap-2">
+        <button type="button" class="btn"
+                hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+                hx-vals='{"step": "calendar", "values": {}}'>
+          Skip
+        </button>
+        <button type="submit" class="btn-primary">Next</button>
+      </div>
+    </div>
+  </form>
 </div>
