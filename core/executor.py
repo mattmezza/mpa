@@ -6,6 +6,8 @@ import asyncio
 import json
 import os
 
+from core.contacts_config import vdirsyncer_env
+
 from core.email_config import himalaya_env
 
 
@@ -50,9 +52,12 @@ class ToolExecutor:
     async def _exec(self, command: str, timeout: int) -> dict:
         """Run a shell command and capture output."""
         env = None
-        if "himalaya" in command:
+        if "himalaya" in command or "vdirsyncer" in command:
             env = os.environ.copy()
-            env.update(himalaya_env())
+            if "himalaya" in command:
+                env.update(himalaya_env())
+            if "vdirsyncer" in command:
+                env.update(vdirsyncer_env())
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,

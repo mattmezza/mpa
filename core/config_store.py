@@ -57,6 +57,9 @@ SECRET_KEYS = frozenset(
         "admin.password_salt",
         "search.api_key",
         "calendar.providers",
+        "calendar.google_oauth_client_id",
+        "calendar.google_oauth_client_secret",
+        "calendar.google_oauth_token",
         "contacts.providers",
         "calendar.google_oauth_token",
         "calendar.google_oauth_client_id",
@@ -65,7 +68,7 @@ SECRET_KEYS = frozenset(
 )
 
 # Keys that match these prefixes are also considered secret.
-SECRET_PREFIXES = ("calendar.providers.", "contacts.providers.", "email.")
+SECRET_PREFIXES = ("calendar.", "contacts.", "email.")
 
 # Setup wizard step order.
 SETUP_STEPS = [
