@@ -25,7 +25,6 @@ from typing import Protocol, runtime_checkable
 import aiosqlite
 
 from core.config import Config, load_config
-from core.contacts_config import materialize_vdirsyncer_config
 from core.email_config import materialize_himalaya_config
 
 log = logging.getLogger(__name__)
@@ -138,7 +137,7 @@ def _parse_value(value: str) -> object:
     if value.startswith("[") or value.startswith("{"):
         try:
             return json.loads(value)
-        except json.JSONDecodeError, ValueError:
+        except (json.JSONDecodeError, ValueError):
             pass
     return value
 
@@ -164,13 +163,6 @@ def _email_keys_changed(keys: list | tuple | set) -> bool:
     return False
 
 
-def _contacts_keys_changed(keys: list | tuple | set) -> bool:
-    for key in keys:
-        if key == "contacts.providers" or str(key).startswith("contacts."):
-            return True
-    return False
-
-
 def _hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
     if salt is None:
         salt = secrets.token_bytes(16)
@@ -182,7 +174,7 @@ def _verify_password(password: str, hashed: str, salt: str) -> bool:
     try:
         salt_bytes = base64.b64decode(salt.encode())
         expected = base64.b64decode(hashed.encode())
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return False
     derived = hashlib.pbkdf2_hmac("sha256", password.encode(), salt_bytes, 200_000)
     return hmac.compare_digest(derived, expected)
@@ -264,8 +256,6 @@ class ConfigStore:
             await db.commit()
         if _email_keys_changed([key]):
             await materialize_himalaya_config(self)
-        if _contacts_keys_changed([key]):
-            await materialize_vdirsyncer_config(self)
 
     async def set_many(self, values: dict[str, str]) -> None:
         """Set multiple config values atomically."""
@@ -280,8 +270,6 @@ class ConfigStore:
             await db.commit()
         if _email_keys_changed(list(values.keys())):
             await materialize_himalaya_config(self)
-        if _contacts_keys_changed(list(values.keys())):
-            await materialize_vdirsyncer_config(self)
 
     async def delete(self, key: str) -> bool:
         """Delete a config value. Returns True if it existed."""
@@ -292,8 +280,6 @@ class ConfigStore:
             deleted = cursor.rowcount > 0
         if deleted and _email_keys_changed([key]):
             await materialize_himalaya_config(self)
-        if deleted and _contacts_keys_changed([key]):
-            await materialize_vdirsyncer_config(self)
         return deleted
 
     # -- Bulk operations -----------------------------------------------------

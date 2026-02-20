@@ -1,7 +1,14 @@
-"""Materialize Himalaya config from the config store."""
+"""Materialize Himalaya config from the config store.
+
+Structured email provider data is stored as JSON in the ``email.providers``
+config key.  This module generates a valid Himalaya TOML configuration from
+that structured data and writes it to well-known temporary paths so the CLI
+can pick it up at runtime.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -11,6 +18,9 @@ HIMALAYA_CONFIG_PATH = Path("/tmp/mpa-himalaya-config.toml")
 HIMALAYA_XDG_DIR = Path("/tmp/mpa-himalaya-xdg")
 HIMALAYA_XDG_CONFIG_PATH = HIMALAYA_XDG_DIR / "himalaya" / "config.toml"
 
+# Config key used to store the structured provider list.
+EMAIL_PROVIDERS_KEY = "email.providers"
+
 
 def himalaya_env() -> dict[str, str]:
     return {
@@ -19,13 +29,109 @@ def himalaya_env() -> dict[str, str]:
     }
 
 
+def _quote(value: str) -> str:
+    """TOML-quote a string value."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _provider_to_toml(provider: dict, *, is_default: bool = False) -> str:
+    """Convert a single provider dict to a Himalaya TOML account section.
+
+    Expected provider keys:
+        name         – account name slug (e.g. "personal", "work")
+        email        – email address
+        display_name – sender display name (optional)
+        imap_host    – IMAP server hostname
+        imap_port    – IMAP server port (default 993)
+        smtp_host    – SMTP server hostname
+        smtp_port    – SMTP server port (default 465)
+        login        – login username (defaults to email)
+        password     – app password / secret
+    """
+    name = provider.get("name", "default").strip()
+    email = provider.get("email", "").strip()
+    display_name = provider.get("display_name", "").strip()
+    imap_host = provider.get("imap_host", "").strip()
+    imap_port = int(provider.get("imap_port", 993) or 993)
+    smtp_host = provider.get("smtp_host", "").strip()
+    smtp_port = int(provider.get("smtp_port", 465) or 465)
+    login = provider.get("login", "").strip() or email
+    password = provider.get("password", "").strip()
+
+    # Sanitise account name – only allow alphanumeric, dash, underscore
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in name) or "default"
+
+    # Env-var name for the password (uppercase, dashes to underscores)
+    env_var = f"HIMALAYA_{safe_name.upper().replace('-', '_')}_PASSWORD"
+
+    lines: list[str] = []
+    lines.append(f"[accounts.{safe_name}]")
+    if is_default:
+        lines.append("default = true")
+    lines.append(f"email = {_quote(email)}")
+    if display_name:
+        lines.append(f"display-name = {_quote(display_name)}")
+
+    # IMAP backend
+    lines.append('backend.type = "imap"')
+    lines.append(f"backend.host = {_quote(imap_host)}")
+    lines.append(f"backend.port = {imap_port}")
+    lines.append(f"backend.login = {_quote(login)}")
+    lines.append('backend.encryption.type = "tls"')
+    lines.append('backend.auth.type = "password"')
+    lines.append(f"backend.auth.command = {_quote(f'printenv {env_var}')}")
+
+    # SMTP send backend
+    lines.append('message.send.backend.type = "smtp"')
+    lines.append(f"message.send.backend.host = {_quote(smtp_host)}")
+    lines.append(f"message.send.backend.port = {smtp_port}")
+    lines.append(f"message.send.backend.login = {_quote(login)}")
+    lines.append('message.send.backend.encryption.type = "tls"')
+    lines.append('message.send.backend.auth.type = "password"')
+    lines.append(f"message.send.backend.auth.command = {_quote(f'printenv {env_var}')}")
+
+    return "\n".join(lines)
+
+
+def _env_var_for_provider(provider: dict) -> str:
+    """Return the environment variable name used for a provider's password."""
+    name = provider.get("name", "default").strip()
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in name) or "default"
+    return f"HIMALAYA_{safe_name.upper().replace('-', '_')}_PASSWORD"
+
+
+def providers_to_toml(providers: list[dict]) -> str:
+    """Generate a complete Himalaya TOML config from a list of providers."""
+    if not providers:
+        return ""
+    sections: list[str] = []
+    for idx, provider in enumerate(providers):
+        sections.append(_provider_to_toml(provider, is_default=(idx == 0)))
+    return "\n\n".join(sections) + "\n"
+
+
 async def materialize_himalaya_config(config_store) -> bool:
     """Write Himalaya TOML config from config DB.
 
+    Reads structured provider data from ``email.providers`` (JSON list),
+    generates Himalaya TOML, and writes it to the well-known paths.
+
     Returns True if a file was written or removed.
     """
-    raw = await config_store.get("email.himalaya.toml")
-    if not raw:
+    raw = await config_store.get(EMAIL_PROVIDERS_KEY)
+    providers: list[dict] = []
+    if raw:
+        try:
+            providers = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            log.warning("Invalid JSON in %s, ignoring", EMAIL_PROVIDERS_KEY)
+
+    # Filter out providers missing required fields
+    providers = [
+        p for p in providers if p.get("email") and p.get("imap_host") and p.get("smtp_host")
+    ]
+
+    if not providers:
         removed = False
         if HIMALAYA_CONFIG_PATH.exists():
             HIMALAYA_CONFIG_PATH.unlink()
@@ -35,12 +141,12 @@ async def materialize_himalaya_config(config_store) -> bool:
             removed = True
         return removed
 
-    content = raw.strip()
-    if content and not content.endswith("\n"):
-        content += "\n"
+    content = providers_to_toml(providers)
 
     HIMALAYA_CONFIG_PATH.write_text(content)
     HIMALAYA_XDG_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     HIMALAYA_XDG_CONFIG_PATH.write_text(content)
-    log.info("Materialized Himalaya config to %s", HIMALAYA_CONFIG_PATH)
+    log.info(
+        "Materialized Himalaya config (%d accounts) to %s", len(providers), HIMALAYA_CONFIG_PATH
+    )
     return True

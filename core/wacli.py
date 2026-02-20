@@ -66,7 +66,7 @@ class WacliManager:
                 err_json = json.loads(err_text)
                 if isinstance(err_json, dict):
                     return err_json
-            except json.JSONDecodeError, ValueError:
+            except (json.JSONDecodeError, ValueError):
                 pass
             return {"success": False, "error": err_text}
         try:
