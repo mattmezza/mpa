@@ -29,6 +29,7 @@ async def main() -> None:
     from core.contacts_config import materialize_vdirsyncer_config, vdirsyncer_env
 
     store = ConfigStore(db_path=args.config_db)
+    await store._ensure_schema()
     await materialize_vdirsyncer_config(store)
 
     cmd = ["vdirsyncer", "sync"]
