@@ -137,6 +137,7 @@ class MemoryConfig(BaseModel):
     extraction_model: str = "claude-4-5-haiku"
     consolidation_provider: str = "anthropic"
     consolidation_model: str = "claude-4-5-haiku"
+    extraction_cooldown_seconds: int = 120  # minimum seconds between extractions
 
 
 class SearchConfig(BaseModel):

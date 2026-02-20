@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import aiosqlite
 import pytest
@@ -207,3 +208,189 @@ class TestExtractJsonArray:
     def test_fence_with_preamble(self):
         raw = 'Here are the memories:\n```json\n[{"a": 1}]\n```\nDone.'
         assert _extract_json_array(raw) == [{"a": 1}]
+
+
+# -- Cooldown tests --
+
+
+@pytest.mark.asyncio
+async def test_cooldown_skips_rapid_extractions(store) -> None:
+    """Second call within cooldown window should be skipped."""
+    llm = _make_mock_llm(
+        [
+            {
+                "tier": "LONG_TERM",
+                "category": "fact",
+                "subject": "matteo",
+                "content": "Lives in Zurich",
+            }
+        ]
+    )
+
+    # First call succeeds
+    stored1 = await store.extract_memories(
+        llm,
+        model="m",
+        user_msg="I live in Zurich",
+        agent_msg="Got it",
+        cooldown_seconds=300,
+    )
+    assert stored1 == 1
+
+    # Second call within cooldown is skipped
+    stored2 = await store.extract_memories(
+        llm,
+        model="m",
+        user_msg="I also like coffee",
+        agent_msg="Noted",
+        cooldown_seconds=300,
+    )
+    assert stored2 == 0
+    # Only the first memory was stored
+    assert await _count_rows(store.db_path, "long_term") == 1
+
+
+@pytest.mark.asyncio
+async def test_cooldown_zero_allows_all(store) -> None:
+    """cooldown_seconds=0 should allow every call."""
+    llm = _make_mock_llm(
+        [
+            {
+                "tier": "LONG_TERM",
+                "category": "fact",
+                "subject": "matteo",
+                "content": "Lives in Zurich",
+            }
+        ]
+    )
+
+    stored1 = await store.extract_memories(
+        llm,
+        model="m",
+        user_msg="msg1",
+        agent_msg="ok",
+        cooldown_seconds=0,
+    )
+    stored2 = await store.extract_memories(
+        llm,
+        model="m",
+        user_msg="msg2",
+        agent_msg="ok",
+        cooldown_seconds=0,
+    )
+    # Both should succeed (dedup catches the second one, but no cooldown skip)
+    assert stored1 == 1
+    # Second is a duplicate by content, so dedup catches it — but cooldown didn't block
+    assert stored2 == 0  # deduped, not cooldown-blocked
+    assert await _count_rows(store.db_path, "long_term") == 1
+
+
+# -- Per-turn cap tests --
+
+
+@pytest.mark.asyncio
+async def test_per_turn_cap(store) -> None:
+    """At most _MAX_PER_TURN memories should be stored per call."""
+    llm = _make_mock_llm(
+        [
+            {"tier": "LONG_TERM", "category": "fact", "subject": "a", "content": "Fact A"},
+            {"tier": "LONG_TERM", "category": "fact", "subject": "b", "content": "Fact B"},
+            {"tier": "LONG_TERM", "category": "fact", "subject": "c", "content": "Fact C"},
+            {"tier": "LONG_TERM", "category": "fact", "subject": "d", "content": "Fact D"},
+            {"tier": "LONG_TERM", "category": "fact", "subject": "e", "content": "Fact E"},
+        ]
+    )
+
+    stored = await store.extract_memories(
+        llm,
+        model="m",
+        user_msg="lots of facts",
+        agent_msg="ok",
+        cooldown_seconds=0,
+    )
+
+    assert stored == 3  # capped at _MAX_PER_TURN
+    assert await _count_rows(store.db_path, "long_term") == 3
+
+
+# -- Short-term deduplication tests --
+
+
+@pytest.mark.asyncio
+async def test_short_term_dedup_skips_identical(store) -> None:
+    """Identical short-term memories should not be stored twice."""
+    llm = _make_mock_llm(
+        [
+            {
+                "tier": "SHORT_TERM",
+                "content": "Working from home today",
+                "context": "daily update",
+                "ttl_hours": 8,
+            }
+        ]
+    )
+
+    stored1 = await store.extract_memories(
+        llm,
+        model="m",
+        user_msg="wfh",
+        agent_msg="ok",
+        cooldown_seconds=0,
+    )
+    assert stored1 == 1
+
+    stored2 = await store.extract_memories(
+        llm,
+        model="m",
+        user_msg="wfh again",
+        agent_msg="ok",
+        cooldown_seconds=0,
+    )
+    assert stored2 == 0
+    assert await _count_rows(store.db_path, "short_term") == 1
+
+
+@pytest.mark.asyncio
+async def test_short_term_dedup_skips_substring(store) -> None:
+    """Short-term memory that's a substring of existing one should be skipped."""
+    llm1 = _LLMStub([])
+    llm1._response = json.dumps(
+        [
+            {
+                "tier": "SHORT_TERM",
+                "content": "Working from home today due to rain",
+                "context": "daily update",
+                "ttl_hours": 8,
+            }
+        ]
+    )
+
+    await store.extract_memories(
+        llm1,
+        model="m",
+        user_msg="wfh",
+        agent_msg="ok",
+        cooldown_seconds=0,
+    )
+
+    llm2 = _LLMStub([])
+    llm2._response = json.dumps(
+        [
+            {
+                "tier": "SHORT_TERM",
+                "content": "Working from home today",
+                "context": "daily update",
+                "ttl_hours": 8,
+            }
+        ]
+    )
+
+    stored = await store.extract_memories(
+        llm2,
+        model="m",
+        user_msg="wfh",
+        agent_msg="ok",
+        cooldown_seconds=0,
+    )
+    assert stored == 0
+    assert await _count_rows(store.db_path, "short_term") == 1

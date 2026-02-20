@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -64,11 +65,29 @@ Given this conversation exchange, identify any facts worth remembering.
 User: {user_msg}
 Assistant: {agent_msg}
 
-For each fact, classify it:
-- LONG_TERM: preferences, relationships, routines, biographical facts — things that stay true
-- SHORT_TERM: situational context, temporary states, time-bound info — things that expire
+{existing_memories_block}\
+For each fact, classify it into ONE of these tiers:
 
-Return a JSON array. Each element must be one of:
+LONG_TERM — durable facts that remain true indefinitely:
+  - Personal preferences ("prefers oat milk", "favourite editor is Neovim")
+  - Relationships ("Marco is Matteo's colleague", "Simge is Matteo's partner")
+  - Biographical facts ("lives in Zurich", "works as a software engineer")
+  - Routines ("goes to the gym on Mondays and Thursdays")
+  DO NOT use LONG_TERM for:
+  - Plans, tasks, or events (even recurring ones that haven't been confirmed as routines)
+  - Anything time-bound ("working on project X", "has a deadline Friday")
+  - Opinions about transient topics ("thinks the new API is buggy")
+
+SHORT_TERM — situational context that expires:
+  - Current activities ("working from home today", "debugging the auth flow")
+  - Near-term plans ("dinner with Marco tomorrow", "flight to Rome on Friday")
+  - Temporary states ("feeling tired", "waiting for a code review")
+  - Active projects or tasks ("refactoring the memory system this week")
+
+When in doubt between LONG_TERM and SHORT_TERM, choose SHORT_TERM. Only use
+LONG_TERM for facts you are highly confident will still be true months from now.
+
+Return a JSON array (max 3 items). Each element must be one of:
   {{"tier": "LONG_TERM", "category": "<category>", \
 "subject": "<who/what>", "content": "<the fact>"}}
   {{"tier": "SHORT_TERM", "content": "<the fact>", \
@@ -77,18 +96,18 @@ Return a JSON array. Each element must be one of:
 Categories: preference, relationship, fact, routine, work, health, travel
 
 Rules:
-- Only extract genuinely useful facts. Skip greetings, filler,
-  and anything already obvious from context.
+- Extract only genuinely useful, non-obvious facts. Skip greetings, filler,
+  acknowledgements, and anything already obvious from the conversation.
+- Most conversation turns contain NOTHING worth remembering. Return [] liberally.
+- Do NOT extract facts that duplicate or overlap with the existing memories
+  listed above.
 - Use lowercase for subject (e.g. "matteo", "simge").
 - For LONG_TERM, always set category and subject.
-- For SHORT_TERM, you MUST set ttl_hours by reasoning about how long
-  the fact stays relevant. Guidelines:
+- For SHORT_TERM, you MUST set ttl_hours:
   - 2-4h: trivial, task-at-hand context ("looking at flights now")
   - 8-12h: day-scoped situations ("working from home today")
   - 24-48h: near-term plans ("dinner with Marco tomorrow")
   - 72-168h: week-scoped context ("Simge visiting parents this week")
-  - If the user says when to forget ("remind me tomorrow", "for the
-    next two days"), use that as the TTL.
 - If nothing is worth remembering, return an empty array: []
 
 Respond with ONLY the JSON array, no other text."""
@@ -184,6 +203,7 @@ class MemoryStore:
         self.db_path = db_path
         self.long_term_limit = long_term_limit
         self._ready = False
+        self._last_extraction: float = 0.0  # monotonic timestamp of last extraction
 
     async def _ensure_schema(self) -> None:
         if self._ready:
@@ -240,17 +260,44 @@ class MemoryStore:
 
     # -- Automatic memory extraction --
 
+    # Maximum number of memories to store per extraction call.
+    _MAX_PER_TURN = 3
+
     async def extract_memories(
-        self, llm: LLMClient, model: str, user_msg: str, agent_msg: str
+        self,
+        llm: LLMClient,
+        model: str,
+        user_msg: str,
+        agent_msg: str,
+        cooldown_seconds: int = 120,
     ) -> int:
         """Extract facts from a conversation turn and store them.
 
         Makes a secondary LLM call (cheap/fast model) to identify facts
         worth remembering, then writes them to the appropriate tier.
 
+        If fewer than *cooldown_seconds* have elapsed since the last
+        extraction call, the call is skipped entirely (returns 0).
+
         Returns the number of memories stored.
         """
-        prompt = _EXTRACTION_PROMPT.format(user_msg=user_msg, agent_msg=agent_msg)
+        now = time.monotonic()
+        if now - self._last_extraction < cooldown_seconds:
+            log.debug(
+                "Skipping memory extraction (cooldown: %.0fs remaining)",
+                cooldown_seconds - (now - self._last_extraction),
+            )
+            return 0
+        self._last_extraction = now
+
+        # Build existing-memories block so the LLM can avoid duplicates.
+        existing_block = await self._existing_memories_block()
+
+        prompt = _EXTRACTION_PROMPT.format(
+            user_msg=user_msg,
+            agent_msg=agent_msg,
+            existing_memories_block=existing_block,
+        )
 
         try:
             raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=1024)
@@ -264,7 +311,7 @@ class MemoryStore:
             return 0
 
         stored = 0
-        for mem in memories:
+        for mem in memories[: self._MAX_PER_TURN]:
             try:
                 tier = mem.get("tier", "").upper()
                 if tier == "LONG_TERM":
@@ -282,6 +329,24 @@ class MemoryStore:
         if stored:
             log.info("Extracted and stored %d memories", stored)
         return stored
+
+    async def _existing_memories_block(self) -> str:
+        """Build a summary of existing memories for the extraction prompt."""
+        long_term = await self.get_long_term()
+        short_term = await self.get_short_term()
+
+        if not long_term and not short_term:
+            return ""
+
+        parts = ["## Existing memories (do NOT extract duplicates)\n"]
+        if long_term:
+            for m in long_term:
+                parts.append(f"- [LT] {m['subject']}: {m['content']}")
+        if short_term:
+            for m in short_term:
+                parts.append(f"- [ST] {m['content']}")
+        parts.append("")  # trailing newline
+        return "\n".join(parts) + "\n"
 
     async def _store_long_term(self, mem: dict) -> int:
         """Store a long-term memory, skipping if a similar one exists."""
@@ -323,7 +388,11 @@ class MemoryStore:
             return 1
 
     async def _store_short_term(self, mem: dict) -> int:
-        """Store a short-term memory with a LLM-determined TTL."""
+        """Store a short-term memory with a LLM-determined TTL.
+
+        Skips insertion if an active (non-expired) short-term memory
+        already exists with overlapping content.
+        """
         content = mem.get("content", "")
         context = mem.get("context", "")
         ttl_hours = mem.get("ttl_hours")
@@ -339,6 +408,17 @@ class MemoryStore:
 
         await self._ensure_schema()
         async with aiosqlite.connect(self.db_path) as db:
+            # Check for duplicate active short-term memories
+            cursor = await db.execute(
+                "SELECT id, content FROM short_term WHERE expires_at > datetime('now')",
+            )
+            existing = await cursor.fetchall()
+            content_lower = content.lower()
+            for row in existing:
+                if content_lower in row[1].lower() or row[1].lower() in content_lower:
+                    log.debug("Skipping duplicate short-term memory: %s", content[:80])
+                    return 0
+
             await db.execute(
                 "INSERT INTO short_term (content, context, expires_at) VALUES (?, ?, ?)",
                 (content, context, expires_str),

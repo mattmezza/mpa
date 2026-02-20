@@ -702,6 +702,7 @@ class AgentCore:
                 model=self.config.memory.extraction_model,
                 user_msg=user_msg,
                 agent_msg=agent_msg,
+                cooldown_seconds=self.config.memory.extraction_cooldown_seconds,
             )
             if stored:
                 log.info("Background memory extraction stored %d memories", stored)
