@@ -26,6 +26,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
 )
 log = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Install the in-memory log buffer handler before anything else
 install_log_buffer()
@@ -149,6 +151,7 @@ async def main() -> None:
         host="0.0.0.0",
         port=port,
         log_level="info",
+        log_config=None,
     )
     server = uvicorn.Server(uvi_config)
     # Prevent uvicorn from installing its own signal handlers — we manage
