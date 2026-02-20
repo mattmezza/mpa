@@ -140,55 +140,59 @@ async def _channel_list_context(
     tg_enabled = str(tg_enabled_raw).lower() == "true"
     tg_token = await config_store.get("channels.telegram.bot_token")
     tg_users = await config_store.get("channels.telegram.allowed_user_ids")
-    tg_detail = "Not configured"
-    if tg_token:
-        tg_detail = "Bot token set"
-        if tg_users:
-            tg_detail = f"Bot token set · Users: {tg_users}"
-    channels.append(
-        {
-            "key": "telegram",
-            "label": "Telegram",
-            "enabled": tg_enabled,
-            "detail": tg_detail,
-        }
-    )
+    tg_configured = bool(tg_token or tg_users or tg_enabled)
+    if tg_configured:
+        tg_detail = "Not configured"
+        if tg_token:
+            tg_detail = "Bot token set"
+            if tg_users:
+                tg_detail = f"Bot token set · Users: {tg_users}"
+        channels.append(
+            {
+                "key": "telegram",
+                "label": "Telegram",
+                "enabled": tg_enabled,
+                "detail": tg_detail,
+            }
+        )
 
     wa_enabled_raw = await config_store.get("channels.whatsapp.enabled")
     wa_enabled = str(wa_enabled_raw).lower() == "true"
     wa_bridge = await config_store.get("channels.whatsapp.bridge_url")
     wa_numbers = await config_store.get("channels.whatsapp.allowed_numbers")
-    wa_detail = "Not configured"
-    wa_auth_status = ""
-    wa_auth_class = "badge-off"
-    if wa_bridge:
-        wa_detail = "Local wacli"
-        if wa_numbers:
-            wa_detail = f"Local wacli · Numbers: {wa_numbers}"
-        try:
-            status = await (wacli or WacliManager()).auth_status()
-            if status.get("authenticated") is True:
-                wa_auth_status = "Auth ok"
-                wa_auth_class = "badge-ok"
-            elif status.get("running") is False:
-                wa_auth_status = "Auth stopped"
+    wa_configured = bool(wa_bridge or wa_numbers or wa_enabled)
+    if wa_configured:
+        wa_detail = "Not configured"
+        wa_auth_status = ""
+        wa_auth_class = "badge-off"
+        if wa_bridge:
+            wa_detail = "Local wacli"
+            if wa_numbers:
+                wa_detail = f"Local wacli · Numbers: {wa_numbers}"
+            try:
+                status = await (wacli or WacliManager()).auth_status()
+                if status.get("authenticated") is True:
+                    wa_auth_status = "Auth ok"
+                    wa_auth_class = "badge-ok"
+                elif status.get("running") is False:
+                    wa_auth_status = "Auth stopped"
+                    wa_auth_class = "badge-off"
+                else:
+                    wa_auth_status = "Auth required"
+                    wa_auth_class = "badge-warn"
+            except Exception:
+                wa_auth_status = "Auth unknown"
                 wa_auth_class = "badge-off"
-            else:
-                wa_auth_status = "Auth required"
-                wa_auth_class = "badge-warn"
-        except Exception:
-            wa_auth_status = "Auth unknown"
-            wa_auth_class = "badge-off"
-    channels.append(
-        {
-            "key": "whatsapp",
-            "label": "WhatsApp",
-            "enabled": wa_enabled,
-            "detail": wa_detail,
-            "auth_status": wa_auth_status,
-            "auth_class": wa_auth_class,
-        }
-    )
+        channels.append(
+            {
+                "key": "whatsapp",
+                "label": "WhatsApp",
+                "enabled": wa_enabled,
+                "detail": wa_detail,
+                "auth_status": wa_auth_status,
+                "auth_class": wa_auth_class,
+            }
+        )
 
     return {"channels": channels}
 
