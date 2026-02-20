@@ -37,6 +37,12 @@ def contact_provider_slug(name: str, idx: int, taken: set[str]) -> str:
     return slug
 
 
+def contact_pair_name(provider: dict[str, str], idx: int, taken: set[str]) -> str:
+    name = str(provider.get("name", "")).strip()
+    slug = contact_provider_slug(name, idx, taken)
+    return f"contacts_{slug}"
+
+
 def _token_path(slug: str) -> Path:
     return VDIRSYNCER_TOKEN_DIR / f"{slug}_google"
 
@@ -193,3 +199,22 @@ async def materialize_vdirsyncer_config(config_store) -> bool:
             _token_path(slug).write_text(json.dumps(token_payload, indent=2))
     log.info("Materialized vdirsyncer config to %s", VDIRSYNCER_CONFIG_PATH)
     return True
+
+
+async def list_contact_pairs(config_store) -> list[str]:
+    raw = await config_store.get("contacts.providers")
+    if not raw:
+        return []
+    try:
+        providers = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(providers, list):
+        return []
+    taken: set[str] = set()
+    pairs: list[str] = []
+    for idx, provider in enumerate(providers):
+        if not isinstance(provider, dict):
+            continue
+        pairs.append(contact_pair_name(provider, idx, taken))
+    return pairs

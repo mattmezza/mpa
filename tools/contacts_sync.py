@@ -26,7 +26,11 @@ async def main() -> None:
 
     _setup_sys_path()
     from core.config_store import ConfigStore
-    from core.contacts_config import materialize_vdirsyncer_config, vdirsyncer_env
+    from core.contacts_config import (
+        list_contact_pairs,
+        materialize_vdirsyncer_config,
+        vdirsyncer_env,
+    )
 
     store = ConfigStore(db_path=args.config_db)
     await store._ensure_schema()
@@ -34,7 +38,8 @@ async def main() -> None:
 
     cmd = ["vdirsyncer", "sync"]
     if args.discover:
-        cmd = ["vdirsyncer", "discover", "contacts"]
+        pairs = await list_contact_pairs(store)
+        cmd = ["vdirsyncer", "discover", *pairs] if pairs else ["vdirsyncer", "discover"]
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
