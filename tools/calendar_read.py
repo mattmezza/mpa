@@ -128,7 +128,7 @@ def main():
     if args.today:
         start = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
         end = start + timedelta(days=1)
-        results = cal.date_search(start=start, end=end, expand=True)
+        results = cal.search(start=start, end=end, expand=True)
         events = [event_to_dict(e) for e in results]
 
     elif args.from_date:
@@ -142,14 +142,14 @@ def main():
         else:
             # Default to 7 days if no --to
             end = start + timedelta(days=7)
-        results = cal.date_search(start=start, end=end, expand=True)
+        results = cal.search(start=start, end=end, expand=True)
         events = [event_to_dict(e) for e in results]
 
     elif args.next is not None:
         # Fetch events for the next 90 days and take the first N
         start = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
         end = start + timedelta(days=90)
-        results = cal.date_search(start=start, end=end, expand=True)
+        results = cal.search(start=start, end=end, expand=True)
         all_events = [event_to_dict(e) for e in results]
         # Sort by start time
         all_events.sort(key=lambda e: e.get("start", ""))
