@@ -35,7 +35,6 @@
       <div>
         <label class="label">Model</label>
         <select class="input-sm" style="max-width:500px" x-model="model">
-          <option x-show="customModel" :value="customModel" x-text="customModel + ' (custom)'"></option>
           <template x-for="item in (models[provider] || [])" :key="item.value">
             <option :value="item.value" x-text="item.label"></option>
           </template>
@@ -101,7 +100,6 @@
       <div>
         <label class="label">Extraction model</label>
         <select class="input-sm" style="max-width:500px" x-model="extractionModel">
-          <option x-show="extractionCustomModel" :value="extractionCustomModel" x-text="extractionCustomModel + ' (custom)'"></option>
           <template x-for="item in (models[extractionProvider] || [])" :key="'ext-' + item.value">
             <option :value="item.value" x-text="item.label"></option>
           </template>
@@ -124,7 +122,6 @@
       <div>
         <label class="label">Consolidation model</label>
         <select class="input-sm" style="max-width:500px" x-model="consolidationModel">
-          <option x-show="consolidationCustomModel" :value="consolidationCustomModel" x-text="consolidationCustomModel + ' (custom)'"></option>
           <template x-for="item in (models[consolidationProvider] || [])" :key="'con-' + item.value">
             <option :value="item.value" x-text="item.label"></option>
           </template>

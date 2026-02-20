@@ -128,14 +128,13 @@
           const list = this.models[this.provider] || [];
           if (!list.length) return;
           const current = (this.model || '').trim();
-          if (!current) {
+          const exists = current && list.some(item => item.value === current);
+          if (exists) {
+            this.customModel = '';
+          } else {
             this.model = list[0].value;
             this.customModel = '';
-            return;
           }
-          const exists = list.some(item => item.value === current);
-          this.model = current;
-          this.customModel = exists ? '' : current;
         },
         normalizeMemoryModel(kind) {
           const prov = kind === 'extraction' ? this.extractionProvider : this.consolidationProvider;
@@ -143,14 +142,14 @@
           if (!list.length) return;
           const current = (kind === 'extraction' ? this.extractionModel : this.consolidationModel) || '';
           const trimmed = current.trim();
-          if (!trimmed) {
+          const exists = trimmed && list.some(item => item.value === trimmed);
+          if (exists) {
+            if (kind === 'extraction') { this.extractionCustomModel = ''; }
+            else { this.consolidationCustomModel = ''; }
+          } else {
             if (kind === 'extraction') { this.extractionModel = list[0].value; this.extractionCustomModel = ''; }
             else { this.consolidationModel = list[0].value; this.consolidationCustomModel = ''; }
-            return;
           }
-          const exists = list.some(item => item.value === trimmed);
-          if (kind === 'extraction') { this.extractionModel = trimmed; this.extractionCustomModel = exists ? '' : trimmed; }
-          else { this.consolidationModel = trimmed; this.consolidationCustomModel = exists ? '' : trimmed; }
         },
         keyFor(service) {
           if (service === 'openai') return this.openaiKey;
