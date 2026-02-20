@@ -624,6 +624,20 @@
     document.body.addEventListener('htmx:responseError', function(e) {
       if (e.detail.xhr.status === 401) {
         window.location.href = '/login';
+      } else if (window.showToast) {
+        // Show error message for non-2xx responses
+        let msg = 'Request failed';
+        try { msg = JSON.parse(e.detail.xhr.responseText).detail || msg; } catch(_) {}
+        window.showToast(msg, false);
+      }
+    });
+
+    // Global: listen for HX-Trigger showToast events from the server
+    document.body.addEventListener('showToast', function(e) {
+      if (window.showToast && e.detail && e.detail.value) {
+        window.showToast(e.detail.value);
+      } else if (window.showToast && typeof e.detail === 'string') {
+        window.showToast(e.detail);
       }
     });
   </script>

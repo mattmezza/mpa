@@ -925,6 +925,7 @@ def create_admin_app(
         job_type = str(body.get("type", "agent")).strip()
         task = str(body.get("task", "")).strip()
         channel = str(body.get("channel", "telegram")).strip()
+        description = str(body.get("description", "")).strip()
 
         if not job_id:
             raise HTTPException(400, "Job ID is required")
@@ -953,6 +954,7 @@ def create_admin_app(
             channel=channel,
             status="active",
             created_by="admin",
+            description=description,
         )
 
         # Sync with APScheduler if the agent is running
@@ -964,7 +966,9 @@ def create_admin_app(
 
         jobs = _get_jobs_list()
         agent_running = agent is not None
-        return _render_partial("partials/jobs.html", jobs=jobs, agent_running=agent_running)
+        resp = _render_partial("partials/jobs.html", jobs=jobs, agent_running=agent_running)
+        resp.headers["HX-Trigger"] = json.dumps({"showToast": f'Job "{job_id}" saved'})
+        return resp
 
     @app.post("/jobs/delete", dependencies=[Depends(auth)])
     async def delete_job(request: Request) -> HTMLResponse:
@@ -993,7 +997,9 @@ def create_admin_app(
 
         jobs = _get_jobs_list()
         agent_running = agent is not None
-        return _render_partial("partials/jobs.html", jobs=jobs, agent_running=agent_running)
+        resp = _render_partial("partials/jobs.html", jobs=jobs, agent_running=agent_running)
+        resp.headers["HX-Trigger"] = json.dumps({"showToast": f'Job "{job_id}" deleted'})
+        return resp
 
     @app.post("/jobs/run", dependencies=[Depends(auth)])
     async def run_job_now(request: Request) -> HTMLResponse:

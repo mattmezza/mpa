@@ -129,6 +129,7 @@
       </div>
     </div>
     <div class="flex items-center gap-2 mt-4">
+      <input type="hidden" name="description" x-model="form.description">
       <button type="submit" class="btn btn-primary btn-sm">
         <span x-text="editing ? 'Update Job' : 'Add Job'">Add Job</span>
       </button>
@@ -163,7 +164,8 @@ function jobsTab() {
       cron: '',
       type: 'agent',
       task: '',
-      channel: 'telegram'
+      channel: 'telegram',
+      description: ''
     },
     editJob(job) {
       this.editing = true;
@@ -172,6 +174,7 @@ function jobsTab() {
       this.form.type = job.type;
       this.form.task = job.task || '';
       this.form.channel = job.channel || 'telegram';
+      this.form.description = job.description || '';
       // scroll to form
       this.$nextTick(() => {
         document.querySelector('form[hx-post="/jobs"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -179,7 +182,7 @@ function jobsTab() {
     },
     cancelEdit() {
       this.editing = false;
-      this.form = { id: '', cron: '', type: 'agent', task: '', channel: 'telegram' };
+      this.form = { id: '', cron: '', type: 'agent', task: '', channel: 'telegram', description: '' };
     }
   };
 }
