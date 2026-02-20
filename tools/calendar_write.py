@@ -27,12 +27,12 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-import caldav
 import yaml
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.config import _resolve_env_vars  # noqa: E402
+from tools.calendar_auth import connect  # noqa: E402
 
 
 def load_calendar_providers(config_path: str = "config.yml") -> dict[str, dict]:
@@ -47,21 +47,6 @@ def load_calendar_providers(config_path: str = "config.yml") -> dict[str, dict]:
     resolved = _resolve_env_vars(raw)
     providers = resolved.get("calendar", {}).get("providers", [])
     return {p["name"]: p for p in providers}
-
-
-def connect(provider: dict) -> caldav.Calendar:
-    """Connect to a CalDAV server and return the first calendar."""
-    client = caldav.DAVClient(
-        url=provider["url"],
-        username=provider.get("username", ""),
-        password=provider.get("password", ""),
-    )
-    principal = client.principal()
-    calendars = principal.calendars()
-    if not calendars:
-        print("Error: no calendars found for this account", file=sys.stderr)
-        sys.exit(1)
-    return calendars[0]
 
 
 def build_vcalendar(
