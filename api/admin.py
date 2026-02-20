@@ -9,12 +9,17 @@ stored admin password hash.
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import logging
+import secrets
+import urllib.parse
+from base64 import urlsafe_b64encode
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import requests as http_requests
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -30,6 +35,26 @@ if TYPE_CHECKING:
     from core.skills import SkillsStore
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Google OAuth 2.0 constants (for CalDAV calendar access)
+# ---------------------------------------------------------------------------
+
+_GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+# In-memory PKCE state (short-lived, per auth attempt)
+_oauth_pending: dict[str, dict] = {}  # state -> {code_verifier, client_id, client_secret}
+
+
+def _generate_pkce() -> tuple[str, str]:
+    """Generate PKCE code_verifier and code_challenge (S256)."""
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode()).digest()
+    challenge = urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return verifier, challenge
+
 
 # ---------------------------------------------------------------------------
 # Jinja2 template environment
@@ -247,6 +272,34 @@ async def _calendar_providers_context(config_store: ConfigStore) -> list[dict[st
     return cleaned
 
 
+async def _contact_providers_context(config_store: ConfigStore) -> list[dict[str, str]]:
+    raw = await config_store.get("contacts.providers")
+    if not raw:
+        return []
+    try:
+        providers = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(providers, list):
+        return []
+    cleaned: list[dict[str, str]] = []
+    for p in providers:
+        if not isinstance(p, dict):
+            continue
+        cleaned.append(
+            {
+                "name": str(p.get("name", "")),
+                "type": str(p.get("type", "carddav")),
+                "url": str(p.get("url", "")),
+                "username": str(p.get("username", "")),
+                "password": str(p.get("password", "")),
+                "client_id": str(p.get("client_id", "")),
+                "client_secret": str(p.get("client_secret", "")),
+            }
+        )
+    return cleaned
+
+
 def _render_wizard_step(
     step: str,
     steps: list[str],
@@ -332,8 +385,17 @@ class CalendarProvidersIn(BaseModel):
     providers: list[dict[str, str]]
 
 
+class GoogleOAuthClientIn(BaseModel):
+    client_id: str
+    client_secret: str
+
+
 class WhatsAppTestIn(BaseModel):
     pass
+
+
+class ContactProvidersIn(BaseModel):
+    providers: list[dict[str, str]]
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +485,7 @@ def create_admin_app(
     _CHANNEL_PREFIX = "channels."
     _SCHEDULER_PREFIX = "scheduler."
     _CALENDAR_PREFIX = "calendar."
+    _CONTACTS_PREFIX = "contacts."
     _YOU_PREFIX = "you."
     _VOICE_PREFIX = "voice."
     _HISTORY_PREFIX = "history."
@@ -438,6 +501,7 @@ def create_admin_app(
             _CHANNEL_PREFIX,
             _SCHEDULER_PREFIX,
             _CALENDAR_PREFIX,
+            _CONTACTS_PREFIX,
             _YOU_PREFIX,
             _VOICE_PREFIX,
             _HISTORY_PREFIX,
@@ -612,7 +676,30 @@ def create_admin_app(
     async def partial_calendars() -> HTMLResponse:
         """Calendars tab partial."""
         providers = await _calendar_providers_context(config_store)
-        return _render_partial("partials/calendars.html", providers=providers)
+        token_raw = await config_store.get("calendar.google_oauth_token")
+        google_connected = bool(token_raw)
+        client_id = await config_store.get("calendar.google_oauth_client_id") or ""
+        client_secret = await config_store.get("calendar.google_oauth_client_secret") or ""
+        has_oauth_creds = bool(client_id and client_secret)
+        return _render_partial(
+            "partials/calendars.html",
+            providers=providers,
+            google_connected=google_connected,
+            google_client_id=client_id,
+            has_oauth_creds=has_oauth_creds,
+        )
+
+    @app.get("/partials/contacts", dependencies=[Depends(auth)])
+    async def partial_contacts() -> HTMLResponse:
+        """Contacts tab partial."""
+        providers = await _contact_providers_context(config_store)
+        return _render_partial("partials/contacts.html", providers=providers)
+
+    @app.get("/partials/contacts", dependencies=[Depends(auth)])
+    async def partial_contacts() -> HTMLResponse:
+        """Contacts tab partial."""
+        providers = await _contact_providers_context(config_store)
+        return _render_partial("partials/contacts.html", providers=providers)
 
     @app.get("/partials/email", dependencies=[Depends(auth)])
     async def partial_email() -> HTMLResponse:
@@ -1106,6 +1193,190 @@ def create_admin_app(
                 }
             )
         await config_store.set("calendar.providers", json.dumps(providers))
+        return {"ok": True}
+
+    # ── Google Calendar OAuth 2.0 flow ─────────────────────────────────
+
+    @app.post("/calendar/google/oauth/save-credentials", dependencies=[Depends(auth)])
+    async def save_google_oauth_credentials(body: GoogleOAuthClientIn) -> dict:
+        """Save Google OAuth client_id and client_secret to the config store."""
+        await config_store.set("calendar.google_oauth_client_id", body.client_id.strip())
+        await config_store.set("calendar.google_oauth_client_secret", body.client_secret.strip())
+        return {"ok": True}
+
+    @app.get("/calendar/google/oauth/start", dependencies=[Depends(auth)])
+    async def google_oauth_start(request: Request) -> dict:
+        """Initiate the Google OAuth 2.0 flow.
+
+        Returns the authorization URL for the frontend to open in a popup.
+        """
+        client_id = await config_store.get("calendar.google_oauth_client_id")
+        client_secret = await config_store.get("calendar.google_oauth_client_secret")
+        if not client_id or not client_secret:
+            raise HTTPException(
+                400,
+                "Google OAuth client_id and client_secret must be configured first.",
+            )
+
+        code_verifier, code_challenge = _generate_pkce()
+        state = secrets.token_urlsafe(32)
+
+        # Build the callback URL based on the current request
+        callback_url = str(request.base_url).rstrip("/") + "/calendar/google/oauth/callback"
+
+        _oauth_pending[state] = {
+            "code_verifier": code_verifier,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": callback_url,
+        }
+
+        params = {
+            "client_id": client_id,
+            "redirect_uri": callback_url,
+            "response_type": "code",
+            "scope": " ".join(_GOOGLE_CALENDAR_SCOPES),
+            "access_type": "offline",
+            "prompt": "consent",
+            "code_challenge_method": "S256",
+            "code_challenge": code_challenge,
+            "state": state,
+        }
+        auth_url = f"{_GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}"
+        return {"auth_url": auth_url}
+
+    @app.get("/calendar/google/oauth/callback")
+    async def google_oauth_callback(code: str = "", state: str = "", error: str = ""):
+        """Handle the OAuth 2.0 callback from Google.
+
+        This is opened in a popup window — no auth header needed since
+        Google redirects the browser here directly.
+        """
+        if error:
+            return HTMLResponse(
+                f"<html><body><h2>Authorization failed: {error}</h2>"
+                f"<script>window.opener && window.opener.postMessage("
+                f"{{type:'google-oauth-error',error:'{error}'}},'*');"
+                f"setTimeout(()=>window.close(),2000)</script></body></html>"
+            )
+
+        pending = _oauth_pending.pop(state, None)
+        if not pending:
+            return HTMLResponse(
+                "<html><body><h2>Invalid or expired OAuth state.</h2>"
+                "<p>Please try connecting again.</p></body></html>",
+                status_code=400,
+            )
+
+        # Exchange the authorization code for tokens
+        try:
+            resp = http_requests.post(
+                _GOOGLE_TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": pending["client_id"],
+                    "client_secret": pending["client_secret"],
+                    "redirect_uri": pending["redirect_uri"],
+                    "grant_type": "authorization_code",
+                    "code_verifier": pending["code_verifier"],
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            token_data = resp.json()
+        except Exception as exc:
+            log.exception("Google OAuth token exchange failed")
+            return HTMLResponse(
+                f"<html><body><h2>Token exchange failed</h2><p>{exc}</p></body></html>",
+                status_code=500,
+            )
+
+        if "refresh_token" not in token_data:
+            return HTMLResponse(
+                "<html><body><h2>No refresh token received</h2>"
+                "<p>You may need to revoke access in your Google account and try again.</p>"
+                "</body></html>",
+                status_code=400,
+            )
+
+        # Save token to ConfigStore
+        token_out = {
+            "client_id": pending["client_id"],
+            "client_secret": pending["client_secret"],
+            "refresh_token": token_data["refresh_token"],
+            "token_type": "Bearer",
+        }
+        await config_store.set("calendar.google_oauth_token", json.dumps(token_out))
+        log.info("Google Calendar OAuth token saved to config store")
+
+        return HTMLResponse(
+            "<html><body><h2>Google Calendar connected!</h2>"
+            "<p>You can close this window.</p>"
+            "<script>window.opener && window.opener.postMessage("
+            "{type:'google-oauth-success'},'*');"
+            "setTimeout(()=>window.close(),2000)</script></body></html>"
+        )
+
+    @app.get("/calendar/google/oauth/status", dependencies=[Depends(auth)])
+    async def google_oauth_status() -> dict:
+        """Check if a Google OAuth token is stored."""
+        token_raw = await config_store.get("calendar.google_oauth_token")
+        has_token = bool(token_raw)
+        client_id = await config_store.get("calendar.google_oauth_client_id") or ""
+        return {"connected": has_token, "client_id": client_id}
+
+    @app.post("/contacts/providers", dependencies=[Depends(auth)])
+    async def save_contact_providers(body: ContactProvidersIn) -> dict:
+        providers = []
+        for p in body.providers:
+            name = str(p.get("name", "")).strip()
+            provider_type = str(p.get("type", "carddav")).strip() or "carddav"
+            url = str(p.get("url", "")).strip()
+            username = str(p.get("username", "")).strip()
+            password = str(p.get("password", "")).strip()
+            client_id = str(p.get("client_id", "")).strip()
+            client_secret = str(p.get("client_secret", "")).strip()
+            if not any([name, url, username, password, client_id, client_secret]):
+                continue
+            providers.append(
+                {
+                    "name": name,
+                    "type": provider_type,
+                    "url": url,
+                    "username": username,
+                    "password": password,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                }
+            )
+        await config_store.set("contacts.providers", json.dumps(providers))
+        return {"ok": True}
+
+    @app.post("/contacts/providers", dependencies=[Depends(auth)])
+    async def save_contact_providers(body: ContactProvidersIn) -> dict:
+        providers = []
+        for p in body.providers:
+            name = str(p.get("name", "")).strip()
+            provider_type = str(p.get("type", "carddav")).strip() or "carddav"
+            url = str(p.get("url", "")).strip()
+            username = str(p.get("username", "")).strip()
+            password = str(p.get("password", "")).strip()
+            client_id = str(p.get("client_id", "")).strip()
+            client_secret = str(p.get("client_secret", "")).strip()
+            if not any([name, url, username, password, client_id, client_secret]):
+                continue
+            providers.append(
+                {
+                    "name": name,
+                    "type": provider_type,
+                    "url": url,
+                    "username": username,
+                    "password": password,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                }
+            )
+        await config_store.set("contacts.providers", json.dumps(providers))
         return {"ok": True}
 
     # ── Permissions API ────────────────────────────────────────────────

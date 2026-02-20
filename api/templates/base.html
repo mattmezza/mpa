@@ -227,7 +227,7 @@
     }
     window.searchTab = searchTab;
 
-    function calendarTab(providers) {
+    function calendarTab(providers, googleConnected, googleClientId, hasOAuthCreds) {
       const list = Array.isArray(providers) ? providers : [];
       return {
         providers: list.map((p, idx) => ({
@@ -240,6 +240,15 @@
         status: '',
         result: '',
         ok: false,
+        // Google OAuth state
+        googleConnected: !!googleConnected,
+        oauthClientId: googleClientId || '',
+        oauthClientSecret: '',
+        hasOAuthCreds: !!hasOAuthCreds,
+        oauthStatus: '',
+        oauthResult: '',
+        oauthOk: false,
+
         addProvider() {
           this.providers.push({
             id: String(Date.now() + Math.random()),
@@ -252,6 +261,90 @@
         removeProvider(index) {
           this.providers.splice(index, 1);
         },
+
+        saveOAuthCreds() {
+          this.oauthStatus = 'Saving...';
+          this.oauthResult = '';
+          fetch('/calendar/google/oauth/save-credentials', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+            },
+            body: JSON.stringify({
+              client_id: this.oauthClientId.trim(),
+              client_secret: this.oauthClientSecret.trim()
+            })
+          })
+            .then(r => r.json())
+            .then(data => {
+              if (data.ok) {
+                this.hasOAuthCreds = true;
+                this.oauthOk = true;
+                this.oauthResult = 'OAuth credentials saved';
+                this.oauthStatus = '';
+                if (window.showToast) { window.showToast('OAuth credentials saved'); }
+              } else {
+                this.oauthOk = false;
+                this.oauthResult = data.detail || data.error || 'Save failed';
+                this.oauthStatus = '';
+              }
+            })
+            .catch(e => {
+              this.oauthOk = false;
+              this.oauthResult = e.message || 'Network error';
+              this.oauthStatus = '';
+            });
+        },
+
+        connectGoogle() {
+          this.oauthStatus = 'Starting OAuth flow...';
+          this.oauthResult = '';
+          const self = this;
+
+          // Listen for postMessage from the OAuth popup
+          function onMessage(event) {
+            if (event.data && event.data.type === 'google-oauth-success') {
+              self.googleConnected = true;
+              self.oauthOk = true;
+              self.oauthResult = 'Google Calendar connected!';
+              self.oauthStatus = '';
+              if (window.showToast) { window.showToast('Google Calendar connected!'); }
+              window.removeEventListener('message', onMessage);
+            } else if (event.data && event.data.type === 'google-oauth-error') {
+              self.oauthOk = false;
+              self.oauthResult = 'Authorization failed: ' + (event.data.error || 'unknown');
+              self.oauthStatus = '';
+              window.removeEventListener('message', onMessage);
+            }
+          }
+          window.addEventListener('message', onMessage);
+
+          fetch('/calendar/google/oauth/start', {
+            headers: {
+              'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+            }
+          })
+            .then(r => r.json())
+            .then(data => {
+              if (data.auth_url) {
+                this.oauthStatus = 'Waiting for Google authorization...';
+                window.open(data.auth_url, 'google-oauth', 'width=600,height=700');
+              } else {
+                this.oauthOk = false;
+                this.oauthResult = data.detail || 'Failed to start OAuth flow';
+                this.oauthStatus = '';
+                window.removeEventListener('message', onMessage);
+              }
+            })
+            .catch(e => {
+              this.oauthOk = false;
+              this.oauthResult = e.message || 'Network error';
+              this.oauthStatus = '';
+              window.removeEventListener('message', onMessage);
+            });
+        },
+
         saveProviders() {
           this.status = 'Saving...';
           const cleaned = this.providers
@@ -297,6 +390,84 @@
       };
     }
     window.calendarTab = calendarTab;
+
+    function contactsTab(providers) {
+      const list = Array.isArray(providers) ? providers : [];
+      return {
+        providers: list.map((p, idx) => ({
+          id: p.id || String(Date.now() + idx),
+          name: p.name || '',
+          type: p.type || 'carddav',
+          url: p.url || '',
+          username: p.username || '',
+          password: p.password || '',
+          client_id: p.client_id || '',
+          client_secret: p.client_secret || ''
+        })),
+        status: '',
+        result: '',
+        ok: false,
+        addProvider() {
+          this.providers.push({
+            id: String(Date.now() + Math.random()),
+            name: '',
+            type: 'carddav',
+            url: '',
+            username: '',
+            password: '',
+            client_id: '',
+            client_secret: ''
+          });
+        },
+        removeProvider(index) {
+          this.providers.splice(index, 1);
+        },
+        saveProviders() {
+          this.status = 'Saving...';
+          const cleaned = this.providers
+            .map(p => ({
+              name: (p.name || '').trim(),
+              type: (p.type || 'carddav').trim(),
+              url: (p.url || '').trim(),
+              username: (p.username || '').trim(),
+              password: (p.password || '').trim(),
+              client_id: (p.client_id || '').trim(),
+              client_secret: (p.client_secret || '').trim()
+            }))
+            .filter(p => p.name || p.url || p.username || p.password || p.client_id || p.client_secret);
+          fetch('/contacts/providers', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+            },
+            body: JSON.stringify({providers: cleaned})
+          })
+            .then(async r => {
+              const text = await r.text();
+              let data = {};
+              try {
+                data = text ? JSON.parse(text) : {};
+              } catch (err) {
+                data = {error: text || 'Invalid response'};
+              }
+              return {ok: r.ok, data};
+            })
+            .then(({ok, data}) => {
+              this.ok = ok && data.ok;
+              this.result = this.ok ? 'Contacts saved' : (data.error || 'Save failed');
+              this.status = '';
+              if (this.ok && window.showToast) { window.showToast('Contacts saved'); }
+            })
+            .catch(e => {
+              this.ok = false;
+              this.result = e.message || 'Network error';
+              this.status = '';
+            });
+        }
+      };
+    }
+    window.contactsTab = contactsTab;
 
     function emailTab(toml) {
       return {
