@@ -297,8 +297,10 @@ class TelegramChannel:
         """Send an AgentResponse back — voice if present, otherwise text."""
         if response.voice:
             await self.app.bot.send_voice(chat_id=chat_id, voice=response.voice)
-        else:
+        elif response.text:
             await self.app.bot.send_message(chat_id=chat_id, text=response.text)
+        else:
+            log.warning("Skipping empty response for chat_id=%s", chat_id)
 
     async def _finalize_approval_response(
         self, query: CallbackQuery, resolved: bool, label: str

@@ -300,7 +300,7 @@ class MemoryStore:
         )
 
         try:
-            raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=1024)
+            raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=4096)
         except Exception:
             log.exception("Memory extraction LLM call failed")
             return 0
@@ -498,7 +498,7 @@ class MemoryStore:
         )
 
         try:
-            raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=1024)
+            raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=4096)
         except Exception:
             log.exception("Consolidation LLM call failed")
             return 0
