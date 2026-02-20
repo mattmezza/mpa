@@ -15,6 +15,7 @@ from tavily import TavilyClient
 
 from core.config import Config
 from core.executor import ToolExecutor
+from core.goal_decomposition import DecomposedGoal, classify_complexity, decompose_goal
 from core.history import ConversationHistory
 from core.job_store import JobStore
 from core.llm import LLMClient, LLMToolCall
@@ -23,6 +24,7 @@ from core.models import AgentResponse, Attachment
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
 from core.scheduler import AgentScheduler
 from core.skills import SkillsEngine
+from core.task_reflection import ReflectionStore
 from voice.pipeline import VoicePipeline
 
 log = logging.getLogger(__name__)
@@ -246,6 +248,10 @@ class AgentCore:
             db_path=config.memory.db_path,
             long_term_limit=config.memory.long_term_limit,
         )
+        self.reflections = ReflectionStore(
+            db_path=config.task_reflection.db_path,
+            max_reflections=config.task_reflection.max_reflections,
+        )
         self.channels: dict = {}
         self.voice: VoicePipeline | None = None
         self.job_store = JobStore(db_path="data/jobs.db")
@@ -293,7 +299,12 @@ class AgentCore:
             )
             return AgentResponse(text="Conversation cleared.")
 
-        system = await self._build_system_prompt()
+        # Goal decomposition — classify and (if complex) decompose the request
+        decomposed_goal: DecomposedGoal | None = None
+        if self.config.goal_decomposition.enabled and channel != "system":
+            decomposed_goal = await self._maybe_decompose(message)
+
+        system = await self._build_system_prompt(decomposed_goal=decomposed_goal)
 
         if self.history_mode == "session":
             return await self._process_session(
@@ -362,10 +373,12 @@ class AgentCore:
 
         # Agentic loop — keep going while the LLM wants to call tools
         request_state = {"write_executed": False, "write_decision": None, "approvals": {}}
+        tool_log: list[dict] = []
         while response.tool_calls:
             tool_results = []
             for call in response.tool_calls:
                 result = await self._execute_tool(call, channel, user_id, request_state)
+                tool_log.append({"name": call.name, "args": call.arguments, "result": result})
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -402,6 +415,13 @@ class AgentCore:
             asyncio.create_task(
                 self._extract_memories(message, final_text),
                 name=f"memory-extract-{user_id}",
+            )
+
+        # Automatic task reflection (when tools were used)
+        if channel != "system" and self.config.task_reflection.enabled and tool_log:
+            asyncio.create_task(
+                self._reflect_on_task(message, final_text, tool_log),
+                name=f"task-reflect-{user_id}",
             )
 
         return AgentResponse(text=final_text, voice=voice_bytes)
@@ -448,10 +468,12 @@ class AgentCore:
         # Agentic loop — keep going while the LLM wants to call tools
         new_messages: list[dict] = []
         request_state = {"write_executed": False, "write_decision": None, "approvals": {}}
+        tool_log: list[dict] = []
         while response.tool_calls:
             tool_results = []
             for call in response.tool_calls:
                 result = await self._execute_tool(call, channel, user_id, request_state)
+                tool_log.append({"name": call.name, "args": call.arguments, "result": result})
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -498,6 +520,13 @@ class AgentCore:
             asyncio.create_task(
                 self._extract_memories(message, final_text),
                 name=f"memory-extract-{user_id}",
+            )
+
+        # Automatic task reflection (when tools were used)
+        if channel != "system" and self.config.task_reflection.enabled and tool_log:
+            asyncio.create_task(
+                self._reflect_on_task(message, final_text, tool_log),
+                name=f"task-reflect-{user_id}",
             )
 
         return AgentResponse(text=final_text, voice=voice_bytes)
@@ -945,6 +974,15 @@ class AgentCore:
         existing client is reused; otherwise a new one is created using the
         API key / base-URL already stored in the agent config.
         """
+        return self._background_llm(provider)
+
+    def _background_llm(self, provider: str) -> LLMClient:
+        """Return an LLM client for background tasks (memory, reflection, etc.).
+
+        If the requested provider matches the main inference provider the
+        existing client is reused; otherwise a new one is created using the
+        API key / base-URL already stored in the agent config.
+        """
         if provider == self.llm.provider:
             return self.llm
         cfg = self.config.agent
@@ -954,7 +992,54 @@ class AgentCore:
             base_url=getattr(cfg, f"{provider}_base_url", None),
         )
 
-    async def _build_system_prompt(self) -> str:
+    async def _maybe_decompose(self, message: str) -> DecomposedGoal | None:
+        """Classify and optionally decompose a user message into sub-goals.
+
+        Returns None if the message is simple or decomposition fails/is disabled.
+        """
+        gd_cfg = self.config.goal_decomposition
+        llm = self._background_llm(gd_cfg.provider)
+
+        try:
+            is_complex = await classify_complexity(llm, gd_cfg.model, message)
+        except Exception:
+            log.exception("Goal complexity classification failed")
+            return None
+
+        if not is_complex:
+            log.debug("Message classified as SIMPLE, skipping decomposition")
+            return None
+
+        log.info("Message classified as COMPLEX, decomposing...")
+        try:
+            return await decompose_goal(llm, gd_cfg.model, message)
+        except Exception:
+            log.exception("Goal decomposition failed")
+            return None
+
+    async def _reflect_on_task(self, user_msg: str, agent_msg: str, tool_log: list[dict]) -> None:
+        """Run task reflection in the background after tool-use.
+
+        Uses a cheap/fast model to analyse the execution and extract
+        lessons learned. Exceptions are logged and swallowed — this must
+        never crash the main agent loop.
+        """
+        try:
+            tr_cfg = self.config.task_reflection
+            llm = self._background_llm(tr_cfg.provider)
+            stored = await self.reflections.reflect_on_task(
+                llm=llm,
+                model=tr_cfg.model,
+                user_msg=user_msg,
+                agent_msg=agent_msg,
+                tool_log=tool_log,
+            )
+            if stored:
+                log.info("Background task reflection stored a lesson")
+        except Exception:
+            log.exception("Background task reflection failed")
+
+    async def _build_system_prompt(self, decomposed_goal: DecomposedGoal | None = None) -> str:
         cfg = self.config.agent
         skills_index = await self.skills.get_index_block()
         character = cfg.character
@@ -964,6 +1049,14 @@ class AgentCore:
             f"<about_user>\n{you_personalia}\n</about_user>\n\n" if you_personalia.strip() else ""
         )
         memories = await self.memory.format_for_prompt()
+
+        # Task reflections — lessons learned from past tasks
+        reflections = ""
+        if self.config.task_reflection.enabled:
+            try:
+                reflections = await self.reflections.format_for_prompt()
+            except Exception:
+                log.exception("Failed to load task reflections for prompt")
 
         tz = ZoneInfo(cfg.timezone)
         now = datetime.now(tz)
@@ -1030,6 +1123,24 @@ Use earlier messages only to understand context, resolve references (e.g. "that"
 <available_skills>
 {skills_index}
 </available_skills>"""
+
+        if reflections:
+            prompt += f"""
+
+<task_reflections>
+{reflections}
+</task_reflections>"""
+
+        if decomposed_goal:
+            prompt += f"""
+
+<execution_plan>
+The user's request has been analysed and broken into the following sub-goals.
+Follow this plan step-by-step, completing each sub-goal in order (respecting
+dependencies). Report progress as you go.
+
+{decomposed_goal.format_for_prompt()}
+</execution_plan>"""
 
         return prompt
 
