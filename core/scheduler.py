@@ -11,6 +11,8 @@ Three job types:
 from __future__ import annotations
 
 import logging
+import shlex
+import shutil
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -94,6 +96,7 @@ async def run_system_command(command: str) -> None:
         log.error("Scheduler system command dropped; agent not initialized")
         return
 
+    command = _maybe_rewrite_vdirsyncer(command)
     log.info("Scheduler running system command: %s", command[:100])
     try:
         result = await agent.executor.run_command_trusted(command)
@@ -105,6 +108,22 @@ async def run_system_command(command: str) -> None:
             )
     except Exception:
         log.exception("Scheduler system command failed: %s", command[:100])
+
+
+def _maybe_rewrite_vdirsyncer(command: str) -> str:
+    """Fallback to python -m vdirsyncer if binary isn't in PATH."""
+    stripped = command.strip()
+    if not stripped.startswith("vdirsyncer"):
+        return command
+    if shutil.which("vdirsyncer"):
+        return command
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return command
+    if not parts or parts[0] != "vdirsyncer":
+        return command
+    return shlex.join(["python3", "-m", "vdirsyncer", *parts[1:]])
 
 
 async def run_memory_consolidation() -> None:

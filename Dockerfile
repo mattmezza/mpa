@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg curl ca-certificates jq sqlite3 \
     bash tar gzip xz-utils \
     golang build-essential pkg-config \
+    nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Himalaya CLI (pre-built Rust binary for email management)
@@ -47,11 +48,13 @@ RUN mkdir -p /home/mpa/.config/himalaya /home/mpa/.config/khard /home/mpa/.confi
     /home/mpa/.local/share/vdirsyncer /app/data \
     && chown -R mpa:mpa /home/mpa /app
 
+# Build wacli
+RUN corepack enable && \
+    corepack prepare pnpm@9.15.2 --activate && \
+    cd tools/wacli && \
+    pnpm -s build
+
 USER mpa
 
 EXPOSE 8000
 CMD ["uv", "run", "python", "-m", "core.main"]
-# Build wacli
-RUN corepack enable && \
-    cd tools/wacli && \
-    pnpm -s build

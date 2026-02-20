@@ -7,6 +7,11 @@
 .pytest_cache/
 __pycache__/
 data/
+tailwindcss/
+tests/
+tools/wacli/.turbo/
+tools/wacli/.next/
+tools/wacli/node_modules/
 *.md
 !skills/*.md
 .tmux-session
