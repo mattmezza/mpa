@@ -389,7 +389,6 @@ def create_admin_app(
     @app.on_event("shutdown")
     async def _shutdown_wacli() -> None:
         await wacli.stop_auth()
-        await wacli.stop_sync()
 
     # Mount static files
     static_dir = Path(__file__).parent / "static"
@@ -1210,7 +1209,6 @@ def create_admin_app(
         if not enabled:
             try:
                 await wacli.stop_auth()
-                await wacli.stop_sync()
             except Exception as exc:
                 log.warning("Failed to stop WhatsApp auth: %s", exc)
         channel_data = await _channel_list_context(config_store, wacli)
@@ -1241,7 +1239,6 @@ def create_admin_app(
     @app.post("/channels/whatsapp/auth/stop", dependencies=[Depends(auth)])
     async def whatsapp_auth_stop() -> dict:
         await wacli.stop_auth()
-        await wacli.stop_sync()
         return {"ok": True}
 
     @app.get("/channels/whatsapp/auth/qr", dependencies=[Depends(auth)])
@@ -1257,15 +1254,10 @@ def create_admin_app(
         await wacli.logout()
         return {"ok": True}
 
-    @app.post("/channels/whatsapp/sync/start", dependencies=[Depends(auth)])
-    async def whatsapp_sync_start() -> dict:
-        await wacli.start_sync()
-        return {"ok": True}
-
-    @app.post("/channels/whatsapp/sync/stop", dependencies=[Depends(auth)])
-    async def whatsapp_sync_stop() -> dict:
-        await wacli.stop_sync()
-        return {"ok": True}
+    @app.post("/channels/whatsapp/sync", dependencies=[Depends(auth)])
+    async def whatsapp_sync() -> dict:
+        res = await wacli.sync_once()
+        return {"ok": res.get("success") is True, "response": res}
 
     @app.post("/channels/whatsapp/send", dependencies=[Depends(auth)])
     async def whatsapp_send(request: Request) -> dict:

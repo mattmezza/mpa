@@ -31,7 +31,6 @@ class WacliManager:
     bin_path: str = field(default_factory=default_wacli_bin)
     store_dir: str = field(default_factory=default_wacli_store)
     auth_proc: asyncio.subprocess.Process | None = None
-    sync_proc: asyncio.subprocess.Process | None = None
     latest_qr: str = ""
     latest_qr_at: float = 0.0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -128,35 +127,12 @@ class WacliManager:
                 self.latest_qr = qr
                 self.latest_qr_at = time.time()
 
-    async def start_sync(self) -> None:
-        async with self.lock:
-            if self.sync_proc is not None or not self.available():
-                return
-            self.sync_proc = await asyncio.create_subprocess_exec(
-                self.bin_path,
-                "--store",
-                self.store_dir,
-                "sync",
-                "--follow",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-
-    async def stop_sync(self) -> None:
-        async with self.lock:
-            proc = self.sync_proc
-            if proc is None:
-                return
-            self.sync_proc = None
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                proc.kill()
+    async def sync_once(self) -> dict[str, Any]:
+        """Run a single sync pass (non-blocking, no long-lived process)."""
+        return await self._run_json(["sync", "--once"])
 
     async def logout(self) -> None:
         await self.stop_auth()
-        await self.stop_sync()
         await self._run_json(["auth", "logout"])
         try:
             await asyncio.to_thread(lambda: shutil.rmtree(self.store_dir, ignore_errors=True))
@@ -164,14 +140,7 @@ class WacliManager:
             pass
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
-        was_syncing = self.sync_proc is not None
-        if was_syncing:
-            await self.stop_sync()
-        try:
-            return await self._run_json(["send", "text", "--to", to, "--message", text])
-        finally:
-            if was_syncing:
-                await self.start_sync()
+        return await self._run_json(["send", "text", "--to", to, "--message", text])
 
     async def list_messages(self, limit: int = 100) -> list[dict[str, Any]]:
         res = await self._run_json(["messages", "list", "--limit", str(limit)])

@@ -533,14 +533,6 @@
           panel.style.display = 'none';
           result.textContent = 'WhatsApp authenticated.';
           result.className = 'alert-success';
-          try {
-            await fetch('/channels/whatsapp/sync/start', {
-              method: 'POST',
-              headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
-            });
-          } catch (e) {
-            // ignore sync start errors
-          }
           return;
         }
         panel.style.display = 'block';
@@ -581,6 +573,32 @@
     tick();
   }
 
+  async function syncWhatsApp() {
+    const result = document.getElementById('channel-wizard-result');
+    if (!result) return;
+    result.textContent = 'Syncing messages...';
+    result.className = 'alert-info';
+    try {
+      const r = await fetch('/channels/whatsapp/sync', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+        }
+      });
+      const d = await r.json();
+      if (d.ok) {
+        result.textContent = 'Sync completed.';
+        result.className = 'alert-success';
+      } else {
+        result.textContent = d.error || d.response?.error || 'Sync failed.';
+        result.className = 'alert-error';
+      }
+    } catch (e) {
+      result.textContent = e.message || 'Sync failed.';
+      result.className = 'alert-error';
+    }
+  }
+
   async function refreshWhatsAppAuth() {
     const result = document.getElementById('channel-wizard-result');
     const panel = document.getElementById('wa-auth-panel');
@@ -594,14 +612,6 @@
         panel.style.display = 'none';
         result.textContent = 'WhatsApp already authenticated.';
         result.className = 'alert-success';
-        try {
-          await fetch('/channels/whatsapp/sync/start', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
-          });
-        } catch (e) {
-          // ignore sync start errors
-        }
         return;
       }
       if (status.running) {
