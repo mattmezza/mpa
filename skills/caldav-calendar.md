@@ -1,24 +1,31 @@
 # Calendar Management (CalDAV)
 
 Calendar operations use helper scripts that wrap Python's caldav library.
+Calendar providers are configured via the admin UI.
 
-## Available calendars
+## Discovering available calendars
 
-- `google` — Matteo's Google Calendar (primary, work events)
-- `icloud` — Shared family calendar
+```bash
+python3 /app/tools/calendar_read.py --list -o json
+```
+
+Returns a JSON array of provider names, e.g. `["google", "icloud"]`.
+Always run this first if you are unsure which calendars are configured.
 
 ## Reading events
 
 ```bash
 # Get today's events
-python3 /app/tools/calendar_read.py --calendar google --today -o json
+python3 /app/tools/calendar_read.py --calendar <NAME> --today -o json
 
 # Get events for a date range
-python3 /app/tools/calendar_read.py --calendar google --from 2025-02-17 --to 2025-02-24 -o json
+python3 /app/tools/calendar_read.py --calendar <NAME> --from YYYY-MM-DD --to YYYY-MM-DD -o json
 
 # Get next N events
-python3 /app/tools/calendar_read.py --calendar google --next 5 -o json
+python3 /app/tools/calendar_read.py --calendar <NAME> --next N -o json
 ```
+
+Replace `<NAME>` with a provider name from `--list`.
 
 JSON output:
 
@@ -37,15 +44,14 @@ JSON output:
 
 ## Creating events
 
-Use the `create_calendar_event` structured tool (requires permission). Provide:
-- `calendar`: "google" or "icloud"
+Use the `create_calendar_event` structured tool (requires user permission). Provide:
+- `calendar`: provider name from `--list`
 - `summary`: event title
-- `start`: ISO datetime with timezone (e.g. "2025-02-20T14:00:00+01:00")
-- `end`: ISO datetime with timezone
-- `attendees`: optional list of email addresses (sends invites automatically)
+- `start`: ISO 8601 datetime with timezone (e.g. "2025-02-20T14:00:00+01:00")
+- `end`: ISO 8601 datetime with timezone
+- `attendees`: optional list of email addresses
 
 ## Important notes
 
-- Always include timezone (Europe/Zurich = UTC+1, UTC+2 during DST).
+- Always include timezone offset in datetimes (Europe/Zurich = +01:00, +02:00 during DST).
 - For all-day events, use date only: "2025-02-20".
-- Use `google` calendar for work events, `icloud` for family/personal.

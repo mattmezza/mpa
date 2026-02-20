@@ -92,11 +92,14 @@ def format_event_text(ev: dict) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Read CalDAV calendar events")
-    parser.add_argument("--calendar", "-c", required=True, help="Calendar provider name")
+    parser.add_argument("--calendar", "-c", help="Calendar provider name")
     parser.add_argument("--config", default="config.yml", help="Path to config.yml")
+    parser.add_argument(
+        "--list", action="store_true", help="List available calendar providers and exit"
+    )
 
     # Query modes (mutually exclusive)
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group()
     group.add_argument("--today", action="store_true", help="Get today's events")
     group.add_argument("--from", dest="from_date", metavar="DATE", help="Start date (YYYY-MM-DD)")
     group.add_argument("--next", type=int, metavar="N", help="Get next N upcoming events")
@@ -110,8 +113,25 @@ def main():
 
     args = parser.parse_args()
 
-    # Load provider
+    # Load providers
     providers = load_calendar_providers(args.config)
+
+    if args.list:
+        if not providers:
+            print("No calendar providers configured.")
+        elif args.output == "json":
+            print(json.dumps(list(providers.keys())))
+        else:
+            for name in providers:
+                print(f"  - {name}")
+        sys.exit(0)
+
+    if not args.calendar:
+        parser.error("--calendar/-c is required (use --list to see available providers)")
+
+    if not any([args.today, args.from_date, args.next is not None]):
+        parser.error("one of --today, --from, --next is required (or use --list)")
+
     if args.calendar not in providers:
         available = ", ".join(providers.keys()) if providers else "(none configured)"
         print(
