@@ -6,7 +6,7 @@ Calendar providers are configured via the admin UI.
 ## Discovering available calendars
 
 ```bash
-python3 /app/tools/calendar_read.py --list -o json
+python3 ./tools/calendar_read.py --list -o json
 ```
 
 Returns a JSON array of provider names, e.g. `["google", "icloud"]`.
@@ -16,13 +16,13 @@ Always run this first if you are unsure which calendars are configured.
 
 ```bash
 # Get today's events
-python3 /app/tools/calendar_read.py --calendar <NAME> --today -o json
+python3 ./tools/calendar_read.py --calendar <NAME> --today -o json
 
 # Get events for a date range
-python3 /app/tools/calendar_read.py --calendar <NAME> --from YYYY-MM-DD --to YYYY-MM-DD -o json
+python3 ./tools/calendar_read.py --calendar <NAME> --from YYYY-MM-DD --to YYYY-MM-DD -o json
 
 # Get next N events
-python3 /app/tools/calendar_read.py --calendar <NAME> --next N -o json
+python3 ./tools/calendar_read.py --calendar <NAME> --next N -o json
 ```
 
 Replace `<NAME>` with a provider name from `--list`.
