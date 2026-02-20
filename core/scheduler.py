@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -175,10 +176,11 @@ class AgentScheduler:
     def __init__(self, agent: AgentCore, job_store: JobStore):
         self.agent = agent
         self.job_store = job_store
+        self.tz = ZoneInfo(agent.config.agent.timezone)
         set_agent_context(agent)
         # In-memory only scheduler — no SQLAlchemy jobstore.
         # Jobs are persisted in JobStore; APScheduler just runs them.
-        self.scheduler = AsyncIOScheduler()
+        self.scheduler = AsyncIOScheduler(timezone=self.tz)
 
     async def load_jobs(self) -> None:
         """Load all active jobs from JobStore into APScheduler."""
@@ -208,8 +210,11 @@ class AgentScheduler:
                         "One-shot job %r has invalid run_at %r; skipping", job_id, run_at_str
                     )
                     return
+                # Treat naive datetimes as being in the configured timezone
+                if run_at.tzinfo is None:
+                    run_at = run_at.replace(tzinfo=self.tz)
                 # Skip one-shots in the past
-                if run_at < datetime.now(run_at.tzinfo):
+                if run_at < datetime.now(self.tz):
                     log.info("One-shot job %r is in the past; marking done", job_id)
                     # Can't await here, but we'll handle it in load_jobs
                     return

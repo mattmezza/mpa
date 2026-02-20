@@ -9,6 +9,7 @@ import shlex
 import uuid
 from datetime import datetime
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from tavily import TavilyClient
 
@@ -199,7 +200,11 @@ TOOLS = [
                 },
                 "run_at": {
                     "type": "string",
-                    "description": "For one-time jobs: ISO datetime when the task should run",
+                    "description": (
+                        "For one-time jobs: ISO datetime with timezone offset when the task "
+                        "should run (e.g. '2026-02-21T09:00:00+01:00'). "
+                        "If no offset is provided, the user's configured timezone is assumed."
+                    ),
                 },
                 "cron": {
                     "type": "string",
@@ -806,6 +811,11 @@ class AgentCore:
                 except ValueError:
                     return {"error": f"Invalid datetime format: {run_at_str!r}. Use ISO format."}
 
+                # Treat naive datetimes as being in the configured timezone
+                if run_at.tzinfo is None:
+                    tz = ZoneInfo(self.config.agent.timezone)
+                    run_at = run_at.replace(tzinfo=tz)
+
                 job = await self.job_store.upsert_job(
                     job_id=job_id,
                     type="agent",
@@ -955,9 +965,12 @@ class AgentCore:
         )
         memories = await self.memory.format_for_prompt()
 
+        tz = ZoneInfo(cfg.timezone)
+        now = datetime.now(tz)
+
         prompt = f"""You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.
 
-Today is {datetime.now().strftime("%A, %B %d, %Y")}. Timezone: {cfg.timezone}.
+Today is {now.strftime("%A, %B %d, %Y")}. Current time: {now.strftime("%H:%M")}. Timezone: {cfg.timezone}.
 
 <personalia>
 {personalia}

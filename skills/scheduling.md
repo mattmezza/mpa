@@ -30,7 +30,7 @@ There are two ways to manage jobs:
   "action": "create",
   "job_id": "remind-nick-email",
   "task": "Remind me to reply to Nick's email about the project deadline",
-  "run_at": "2026-02-21T09:00:00",
+  "run_at": "2026-02-21T09:00:00+01:00",
   "channel": "telegram",
   "description": "One-time reminder"
 }
@@ -103,7 +103,7 @@ python3 /app/tools/jobs.py create --id daily-standup \
 
 ```bash
 python3 /app/tools/jobs.py create --id remind-call \
-  --once "2026-02-21T14:30:00" \
+  --once "2026-02-21T14:30:00+01:00" \
   --type agent \
   --task "Remind me about the call with the design team" \
   --channel telegram
