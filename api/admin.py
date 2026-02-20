@@ -143,7 +143,7 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
                     ctx["cal_url"] = p.get("url", "")
                     ctx["cal_username"] = p.get("username", "")
                     ctx["cal_password"] = p.get("password", "")
-            except json.JSONDecodeError, IndexError:
+            except (json.JSONDecodeError, IndexError):
                 pass
     elif step == "search":
         val = await config_store.get("search.api_key")
@@ -1685,7 +1685,7 @@ def create_admin_app(
         # Coerce to int (form-encoded values arrive as strings)
         try:
             memory_id = int(cast(str, memory_id_raw))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             raise HTTPException(400, "memory_id must be an integer")
 
         import aiosqlite
