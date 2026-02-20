@@ -45,6 +45,13 @@
     function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel) {
       const currentProvider = provider || 'anthropic';
       return {
+        providerOptions: [
+          {value: 'anthropic', label: 'Anthropic'},
+          {value: 'openai', label: 'OpenAI'},
+          {value: 'google', label: 'Google Gemini'},
+          {value: 'grok', label: 'Grok (xAI)'},
+          {value: 'deepseek', label: 'DeepSeek'}
+        ],
         provider: currentProvider,
         apiKey: apiKey || '',
         model: model || '',
@@ -114,6 +121,7 @@
           ]
         },
         init() {
+          const savedProvider = this.provider;
           // Preserve the server-provided values after Alpine's x-for has
           // rendered the <option> elements — without this the browser
           // resets <select> to the first option before options exist.
@@ -121,9 +129,14 @@
           const savedExtraction = this.extractionModel;
           const savedConsolidation = this.consolidationModel;
           this.$nextTick(() => {
+            const validProvider = this.providerOptions.some(item => item.value === savedProvider);
+            this.provider = validProvider ? savedProvider : 'anthropic';
             this.model = savedModel;
             this.extractionModel = savedExtraction;
             this.consolidationModel = savedConsolidation;
+            this.resetModel();
+            this.resetMemoryModel('extraction');
+            this.resetMemoryModel('consolidation');
           });
         },
         resetModel() {

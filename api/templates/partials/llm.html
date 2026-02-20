@@ -23,12 +23,10 @@
     <form class="space-y-3" @submit.prevent>
       <div>
         <label class="label">Provider</label>
-        <select class="input-sm" style="max-width:500px" x-model="provider" @change="resetModel()">
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-          <option value="google">Google Gemini</option>
-          <option value="grok">Grok (xAI)</option>
-          <option value="deepseek">DeepSeek</option>
+        <select class="input-sm" style="max-width:500px" x-model="provider" @change="resetModel()" x-effect="$el.value = provider">
+          <template x-for="item in providerOptions" :key="'provider-' + item.value">
+            <option :value="item.value" :selected="item.value === provider" x-text="item.label"></option>
+          </template>
         </select>
       </div>
 
@@ -89,12 +87,10 @@
     <form class="space-y-4" @submit.prevent>
       <div>
         <label class="label">Extraction provider</label>
-        <select class="input-sm" style="max-width:500px" x-model="extractionProvider" @change="resetMemoryModel('extraction')">
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-          <option value="google">Google Gemini</option>
-          <option value="grok">Grok (xAI)</option>
-          <option value="deepseek">DeepSeek</option>
+        <select class="input-sm" style="max-width:500px" x-model="extractionProvider" @change="resetMemoryModel('extraction')" x-effect="$el.value = extractionProvider">
+          <template x-for="item in providerOptions" :key="'extraction-' + item.value">
+            <option :value="item.value" :selected="item.value === extractionProvider" x-text="item.label"></option>
+          </template>
         </select>
       </div>
       <div>
@@ -111,12 +107,10 @@
 
       <div>
         <label class="label">Consolidation provider</label>
-        <select class="input-sm" style="max-width:500px" x-model="consolidationProvider" @change="resetMemoryModel('consolidation')">
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-          <option value="google">Google Gemini</option>
-          <option value="grok">Grok (xAI)</option>
-          <option value="deepseek">DeepSeek</option>
+        <select class="input-sm" style="max-width:500px" x-model="consolidationProvider" @change="resetMemoryModel('consolidation')" x-effect="$el.value = consolidationProvider">
+          <template x-for="item in providerOptions" :key="'consolidation-' + item.value">
+            <option :value="item.value" :selected="item.value === consolidationProvider" x-text="item.label"></option>
+          </template>
         </select>
       </div>
       <div>
