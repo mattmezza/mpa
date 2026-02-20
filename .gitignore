@@ -29,6 +29,7 @@ cli-configs/*
 
 # Data (runtime state, DB, models)
 data/
+memories.db
 
 # pytest / ruff
 .pytest_cache/
