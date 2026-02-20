@@ -159,6 +159,8 @@ Create new skills by adding `.md` files to `skills/`, through the admin UI's ski
 python3 /app/tools/skills.py upsert --name my-skill --stdin
 ```
 
+Behavior and identity are configured in `character.md.example` and `personalia.md.example`.
+
 ## WhatsApp
 
 MPA uses wacli to authenticate and sync WhatsApp locally. The admin UI starts auth, displays the QR code, and manages sync.
