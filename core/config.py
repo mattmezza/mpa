@@ -140,6 +140,20 @@ class MemoryConfig(BaseModel):
     extraction_cooldown_seconds: int = 120  # minimum seconds between extractions
 
 
+class GoalDecompositionConfig(BaseModel):
+    enabled: bool = True
+    provider: str = "anthropic"
+    model: str = "claude-4-5-haiku"
+
+
+class TaskReflectionConfig(BaseModel):
+    enabled: bool = True
+    provider: str = "anthropic"
+    model: str = "claude-4-5-haiku"
+    db_path: str = "data/reflections.db"
+    max_reflections: int = 50  # max reflections to keep for prompt injection
+
+
 class SearchConfig(BaseModel):
     enabled: bool = False
     provider: str = "tavily"
@@ -160,6 +174,8 @@ class Config(BaseModel):
     admin: AdminConfig = AdminConfig()
     history: HistoryConfig = HistoryConfig()
     memory: MemoryConfig = MemoryConfig()
+    goal_decomposition: GoalDecompositionConfig = GoalDecompositionConfig()
+    task_reflection: TaskReflectionConfig = TaskReflectionConfig()
     search: SearchConfig = SearchConfig()
     you: YouConfig = YouConfig()
 
