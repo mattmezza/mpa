@@ -40,7 +40,5 @@ tailwindcss
 api/static/style.css
 node_modules
 
-# WhatsApp bridge auth/session data
-tools/wa-bridge/.wwebjs_auth/
-# WhatsApp bridge cache data
-tools/wa-bridge/.wwebjs_cache/
+# WhatsApp CLI auth/session data
+tools/wacli/.wacli/

@@ -22,9 +22,11 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
+from core.config_store import ConfigStore
+from core.wacli import WacliManager
+
 if TYPE_CHECKING:
     from core.agent import AgentCore
-    from core.config_store import ConfigStore
     from core.skills import SkillsStore
 
 log = logging.getLogger(__name__)
@@ -100,11 +102,7 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             if val:
                 ctx[var] = val
     elif step == "whatsapp":
-        for key, var in (
-            ("channels.whatsapp.bridge_url", "bridge_url"),
-            ("channels.whatsapp.bridge_token", "bridge_token"),
-            ("channels.whatsapp.allowed_numbers", "allowed_numbers"),
-        ):
+        for key, var in (("channels.whatsapp.allowed_numbers", "allowed_numbers"),):
             val = await config_store.get(key)
             if val:
                 ctx[var] = val
@@ -132,7 +130,10 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
     return ctx
 
 
-async def _channel_list_context(config_store: ConfigStore) -> dict[str, list[dict[str, object]]]:
+async def _channel_list_context(
+    config_store: ConfigStore,
+    wacli: WacliManager | None = None,
+) -> dict[str, list[dict[str, object]]]:
     channels: list[dict[str, object]] = []
 
     tg_enabled_raw = await config_store.get("channels.telegram.enabled")
@@ -157,34 +158,24 @@ async def _channel_list_context(config_store: ConfigStore) -> dict[str, list[dic
     wa_enabled = str(wa_enabled_raw).lower() == "true"
     wa_bridge = await config_store.get("channels.whatsapp.bridge_url")
     wa_numbers = await config_store.get("channels.whatsapp.allowed_numbers")
-    wa_token = await config_store.get("channels.whatsapp.bridge_token") or ""
     wa_detail = "Not configured"
     wa_auth_status = ""
     wa_auth_class = "badge-off"
     if wa_bridge:
-        wa_detail = f"Bridge: {wa_bridge}"
+        wa_detail = "Local wacli"
         if wa_numbers:
-            wa_detail = f"Bridge: {wa_bridge} · Numbers: {wa_numbers}"
+            wa_detail = f"Local wacli · Numbers: {wa_numbers}"
         try:
-            import httpx
-
-            headers = {"X-WA-Bridge-Token": wa_token} if wa_token else None
-            async with httpx.AsyncClient(timeout=3) as client:
-                resp = await client.get(f"{wa_bridge.rstrip('/')}/auth/status", headers=headers)
-                if resp.status_code < 400:
-                    data = resp.json()
-                    if data.get("authenticated") is True:
-                        wa_auth_status = "Auth ok"
-                        wa_auth_class = "badge-ok"
-                    elif data.get("running") is False:
-                        wa_auth_status = "Auth stopped"
-                        wa_auth_class = "badge-off"
-                    else:
-                        wa_auth_status = "Auth required"
-                        wa_auth_class = "badge-warn"
-                else:
-                    wa_auth_status = "Auth unknown"
-                    wa_auth_class = "badge-off"
+            status = await (wacli or WacliManager()).auth_status()
+            if status.get("authenticated") is True:
+                wa_auth_status = "Auth ok"
+                wa_auth_class = "badge-ok"
+            elif status.get("running") is False:
+                wa_auth_status = "Auth stopped"
+                wa_auth_class = "badge-off"
+            else:
+                wa_auth_status = "Auth required"
+                wa_auth_class = "badge-warn"
         except Exception:
             wa_auth_status = "Auth unknown"
             wa_auth_class = "badge-off"
@@ -219,12 +210,9 @@ async def _channel_wizard_context(
         enabled = str(enabled_raw).lower() != "false"
         ctx["enabled"] = "true" if enabled else "false"
         bridge_url = await config_store.get("channels.whatsapp.bridge_url")
-        bridge_token = await config_store.get("channels.whatsapp.bridge_token")
         allowed_numbers = await config_store.get("channels.whatsapp.allowed_numbers")
         if bridge_url:
             ctx["bridge_url"] = bridge_url
-        if bridge_token:
-            ctx["bridge_token"] = bridge_token
         if allowed_numbers:
             ctx["allowed_numbers"] = allowed_numbers
     return ctx
@@ -341,8 +329,7 @@ class CalendarProvidersIn(BaseModel):
 
 
 class WhatsAppTestIn(BaseModel):
-    bridge_url: str
-    bridge_token: str = ""
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +372,7 @@ def create_admin_app(
     agent_state: AgentState,
     config_store: ConfigStore,
 ) -> tuple[FastAPI, object]:
+    wacli = WacliManager()
     app = FastAPI(
         title="Personal Agent Admin",
         version="0.1.0",
@@ -608,7 +596,7 @@ def create_admin_app(
     @app.get("/partials/channels", dependencies=[Depends(auth)])
     async def partial_channels() -> HTMLResponse:
         """Channels tab partial."""
-        channel_data = await _channel_list_context(config_store)
+        channel_data = await _channel_list_context(config_store, wacli)
         return _render_partial("partials/channels.html", **channel_data)
 
     @app.get("/partials/calendars", dependencies=[Depends(auth)])
@@ -999,11 +987,12 @@ def create_admin_app(
 
             asyncio.create_task(run_memory_consolidation())
         else:
-            return HTMLResponse(f'<span class="alert-error">Unknown job function</span>')
+            return HTMLResponse('<span class="alert-error">Unknown job function</span>')
 
         log.info("Job %r triggered manually via admin", job_id)
         return HTMLResponse(
-            f'<span class="alert-success">Job &quot;{job_id}&quot; triggered — check logs for output</span>'
+            f'<span class="alert-success">Job &quot;{job_id}&quot; triggered — check logs '
+            "for output</span>"
         )
 
     # ── Config API ─────────────────────────────────────────────────────
@@ -1193,65 +1182,91 @@ def create_admin_app(
             "channels.telegram.allowed_user_ids": user_ids,
         }
         await config_store.set_many(values)
-        channel_data = await _channel_list_context(config_store)
+        channel_data = await _channel_list_context(config_store, wacli)
         return _render_partial("partials/channels.html", **channel_data)
 
     @app.post("/channels/whatsapp", dependencies=[Depends(auth)])
     async def save_channel_whatsapp(request: Request) -> HTMLResponse:
         body = await request.json()
-        bridge_url = str(body.get("bridge_url", "")).strip()
-        bridge_token = str(body.get("bridge_token", "")).strip()
+        bridge_url = str(body.get("bridge_url", "")).strip() or "local-wacli"
         allowed_numbers = str(body.get("allowed_numbers", "")).strip()
         enabled = str(body.get("enabled", "true")).lower() == "true"
-        if not bridge_url:
-            raise HTTPException(400, "Bridge URL is required")
         values = {
             "channels.whatsapp.enabled": str(enabled).lower(),
             "channels.whatsapp.bridge_url": bridge_url,
-            "channels.whatsapp.bridge_token": bridge_token,
             "channels.whatsapp.allowed_numbers": allowed_numbers,
         }
         await config_store.set_many(values)
         if not enabled:
             try:
-                import httpx
-
-                headers = {"X-WA-Bridge-Token": bridge_token} if bridge_token else None
-                async with httpx.AsyncClient(timeout=5) as client:
-                    await client.post(f"{bridge_url.rstrip('/')}/auth/stop", headers=headers)
+                await wacli.stop_auth()
+                await wacli.stop_sync()
             except Exception as exc:
-                log.warning("Failed to stop WhatsApp bridge auth: %s", exc)
-        channel_data = await _channel_list_context(config_store)
+                log.warning("Failed to stop WhatsApp auth: %s", exc)
+        channel_data = await _channel_list_context(config_store, wacli)
         return _render_partial("partials/channels.html", **channel_data)
 
     @app.post("/channels/whatsapp/test", dependencies=[Depends(auth)])
     async def test_channel_whatsapp(body: WhatsAppTestIn) -> dict:
-        bridge_url = body.bridge_url.strip().rstrip("/")
-        if not bridge_url:
-            raise HTTPException(400, "Bridge URL is required")
-        try:
-            import httpx
+        status = await wacli.auth_status()
+        return {"ok": status.get("available") is True, "response": status}
 
-            async with httpx.AsyncClient(timeout=5) as client:
-                headers = {"X-WA-Bridge-Token": body.bridge_token} if body.bridge_token else None
-                resp = await client.get(f"{bridge_url}/health", headers=headers)
-                data = resp.json()
-                ok = data.get("ok") is True or data.get("status") == "ok"
-                return {"ok": ok, "response": data}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+    @app.get("/channels/whatsapp/auth/status", dependencies=[Depends(auth)])
+    async def whatsapp_auth_status() -> dict:
+        status = await wacli.auth_status()
+        return {"ok": True, **status}
+
+    @app.post("/channels/whatsapp/auth/start", dependencies=[Depends(auth)])
+    async def whatsapp_auth_start() -> dict:
+        await wacli.start_auth()
+        return {"ok": True}
+
+    @app.post("/channels/whatsapp/auth/stop", dependencies=[Depends(auth)])
+    async def whatsapp_auth_stop() -> dict:
+        await wacli.stop_auth()
+        await wacli.stop_sync()
+        return {"ok": True}
+
+    @app.get("/channels/whatsapp/auth/qr", dependencies=[Depends(auth)])
+    async def whatsapp_auth_qr() -> dict:
+        if not wacli.latest_qr:
+            await wacli.fetch_latest_qr()
+        if not wacli.latest_qr:
+            raise HTTPException(404, "No QR available")
+        return {"ok": True, "qr": wacli.latest_qr, "latest_qr_at": wacli.latest_qr_at}
+
+    @app.post("/channels/whatsapp/auth/logout", dependencies=[Depends(auth)])
+    async def whatsapp_auth_logout() -> dict:
+        await wacli.logout()
+        return {"ok": True}
+
+    @app.post("/channels/whatsapp/sync/start", dependencies=[Depends(auth)])
+    async def whatsapp_sync_start() -> dict:
+        await wacli.start_sync()
+        return {"ok": True}
+
+    @app.post("/channels/whatsapp/sync/stop", dependencies=[Depends(auth)])
+    async def whatsapp_sync_stop() -> dict:
+        await wacli.stop_sync()
+        return {"ok": True}
+
+    @app.post("/channels/whatsapp/send", dependencies=[Depends(auth)])
+    async def whatsapp_send(request: Request) -> dict:
+        body = await request.json()
+        to = str(body.get("to", "")).strip()
+        text = str(body.get("text", "")).strip()
+        if not to or not text:
+            raise HTTPException(400, "Missing 'to' or 'text'")
+        res = await wacli.send_text(to, text)
+        if res.get("success") is not True:
+            return {"ok": False, "error": res.get("error")}
+        return {"ok": True}
 
     @app.post("/webhook/whatsapp")
     async def whatsapp_webhook(request: Request) -> dict:
-        """Webhook for the WhatsApp bridge sidecar."""
+        """Webhook for WhatsApp inbound messages."""
         if agent_state.agent is None:
             raise HTTPException(503, "Agent not running")
-
-        bridge_token = await config_store.get("channels.whatsapp.bridge_token") or ""
-        if bridge_token:
-            provided = request.headers.get("X-WA-Bridge-Token", "")
-            if provided != bridge_token:
-                raise HTTPException(401, "Unauthorized")
 
         body = await request.json()
         channel = agent_state.agent.channels.get("whatsapp")
@@ -1275,31 +1290,20 @@ def create_admin_app(
                 "channels.telegram.allowed_user_ids": "",
             }
         elif key == "whatsapp":
-            bridge_url = await config_store.get("channels.whatsapp.bridge_url") or ""
-            bridge_token = await config_store.get("channels.whatsapp.bridge_token") or ""
-            if bridge_url:
-                try:
-                    import httpx
-
-                    headers = {"X-WA-Bridge-Token": bridge_token} if bridge_token else None
-                    async with httpx.AsyncClient(timeout=5) as client:
-                        await client.post(
-                            f"{bridge_url.rstrip('/')}/auth/logout",
-                            headers=headers,
-                        )
-                except Exception as exc:
-                    log.warning("Failed to logout WhatsApp bridge auth: %s", exc)
+            try:
+                await wacli.logout()
+            except Exception as exc:
+                log.warning("Failed to logout WhatsApp auth: %s", exc)
             values = {
                 "channels.whatsapp.enabled": "false",
                 "channels.whatsapp.bridge_url": "",
                 "channels.whatsapp.allowed_numbers": "",
-                "channels.whatsapp.bridge_token": "",
             }
         else:
             raise HTTPException(400, f"Unknown channel: {channel}")
 
         await config_store.set_many(values)
-        channel_data = await _channel_list_context(config_store)
+        channel_data = await _channel_list_context(config_store, wacli)
         return _render_partial("partials/channels.html", **channel_data)
 
     @app.post("/skills", dependencies=[Depends(auth)])
@@ -1556,15 +1560,24 @@ def create_admin_app(
                 "",
                 "- Be concise. Messages should be short and direct — no filler.",
                 '- Be warm but not sycophantic. No "Great question!" or "Of course!". Just answer.',
-                f"- When acting on {owner_name}'s behalf (emails, messages), match their communication style.",
-                f"- When messaging {owner_name}'s contacts, always identify yourself unless told otherwise.",
+                (
+                    f"- When acting on {owner_name}'s behalf (emails, messages), match their "
+                    "communication style."
+                ),
+                (
+                    f"- When messaging {owner_name}'s contacts, always identify yourself unless "
+                    "told otherwise."
+                ),
                 "",
                 "## Decision-making",
                 "",
                 "- When unsure about an action, ask. When confident and pre-approved, just do it.",
                 "- If multiple contacts match a name, present the options — never guess.",
                 "- If a command fails, read the error and try to fix it before reporting back.",
-                "- Prefer structured data (JSON output flags) over free-text parsing when available.",
+                (
+                    "- Prefer structured data (JSON output flags) over free-text parsing when "
+                    "available."
+                ),
                 "",
                 "## Language",
                 "",
@@ -1601,7 +1614,10 @@ def create_admin_app(
                 "- Cannot make phone calls",
                 "- Cannot access websites or browse the internet",
                 f"- Cannot access files on {owner_name}'s personal devices",
-                f"- Always needs permission before sending messages or emails on {owner_name}'s behalf",
+                (
+                    f"- Always needs permission before sending messages or emails on {owner_name}'s"
+                    " behalf"
+                ),
                 "",
                 "## History",
                 "",

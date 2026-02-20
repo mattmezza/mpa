@@ -55,8 +55,8 @@ dev:
 	@echo "  2. Tailwind CSS watcher:"
 	@echo "     make dev-css"
 	@echo ""
-	@if [ -d tools/wa-bridge ]; then \
-		echo "  3. WhatsApp bridge:"; \
+	@if [ -d tools/wacli ]; then \
+		echo "  3. WhatsApp (wacli build):"; \
 		echo "     make dev-wa"; \
 		echo ""; \
 	fi
@@ -69,12 +69,12 @@ dev-agent:
 dev-css:
 	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --watch
 
-# Dev: WhatsApp bridge
+# Dev: WhatsApp (wacli)
 dev-wa:
-	@if [ ! -d tools/wa-bridge/node_modules ]; then \
-		npm --prefix tools/wa-bridge install; \
+	@if [ ! -x tools/wacli/dist/wacli ]; then \
+		echo "Building wacli..."; \
+		cd tools/wacli && pnpm -s build; \
 	fi
-	npm --prefix tools/wa-bridge run start
 
 # Remove venv and caches
 clean:

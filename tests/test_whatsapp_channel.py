@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from channels.whatsapp import WhatsAppChannel, _normalize_number
@@ -25,8 +27,8 @@ def test_normalize_number() -> None:
 
 
 def test_allowed_numbers_match() -> None:
-    config = WhatsAppConfig(bridge_url="http://localhost:3001", allowed_numbers=["+14155551234"])
-    channel = WhatsAppChannel(config, FakeAgent(FakePermissions()))
+    config = WhatsAppConfig(allowed_numbers=["+14155551234"])
+    channel = WhatsAppChannel(config, cast(Any, FakeAgent(FakePermissions())))
     assert channel._is_allowed("+1 415-555-1234") is True
     assert channel._is_allowed("14155551234@c.us") is True
     assert channel._is_allowed("+442071838750") is False
@@ -36,8 +38,8 @@ def test_allowed_numbers_match() -> None:
 async def test_approval_commands_send_responses() -> None:
     permissions = FakePermissions(resolved=True)
     channel = WhatsAppChannel(
-        WhatsAppConfig(bridge_url="http://localhost:3001"),
-        FakeAgent(permissions),
+        WhatsAppConfig(),
+        cast(Any, FakeAgent(permissions)),
     )
     sent: list[tuple[str, str]] = []
 
@@ -61,8 +63,8 @@ async def test_approval_commands_send_responses() -> None:
 async def test_approval_missing_id() -> None:
     permissions = FakePermissions(resolved=True)
     channel = WhatsAppChannel(
-        WhatsAppConfig(bridge_url="http://localhost:3001"),
-        FakeAgent(permissions),
+        WhatsAppConfig(),
+        cast(Any, FakeAgent(permissions)),
     )
     sent: list[tuple[str, str]] = []
 

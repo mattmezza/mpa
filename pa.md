@@ -794,18 +794,16 @@ class TelegramChannel:
 | Option | Pros | Cons |
 |---|---|---|
 | **Twilio WhatsApp API** | Official, reliable, simple REST API | Costs money (~$0.005/msg), requires business verification |
-| **whatsapp-web.js** (via Node bridge) | Free, uses your personal number | Unofficial, can get banned, needs a Node sidecar |
-| **Baileys** (via Node bridge) | Free, lightweight, your personal number | Unofficial, same ban risk, Node sidecar |
+| **wacli** (Go CLI) | Local, no Node sidecar, small footprint | Unofficial, can get banned, uses WhatsApp Web |
 
-Start with a thin Node.js bridge:
+Use the local wacli CLI with a minimal admin API integration:
 
 ```python
 # channels/whatsapp.py
 import httpx
 
 class WhatsAppChannel:
-    def __init__(self, bridge_url: str, agent_core):
-        self.bridge_url = bridge_url
+    def __init__(self, agent_core):
         self.agent = agent_core
 
     async def on_message(self, payload: dict):
@@ -816,33 +814,15 @@ class WhatsAppChannel:
 
     async def send(self, to: str, text: str, voice: bytes = None):
         async with httpx.AsyncClient() as client:
-            await client.post(f"{self.bridge_url}/send", json={"to": to, "text": text})
+            await client.post(
+                "http://localhost:8000/channels/whatsapp/send",
+                json={"to": to, "text": text},
+            )
 ```
 
-```javascript
-// wa-bridge/index.js (~50 lines)
-const { Client, LocalAuth } = require("whatsapp-web.js");
-const express = require("express");
-
-const client = new Client({ authStrategy: new LocalAuth() });
-const app = express();
-app.use(express.json());
-
-client.on("message", async (msg) => {
-  await fetch("http://localhost:8000/webhook/whatsapp", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ from: msg.from, body: msg.body }),
-  });
-});
-
-app.post("/send", async (req, res) => {
-  await client.sendMessage(req.body.to, req.body.text);
-  res.json({ ok: true });
-});
-
-app.listen(3001);
-client.initialize();
+```
+wacli auth --json
+wacli sync
 ```
 
 ### 6.3 Voice Pipeline
@@ -1316,9 +1296,7 @@ personal-agent/
 ├── api/
 │   └── admin.py                # FastAPI admin endpoints
 │
-├── wa-bridge/                  # WhatsApp web.js bridge (Node)
-│   ├── package.json
-│   └── index.js
+├── tools/wacli/                # WhatsApp CLI (Go, vendored)
 │
 ├── cli-configs/                # Config files for CLI tools (mounted into container)
 │   ├── himalaya.toml           # → ~/.config/himalaya/config.toml
@@ -1361,7 +1339,7 @@ channels:
     allowed_user_ids: [123456789]
   whatsapp:
     enabled: true
-    bridge_url: "http://localhost:3001"
+    bridge_url: "local-wacli"
     allowed_numbers: ["+41..."]
 
 calendar:
@@ -1548,15 +1526,6 @@ services:
       - ./cli-configs/vdirsyncer.conf:/root/.config/vdirsyncer/config:ro
       - ./data/vdirsyncer:/root/.local/share/vdirsyncer
     env_file: .env
-    depends_on:
-      - wa-bridge
-
-  wa-bridge:
-    build: ./wa-bridge
-    container_name: wa-bridge
-    restart: unless-stopped
-    volumes:
-      - ./data/wa-session:/app/.wwebjs_auth
 ```
 
 ### Resource Requirements
@@ -1566,7 +1535,7 @@ services:
 | Python agent + FastAPI | ~100 MB | minimal | — |
 | Himalaya + khard binaries | ~20 MB | per-call | ~50 MB |
 | Whisper `base` model | ~300 MB | 1 core during STT | 150 MB |
-| WhatsApp bridge (Node) | ~100 MB | minimal | — |
+| WhatsApp (wacli) | ~60 MB | minimal | — |
 | SQLite DB + vCards | ~10 MB | minimal | grows |
 | **Total** | **~530 MB** | **2 cores** | **~500 MB** |
 
@@ -1669,7 +1638,7 @@ async def main():
         tg = TelegramChannel(config.channels.telegram.bot_token, agent)
         agent.channels["telegram"] = tg
     if config.channels.whatsapp.enabled:
-        wa = WhatsAppChannel(config.channels.whatsapp.bridge_url, agent)
+        wa = WhatsAppChannel(agent)
         agent.channels["whatsapp"] = wa
 
     # 3. Start scheduler
@@ -1701,7 +1670,7 @@ if __name__ == "__main__":
 | **7. Scheduler** | APScheduler + morning briefing + periodic email check + memory consolidation + contact sync | 0.5 day |
 | **8. Permissions** | Permission engine + glob patterns + Telegram inline approval | 1 day |
 | **9. Voice** | Whisper STT + edge-tts + `voice.md` skill | 1 day |
-| **10. WhatsApp** | WA bridge + channel integration | 1-2 days |
+| **10. WhatsApp** | wacli auth + channel integration | 1-2 days |
 | **11. Polish** | Admin API, logging, error handling, Docker optimization | 1-2 days |
 
 **Total: ~10-15 days**

@@ -22,8 +22,7 @@ channels:
     allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
   whatsapp:
     enabled: false
-    bridge_url: "http://localhost:3001"
-    bridge_token: "${WHATSAPP_BRIDGE_TOKEN}"
+    bridge_url: "local-wacli"
     allowed_numbers: "${WHATSAPP_ALLOWED_NUMBERS}"
 
 calendar:

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from dataclasses import dataclass
-import importlib
 from typing import Any, cast
 
 from anthropic import AsyncAnthropic
-
 
 _DEFAULT_BASE_URLS = {
     "google": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -72,7 +71,7 @@ class LLMClient:
             self._client = cast(Any, client_class)(**client_kwargs)  # type: ignore[call-arg]
 
     @classmethod
-    def from_agent_config(cls, config) -> "LLMClient":
+    def from_agent_config(cls, config) -> LLMClient:
         provider = _normalize_provider(getattr(config, "llm_provider", "anthropic"))
         if provider == "anthropic":
             return cls(provider, getattr(config, "anthropic_api_key", ""))

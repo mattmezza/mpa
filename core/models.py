@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 
-
 # Mime types we accept as images for LLM vision.
 IMAGE_MIME_TYPES = frozenset(
     {

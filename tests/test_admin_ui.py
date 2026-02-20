@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from api.admin import AgentState, create_admin_app
 from core.config_store import ConfigStore
 
-
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------
@@ -78,7 +77,7 @@ class _AgentStub:
         self.scheduler = SimpleNamespace(scheduler=SimpleNamespace(get_jobs=lambda: [1, 2]))
         self.permissions = SimpleNamespace(
             rules={"run_command:jq*": "ALWAYS"},
-            add_rule=lambda p, l: None,
+            add_rule=lambda pattern, level: None,
         )
 
 
@@ -159,7 +158,6 @@ class TestPartialRoutes:
         assert "running" in resp.text.lower()
 
     def test_status_partial_without_agent(self):
-        client = _client(setup_complete=True, agent=None)
         # Override with explicit None agent
         store = _ConfigStoreStub(setup_complete=True)
         agent_state = AgentState(agent=None)

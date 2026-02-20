@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-
 log = logging.getLogger(__name__)
 
 HIMALAYA_CONFIG_PATH = Path("/tmp/mpa-himalaya-config.toml")

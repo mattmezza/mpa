@@ -1,0 +1,48 @@
+version: 2
+
+project_name: wacli
+
+builds:
+  - id: wacli
+    main: ./cmd/wacli
+    binary: wacli
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    tags:
+      - sqlite_fts5
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+universal_binaries:
+  - id: wacli
+    ids:
+      - wacli
+    name_template: wacli
+    replace: true
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "all" }}universal{{ else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

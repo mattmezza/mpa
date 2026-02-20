@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg curl ca-certificates jq sqlite3 \
     bash tar gzip xz-utils \
+    golang build-essential pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Himalaya CLI (pre-built Rust binary for email management)
@@ -50,3 +51,7 @@ USER mpa
 
 EXPOSE 8000
 CMD ["uv", "run", "python", "-m", "core.main"]
+# Build wacli
+RUN corepack enable && \
+    cd tools/wacli && \
+    pnpm -s build

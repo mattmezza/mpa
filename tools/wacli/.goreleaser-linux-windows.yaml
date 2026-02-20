@@ -1,0 +1,75 @@
+version: 2
+
+project_name: wacli
+
+builds:
+  - id: wacli_linux_amd64
+    main: ./cmd/wacli
+    binary: wacli
+    env:
+      - CGO_ENABLED=1
+      - CGO_CFLAGS=-Wno-error=missing-braces
+    flags:
+      - -trimpath
+    tags:
+      - sqlite_fts5
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+  - id: wacli_linux_arm64
+    main: ./cmd/wacli
+    binary: wacli
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+      - CGO_CFLAGS=-Wno-error=missing-braces
+    flags:
+      - -trimpath
+    tags:
+      - sqlite_fts5
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - linux
+    goarch:
+      - arm64
+
+  - id: wacli_windows_amd64
+    main: ./cmd/wacli
+    binary: wacli
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+      - CGO_CFLAGS=-Wno-error=missing-braces
+    flags:
+      - -trimpath
+    tags:
+      - sqlite_fts5
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - windows
+    goarch:
+      - amd64
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "all" }}universal{{ else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums-linux-windows.txt
+
+changelog:
+  disable: true

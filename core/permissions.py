@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import logging
-import uuid
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import TypedDict
 

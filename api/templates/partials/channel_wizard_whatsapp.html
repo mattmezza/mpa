@@ -2,16 +2,15 @@
   <div class="flex items-start justify-between gap-3 flex-wrap">
     <div>
       <h3 class="text-base mb-1">WhatsApp setup</h3>
-      <p class="text-xs text-muted">
-        The WhatsApp bridge runs as a separate service. When you start auth, it generates a QR code to link your
-        WhatsApp account. After linking, the bridge relays messages to this server and the agent responds back.
-      </p>
+  <p class="text-xs text-muted">
+    WhatsApp runs locally via wacli. When you start auth, a QR code appears here to link your account. Once linked,
+    the agent can send and receive messages through the local wacli session.
+  </p>
     </div>
-    <div class="badge-off">Bridge required</div>
+  <div class="badge-off">Local wacli</div>
   </div>
 
-  <input type="hidden" id="ch-wa-bridge" value="{{ bridge_url|default('http://localhost:3001') }}">
-  <input type="hidden" id="ch-wa-token" value="{{ bridge_token|default('') }}">
+  <input type="hidden" id="ch-wa-bridge" value="{{ bridge_url|default('local-wacli') }}">
 
   <div class="mt-3">
     <label class="label" for="ch-wa-numbers">Allowed numbers</label>
@@ -30,7 +29,7 @@
   </div>
 
   <div class="flex items-center gap-2 mt-4">
-    <button class="btn btn-sm" type="button" onclick="testWhatsApp()">Test bridge</button>
+    <button class="btn btn-sm" type="button" onclick="testWhatsApp()">Test wacli</button>
     <button class="btn btn-sm" type="button" onclick="sendWhatsAppTestMessage()">Send test message</button>
     <button class="btn btn-sm" type="button" onclick="startWhatsAppBridge()">Start auth</button>
     <button class="btn btn-sm" type="button" onclick="stopWhatsAppBridge()">Stop auth</button>

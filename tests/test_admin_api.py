@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
+
 from fastapi.testclient import TestClient
 
 from api.admin import AgentState, create_admin_app

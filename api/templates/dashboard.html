@@ -336,27 +336,19 @@
 
   function saveWhatsApp() {
     const result = document.getElementById('channel-wizard-result');
-    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
-    const bridgeTokenInput = document.getElementById('ch-wa-token');
     const numbersInput = document.getElementById('ch-wa-numbers');
     const enabledInput = document.getElementById('ch-wa-enabled');
-    if (!result || !bridgeUrlInput || !bridgeTokenInput || !numbersInput || !enabledInput) return;
-    const bridgeUrl = bridgeUrlInput.value.trim();
-    const bridgeToken = bridgeTokenInput.value.trim();
+    if (!result || !numbersInput || !enabledInput) return;
+    const bridgeUrl = 'local-wacli';
     const numbers = numbersInput.value.trim();
     const enabled = enabledInput.checked;
-    if (!bridgeUrl) {
-      result.textContent = 'Bridge URL is missing in config.';
-      result.className = 'alert-error';
-      return;
-    }
     fetch('/channels/whatsapp', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
       },
-      body: JSON.stringify({bridge_url: bridgeUrl, bridge_token: bridgeToken, allowed_numbers: numbers, enabled: enabled})
+      body: JSON.stringify({bridge_url: bridgeUrl, allowed_numbers: numbers, enabled: enabled})
     })
       .then(r => r.text())
       .then(html => {
@@ -372,17 +364,9 @@
 
   function testWhatsApp() {
     const result = document.getElementById('channel-wizard-result');
-    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
-    const bridgeTokenInput = document.getElementById('ch-wa-token');
-    if (!result || !bridgeUrlInput || !bridgeTokenInput) return;
-    const bridgeUrl = bridgeUrlInput.value.trim();
-    const bridgeToken = bridgeTokenInput.value.trim();
-    if (!bridgeUrl) {
-      result.textContent = 'Bridge URL is missing in config.';
-      result.className = 'alert-error';
-      return;
-    }
-    result.textContent = 'Testing bridge...';
+    if (!result) return;
+    const bridgeUrl = 'local-wacli';
+    result.textContent = 'Checking wacli...';
     result.className = 'alert-info';
     fetch('/channels/whatsapp/test', {
       method: 'POST',
@@ -390,35 +374,26 @@
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
       },
-      body: JSON.stringify({ bridge_url: bridgeUrl, bridge_token: bridgeToken })
+      body: JSON.stringify({ bridge_url: bridgeUrl })
     })
       .then(r => r.json())
       .then(d => {
         const ok = d && d.ok === true;
-        result.textContent = ok ? 'Bridge is reachable.' : (d.error || 'Bridge not reachable.');
+    result.textContent = ok ? 'wacli is available.' : (d.error || 'wacli not available.');
         result.className = ok ? 'alert-success' : 'alert-error';
       })
       .catch(e => {
-        result.textContent = e.message || 'Bridge not reachable.';
+        result.textContent = e.message || 'wacli not available.';
         result.className = 'alert-error';
       });
   }
 
   function sendWhatsAppTestMessage() {
     const result = document.getElementById('channel-wizard-result');
-    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
-    const bridgeTokenInput = document.getElementById('ch-wa-token');
     const numbersInput = document.getElementById('ch-wa-numbers');
-    if (!result || !bridgeUrlInput || !bridgeTokenInput || !numbersInput) return;
-    const bridgeUrl = bridgeUrlInput.value.trim().replace(/\/$/, '');
-    const bridgeToken = bridgeTokenInput.value.trim();
+    if (!result || !numbersInput) return;
     const numbersRaw = numbersInput.value.trim();
     const firstNumber = numbersRaw.split(',').map((n) => n.trim()).filter(Boolean)[0];
-    if (!bridgeUrl) {
-      result.textContent = 'Bridge URL is missing in config.';
-      result.className = 'alert-error';
-      return;
-    }
     if (!firstNumber) {
       result.textContent = 'Add at least one allowed number to send a test message.';
       result.className = 'alert-error';
@@ -426,11 +401,11 @@
     }
     result.textContent = 'Sending test message...';
     result.className = 'alert-info';
-    fetch(bridgeUrl + '/send', {
+    fetch('/channels/whatsapp/send', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-WA-Bridge-Token': bridgeToken
+        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
       },
       body: JSON.stringify({ to: firstNumber, text: 'Test message from MPA' })
     })
@@ -448,58 +423,42 @@
 
   async function startWhatsAppBridge() {
     const result = document.getElementById('channel-wizard-result');
-    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
-    const bridgeTokenInput = document.getElementById('ch-wa-token');
-    if (!result || !bridgeUrlInput || !bridgeTokenInput) return;
-    result.textContent = 'Starting WhatsApp bridge...';
+    if (!result) return;
+    result.textContent = 'Starting WhatsApp auth...';
     result.className = 'alert-info';
     try {
-      const bridgeUrl = bridgeUrlInput.value.trim().replace(/\/$/, '');
-      if (!bridgeUrl) {
-        result.textContent = 'Bridge URL is missing in config.';
-        result.className = 'alert-error';
-        return;
-      }
-      const r = await fetch(bridgeUrl + '/auth/start', {
+      const r = await fetch('/channels/whatsapp/auth/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-WA-Bridge-Token': bridgeTokenInput.value.trim()
+          'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
         }
       });
       if (!r.ok) {
-        throw new Error('Bridge start failed');
+        throw new Error('Auth start failed');
       }
       await pollWhatsAppAuth();
     } catch (e) {
-      result.textContent = e.message || 'Bridge start failed.';
+      result.textContent = e.message || 'Auth start failed.';
       result.className = 'alert-error';
     }
   }
 
   async function stopWhatsAppBridge() {
     const result = document.getElementById('channel-wizard-result');
-    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
-    const bridgeTokenInput = document.getElementById('ch-wa-token');
-    if (!result || !bridgeUrlInput || !bridgeTokenInput) return;
-    result.textContent = 'Stopping WhatsApp bridge...';
+    if (!result) return;
+    result.textContent = 'Stopping WhatsApp auth...';
     result.className = 'alert-info';
     try {
-      const bridgeUrl = bridgeUrlInput.value.trim().replace(/\/$/, '');
-      if (!bridgeUrl) {
-        result.textContent = 'Bridge URL is missing in config.';
-        result.className = 'alert-error';
-        return;
-      }
-      const r = await fetch(bridgeUrl + '/auth/stop', {
+      const r = await fetch('/channels/whatsapp/auth/stop', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-WA-Bridge-Token': bridgeTokenInput.value.trim()
+          'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
         }
       });
       if (!r.ok) {
-        throw new Error('Bridge stop failed');
+        throw new Error('Auth stop failed');
       }
       const panel = document.getElementById('wa-auth-panel');
       const qrBox = document.getElementById('wa-auth-qr');
@@ -508,30 +467,22 @@
       result.textContent = 'WhatsApp auth stopped.';
       result.className = 'alert-success';
     } catch (e) {
-      result.textContent = e.message || 'Bridge stop failed.';
+      result.textContent = e.message || 'Auth stop failed.';
       result.className = 'alert-error';
     }
   }
 
   async function logoutWhatsAppBridge() {
     const result = document.getElementById('channel-wizard-result');
-    const bridgeUrlInput = document.getElementById('ch-wa-bridge');
-    const bridgeTokenInput = document.getElementById('ch-wa-token');
-    if (!result || !bridgeUrlInput || !bridgeTokenInput) return;
-    result.textContent = 'Logging out WhatsApp auth...';
+    if (!result) return;
+    result.textContent = 'Logging out WhatsApp...';
     result.className = 'alert-info';
     try {
-      const bridgeUrl = bridgeUrlInput.value.trim().replace(/\/$/, '');
-      if (!bridgeUrl) {
-        result.textContent = 'Bridge URL is missing in config.';
-        result.className = 'alert-error';
-        return;
-      }
-      const r = await fetch(bridgeUrl + '/auth/logout', {
+      const r = await fetch('/channels/whatsapp/auth/logout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-WA-Bridge-Token': bridgeTokenInput.value.trim()
+          'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
         }
       });
       if (!r.ok) {
@@ -565,9 +516,8 @@
       }
       let qrDelay = 2000;
       try {
-        const bridgeUrl = document.getElementById('ch-wa-bridge').value.trim().replace(/\/$/, '');
-        const r = await fetch(bridgeUrl + '/auth/status', {
-          headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+        const r = await fetch('/channels/whatsapp/auth/status', {
+          headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
         });
         const status = await r.json();
         if (status.latest_qr_at) {
@@ -584,9 +534,9 @@
           result.textContent = 'WhatsApp authenticated.';
           result.className = 'alert-success';
           try {
-            await fetch(bridgeUrl + '/sync/start', {
+            await fetch('/channels/whatsapp/sync/start', {
               method: 'POST',
-              headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+              headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
             });
           } catch (e) {
             // ignore sync start errors
@@ -594,8 +544,8 @@
           return;
         }
         panel.style.display = 'block';
-        const qrResp = await fetch(bridgeUrl + '/auth/qr?ts=' + Date.now(), {
-          headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+        const qrResp = await fetch('/channels/whatsapp/auth/qr?ts=' + Date.now(), {
+          headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
         });
         if (qrResp.ok) {
           const qrData = await qrResp.json();
@@ -636,22 +586,28 @@
     const panel = document.getElementById('wa-auth-panel');
     const qrBox = document.getElementById('wa-auth-qr');
     try {
-      const bridgeUrl = document.getElementById('ch-wa-bridge').value.trim().replace(/\/$/, '');
-      if (!bridgeUrl) return;
-      const r = await fetch(bridgeUrl + '/auth/status', {
-        headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+      const r = await fetch('/channels/whatsapp/auth/status', {
+        headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
       });
       const status = await r.json();
       if (status.authenticated) {
         panel.style.display = 'none';
         result.textContent = 'WhatsApp already authenticated.';
         result.className = 'alert-success';
+        try {
+          await fetch('/channels/whatsapp/sync/start', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
+          });
+        } catch (e) {
+          // ignore sync start errors
+        }
         return;
       }
       if (status.running) {
         panel.style.display = 'block';
-        const qrResp = await fetch(bridgeUrl + '/auth/qr?ts=' + Date.now(), {
-          headers: { 'X-WA-Bridge-Token': document.getElementById('ch-wa-token').value.trim() }
+        const qrResp = await fetch('/channels/whatsapp/auth/qr?ts=' + Date.now(), {
+          headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
         });
         if (qrResp.ok) {
           const qrData = await qrResp.json();

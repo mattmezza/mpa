@@ -56,7 +56,8 @@ async def run_agent_task(
     if silent_mode:
         task = (
             task
-            + "\n\nIf there is nothing important or urgent to report, respond with [NO_UPDATES] only."
+            + "\n\nIf there is nothing important or urgent to report, respond with [NO_UPDATES] "
+            "only."
         )
 
     log.info("Scheduler running agent task: %s", task[:100])

@@ -1,0 +1,16 @@
+{
+  "name": "wacli",
+  "private": true,
+  "packageManager": "pnpm@10.23.0",
+  "scripts": {
+    "wacli": "bash -lc 'pnpm -s build >/dev/null && exec ./dist/wacli \"$@\"' _",
+    "build": "mkdir -p dist && CGO_CFLAGS=\"${CGO_CFLAGS:+$CGO_CFLAGS }-Wno-error=missing-braces\" go build -tags sqlite_fts5 -o dist/wacli ./cmd/wacli",
+    "start": "pnpm -s build && ./dist/wacli",
+    "test": "pnpm -s test:go && pnpm -s test:fts",
+    "test:go": "go test ./...",
+    "test:fts": "go test -tags sqlite_fts5 ./...",
+    "lint": "go vet ./...",
+    "format": "gofmt -w .",
+    "format:check": "bash -lc 'out=$(gofmt -l .); if [ -n \"$out\" ]; then echo \"$out\"; exit 1; fi'"
+  }
+}

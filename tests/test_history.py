@@ -6,7 +6,6 @@ import pytest
 
 from core.history import ConversationHistory
 
-
 # ---------------------------------------------------------------------------
 # Injection mode (existing tests)
 # ---------------------------------------------------------------------------

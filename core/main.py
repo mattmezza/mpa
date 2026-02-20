@@ -75,10 +75,10 @@ async def _start_agent(config_store: ConfigStore):
             await updater.start_polling()
 
     # -- WhatsApp --
-    if config.channels.whatsapp.enabled and config.channels.whatsapp.bridge_url:
+    if config.channels.whatsapp.enabled:
         wa = WhatsAppChannel(config.channels.whatsapp, agent)
         agent.channels["whatsapp"] = wa
-        log.info("WhatsApp channel enabled (bridge: %s)", config.channels.whatsapp.bridge_url)
+        log.info("WhatsApp channel enabled (wacli)")
 
     # -- Scheduler --
     if config.scheduler.jobs:
