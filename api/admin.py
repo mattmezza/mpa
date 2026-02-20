@@ -921,7 +921,9 @@ def create_admin_app(
             body = await request.json()
 
         job_id = str(body.get("job_id", "")).strip()
+        schedule = str(body.get("schedule", "cron")).strip()
         cron = str(body.get("cron", "")).strip()
+        run_at = str(body.get("run_at", "")).strip()
         job_type = str(body.get("type", "agent")).strip()
         task = str(body.get("task", "")).strip()
         channel = str(body.get("channel", "telegram")).strip()
@@ -929,27 +931,41 @@ def create_admin_app(
 
         if not job_id:
             raise HTTPException(400, "Job ID is required")
-        if not cron:
-            raise HTTPException(400, "Cron schedule is required")
+        if schedule not in ("cron", "once"):
+            raise HTTPException(400, f"Invalid schedule type: {schedule}")
+        if schedule == "cron":
+            if not cron:
+                raise HTTPException(400, "Cron schedule is required")
+        else:
+            if not run_at:
+                raise HTTPException(400, "Run-at datetime is required for one-time jobs")
         if job_type not in ("agent", "agent_silent", "system", "memory_consolidation"):
             raise HTTPException(400, f"Invalid job type: {job_type}")
         if job_type != "memory_consolidation" and not task:
             raise HTTPException(400, "Task is required for agent/system jobs")
 
-        from core.scheduler import _parse_cron
+        if schedule == "cron":
+            from core.scheduler import _parse_cron
 
-        try:
-            _parse_cron(cron)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc))
+            try:
+                _parse_cron(cron)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc))
+        else:
+            # Validate the run_at datetime
+            try:
+                datetime.fromisoformat(run_at)
+            except ValueError:
+                raise HTTPException(400, f"Invalid datetime format: {run_at!r}. Use ISO format.")
 
         # Write to JobStore
         store = _get_job_store()
         await store.upsert_job(
             job_id=job_id,
             type=job_type,
-            schedule="cron",
-            cron=cron,
+            schedule=schedule,
+            cron=cron if schedule == "cron" else None,
+            run_at=run_at if schedule == "once" else None,
             task=task,
             channel=channel,
             status="active",

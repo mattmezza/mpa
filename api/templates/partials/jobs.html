@@ -93,10 +93,24 @@
         <span class="hint">Unique identifier (lowercase, dashes ok)</span>
       </div>
       <div>
-        <label class="label">Cron Schedule</label>
+        <label class="label">Schedule</label>
+        <select class="select" name="schedule" x-model="form.schedule"
+                style="padding: 0.375rem 2rem 0.375rem 0.5rem; font-size: 0.75rem;">
+          <option value="cron">Recurring (cron)</option>
+          <option value="once">One-time</option>
+        </select>
+      </div>
+      <div x-show="form.schedule === 'cron'">
+        <label class="label">Cron Expression</label>
         <input type="text" class="input-sm" name="cron" x-model="form.cron"
-               placeholder="0 7 * * *" required>
+               placeholder="0 7 * * *" :required="form.schedule === 'cron'">
         <span class="hint">5-field cron: min hour day month weekday</span>
+      </div>
+      <div x-show="form.schedule === 'once'">
+        <label class="label">Run At</label>
+        <input type="text" class="input-sm" name="run_at" x-model="form.run_at"
+               placeholder="2026-02-20T18:00:00+01:00" :required="form.schedule === 'once'">
+        <span class="hint">ISO datetime with timezone offset</span>
       </div>
       <div>
         <label class="label">Type</label>
@@ -161,7 +175,9 @@ function jobsTab() {
     editing: false,
     form: {
       id: '',
+      schedule: 'cron',
       cron: '',
+      run_at: '',
       type: 'agent',
       task: '',
       channel: 'telegram',
@@ -170,7 +186,9 @@ function jobsTab() {
     editJob(job) {
       this.editing = true;
       this.form.id = job.id;
-      this.form.cron = job.raw_cron || job.cron;
+      this.form.schedule = job.schedule || 'cron';
+      this.form.cron = job.raw_cron || '';
+      this.form.run_at = job.run_at || '';
       this.form.type = job.type;
       this.form.task = job.task || '';
       this.form.channel = job.channel || 'telegram';
@@ -182,7 +200,7 @@ function jobsTab() {
     },
     cancelEdit() {
       this.editing = false;
-      this.form = { id: '', cron: '', type: 'agent', task: '', channel: 'telegram', description: '' };
+      this.form = { id: '', schedule: 'cron', cron: '', run_at: '', type: 'agent', task: '', channel: 'telegram', description: '' };
     }
   };
 }
