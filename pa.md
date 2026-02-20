@@ -51,7 +51,7 @@ A lightweight, self-hosted personal AI agent that runs in a single Docker contai
 │  └─────┘  └───────┘  │         │  │        │  └──────────┘    │
 │                       │ email   │  │calendar│                   │
 │                       │ read    │  │contacts│                   │
-│                       │ send    │  │ khard  │                   │
+│                       │ send    │  │ contacts CLI │           │
 │                       │ search  │  │        │                   │
 │                       └─────────┘  └────────┘                   │
 │                                                                   │
@@ -79,7 +79,7 @@ A lightweight, self-hosted personal AI agent that runs in a single Docker contai
 | WhatsApp | **whatsapp-web.js** via bridge OR **Twilio** | See §6.2 for tradeoffs |
 | Email | **Himalaya CLI** (Rust binary) | Stateless CLI, JSON output, multi-account, OAuth2 |
 | Calendar | **python-caldav** | Stable Python lib, CalDAV is a simple protocol |
-| Contacts | **khard** (CLI) | Mature CardDAV CLI, vCard support, tab-completable |
+| Contacts | **contacts CLI** | Direct provider API (Google People + CardDAV), JSON output |
 | Voice → Text | **faster-whisper** | Fast, local, offline-capable STT |
 | Text → Voice | **edge-tts** or **Coqui TTS** | Free, no API key needed |
 | Scheduler | **APScheduler** | Cron-like scheduling, persistent job store |
@@ -94,7 +94,7 @@ The traditional approach is to write IMAP/SMTP/CardDAV code directly in Python. 
 | Concern | Python Library | CLI Tool |
 |---|---|---|
 | Protocol complexity | You own it (IMAP quirks, OAuth flows, connection pooling) | The tool owns it |
-| Auth management | Implement per-provider | Himalaya/khard handle it (keyring, OAuth2, app passwords) |
+| Auth management | Implement per-provider | Himalaya + contacts CLI handle it (OAuth2/app passwords) |
 | Configuration | Scattered across Python code | One TOML file per tool |
 | Debugging | Step through Python code | Run the CLI command manually in your terminal |
 | Teaching the LLM | Hardcoded tool schemas | Markdown skill files the LLM reads at runtime |
@@ -203,8 +203,7 @@ class ToolExecutor:
     # Commands the agent is allowed to run (prefix whitelist)
     ALLOWED_PREFIXES = [
         "himalaya",
-        "khard",
-        "vdirsyncer",
+        "python3 /app/tools/contacts.py",
         "sqlite3",
         "python3 /app/tools/",
     ]
@@ -424,60 +423,43 @@ himalaya -a personal folder list -o json
 - The `personal` account is for personal correspondence, `work` for professional
 ```
 
-### 5.2 `skills/khard-contacts.md`
+### 5.2 `skills/contacts.md`
 
 ```markdown
-# Khard Contacts CLI
+# Contacts CLI
 
-You have access to `khard` to look up and manage contacts via CardDAV.
-Contacts are synced from the CardDAV server via vdirsyncer.
+Use the contacts helper script to query providers directly (Google + CardDAV).
+Providers are configured in the admin UI (Contacts tab). Avoid hardcoded names.
 
-## Looking Up Contacts
+## List all contacts
 
-### Search for a contact
 ```bash
-# Search by name (partial match)
-khard list "Marco"
-
-# Show full details for a contact
-khard show "Marco Rossi"
-
-# Get just the email address
-khard email "Marco"
-
-# Get just the phone number
-khard phone "Marco"
+python3 /app/tools/contacts.py list --provider <NAME> --output json
 ```
 
-### List all contacts
+## Search by name, phone, or email
+
 ```bash
-khard list
+python3 /app/tools/contacts.py search --provider <NAME> --query "Marco" --output json
 ```
 
-Output format (tab-separated):
-```
-Name                Email                    Phone
-Marco Rossi         marco@example.com        +39 333 1234567
-Simge Merola        simge@example.com        +41 78 9876543
-```
+## Get full details for a specific contact
 
-## Creating Contacts
 ```bash
-khard new --vcard contact.vcf
+python3 /app/tools/contacts.py get --provider <NAME> --id <CONTACT_ID> --output json
 ```
 
-## Editing and Deleting
-```bash
-khard modify "Marco Rossi"
-khard remove "Marco Rossi"
+## Output format (JSON)
+
+```json
+[
+  {"id": "...", "full_name": "Marco Rossi", "emails": ["marco@example.com"], "phones": ["+39 333 1234567"]}
+]
 ```
 
-## Important Notes
-- Run `vdirsyncer sync` before lookups if contacts may be stale
-- When the user says "send a message to Marco", use `khard email` or `khard phone`
-  to resolve the contact's address/number before composing
-- khard does not support JSON output — parse the tab-separated text output
-- If multiple contacts match a search, present the options to the user
+## Important notes
+
+- If multiple contacts match, present options and ask which to use.
 ```
 
 ### 5.3 `skills/caldav-calendar.md`
@@ -570,7 +552,7 @@ A top-level markdown file (not in `skills/`) that defines the agent's personalit
 
 ## Contact Resolution
 When Matteo refers to someone by first name:
-1. Look up the contact using khard
+1. Look up the contact using the contacts CLI
 2. If multiple matches, ask which one
 3. Use the contact's preferred channel (check notes field for preferences)
 
@@ -609,7 +591,7 @@ The distinction: `character.md` is _how_ the agent behaves (editable, tunable), 
 
 ## Capabilities
 - Can read, search, and send emails via Himalaya CLI
-- Can look up contacts via khard CLI
+- Can look up contacts via contacts CLI
 - Can read and create calendar events via CalDAV
 - Can send messages on Telegram and WhatsApp
 - Can transcribe voice messages and respond with synthesized speech
@@ -1220,9 +1202,8 @@ class PermissionEngine:
         "run_command:himalaya*read*":                         "ALWAYS",
         "run_command:himalaya*envelope*":                     "ALWAYS",
         "run_command:himalaya*folder*":                       "ALWAYS",
-        "run_command:khard*":                                 "ALWAYS",
+        "run_command:python3 /app/tools/contacts.py*":       "ALWAYS",
         "run_command:python3 /app/tools/calendar_read.py*":  "ALWAYS",
-        "run_command:vdirsyncer*":                            "ALWAYS",
         "run_command:sqlite3*/app/data/memory.db*SELECT*":   "ALWAYS",  # memory reads
         "run_command:sqlite3*/app/data/memory.db*INSERT*":   "ALWAYS",  # memory writes
         "run_command:sqlite3*/app/data/memory.db*UPDATE*":   "ALWAYS",  # memory updates
@@ -1278,7 +1259,7 @@ personal-agent/
 │
 ├── skills/                     # ← THE KEY DIRECTORY
 │   ├── himalaya-email.md       # Teaches LLM to use himalaya CLI
-│   ├── khard-contacts.md       # Teaches LLM to use khard CLI
+│   ├── contacts.md             # Teaches LLM to use contacts CLI
 │   ├── caldav-calendar.md      # Teaches LLM to use calendar helpers
 │   ├── memory.md               # Teaches LLM to use sqlite3 for memories
 │   └── voice.md                # Voice interaction guidelines
@@ -1288,7 +1269,8 @@ personal-agent/
 │
 ├── tools/                      # Python helper scripts callable via run_command
 │   ├── calendar_read.py        # CalDAV query helper (JSON output)
-│   └── calendar_write.py       # CalDAV create/update helper
+│   ├── calendar_write.py       # CalDAV create/update helper
+│   └── contacts.py             # Contacts CLI (Google People + CardDAV)
 │
 ├── voice/
 │   └── pipeline.py             # Whisper STT + edge-tts
@@ -1300,14 +1282,13 @@ personal-agent/
 │
 ├── cli-configs/                # Config files for CLI tools (mounted into container)
 │   ├── himalaya.toml           # → ~/.config/himalaya/config.toml
-│   ├── khard.conf              # → ~/.config/khard/khard.conf
-│   └── vdirsyncer.conf         # → ~/.config/vdirsyncer/config
+│   └── (no contacts CLI config files)
 │
 └── data/                       # Persistent volume
     ├── agent.db                # SQLite database (conversations, permissions)
     ├── memory.db               # SQLite database (long-term + short-term memories)
     ├── whisper-models/         # Cached Whisper model files
-    ├── vdirsyncer/             # Synced contacts (vCards on disk)
+    ├── (no contacts sync folder)
     └── wa-session/             # WhatsApp session persistence
 ```
 
@@ -1368,10 +1349,6 @@ scheduler:
       cron: "*/15 * * * *"
       task: "Check for urgent unread emails across all accounts and notify me if any"
       channel: "telegram"
-    - id: "contact_sync"
-      cron: "*/15 * * * *"
-      task: "vdirsyncer sync"
-      type: "system"
     - id: "memory_consolidation"
       cron: "0 */8 * * *"
       task: "memory_consolidation"
@@ -1426,46 +1403,6 @@ message.send.backend.auth.type = "password"
 message.send.backend.auth.raw = "app-password-here"
 ```
 
-### khard Config (`cli-configs/khard.conf`)
-
-```ini
-[addressbooks]
-[[personal]]
-path = ~/.local/share/vdirsyncer/contacts/personal/
-
-[general]
-default_action = list
-editor = /bin/true
-merge_editor = /bin/true
-
-[contact table]
-display = formatted_name
-preferred_email_address_type = pref, work, home
-preferred_phone_number_type = pref, cell, home
-```
-
-### vdirsyncer Config (`cli-configs/vdirsyncer.conf`)
-
-```ini
-[general]
-status_path = "~/.local/share/vdirsyncer/status/"
-
-[pair contacts]
-a = "contacts_local"
-b = "contacts_remote"
-collections = ["from a", "from b"]
-
-[storage contacts_local]
-type = "filesystem"
-path = "~/.local/share/vdirsyncer/contacts/"
-fileext = ".vcf"
-
-[storage contacts_remote]
-type = "carddav"
-url = "https://contacts.icloud.com/"
-username = "matteo@icloud.com"
-password.fetch = ["command", "cat", "/run/secrets/icloud_password"]
-```
 
 ---
 
@@ -1487,8 +1424,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -sSL https://raw.githubusercontent.com/pimalaya/himalaya/master/install.sh \
     | PREFIX=/usr/local sh
 
-# Install khard + vdirsyncer (Python CLI tools)
-RUN pip install --no-cache-dir khard vdirsyncer
+# Contacts CLI is provided by /app/tools/contacts.py
 
 # Python deps
 COPY requirements.txt .
@@ -1497,7 +1433,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # CLI config directories
-RUN mkdir -p /root/.config/himalaya /root/.config/khard /root/.config/vdirsyncer
+RUN mkdir -p /root/.config/himalaya
 
 EXPOSE 8000
 CMD ["python", "-m", "core.main"]
@@ -1522,9 +1458,6 @@ services:
       - ./personalia.md:/app/personalia.md
       - ./skills:/app/skills:ro
       - ./cli-configs/himalaya.toml:/root/.config/himalaya/config.toml:ro
-      - ./cli-configs/khard.conf:/root/.config/khard/khard.conf:ro
-      - ./cli-configs/vdirsyncer.conf:/root/.config/vdirsyncer/config:ro
-      - ./data/vdirsyncer:/root/.local/share/vdirsyncer
     env_file: .env
 ```
 
@@ -1533,7 +1466,7 @@ services:
 | Component | RAM | CPU | Disk |
 |---|---|---|---|
 | Python agent + FastAPI | ~100 MB | minimal | — |
-| Himalaya + khard binaries | ~20 MB | per-call | ~50 MB |
+| Himalaya binaries | ~20 MB | per-call | ~50 MB |
 | Whisper `base` model | ~300 MB | 1 core during STT | 150 MB |
 | WhatsApp (wacli) | ~60 MB | minimal | — |
 | SQLite DB + vCards | ~10 MB | minimal | grows |
@@ -1564,7 +1497,7 @@ Runs comfortably on a **2 vCPU / 2 GB RAM** VPS ($5-10/month on Hetzner, Contabo
 - Telegram: user ID whitelist (immutable, spoofing-proof)
 - WhatsApp: phone number whitelist
 - Email: app-specific passwords via himalaya config
-- Calendar/Contacts: app-specific passwords via caldav/vdirsyncer config
+- Calendar: app-specific passwords via caldav config
 - Admin API: Bearer token
 
 ### Data
@@ -1598,7 +1531,7 @@ The LLM reads its skills and decides to run `python3 /app/tools/calendar_read.py
 You: "Send a WhatsApp message to Marco asking if he's free for dinner Saturday"
 
 Agent thinks: I need Marco's phone number
-→ run_command("khard phone Marco", "Look up Marco's phone number")
+→ run_command("python3 /app/tools/contacts.py search --provider <NAME> --query Marco --output json", "Look up Marco's contact info")
 → Returns: "+39 333 1234567"
 
 → send_message(channel="whatsapp", to="+393331234567",
@@ -1666,7 +1599,7 @@ if __name__ == "__main__":
 | **3. Memory** | SQLite schema + `skills/memory.md` + sqlite3 integration + consolidation (LLM-based promotion + expired cleanup) | 1-2 days |
 | **4. Email** | Install himalaya, write config + `himalaya-email.md` skill | 1 day |
 | **5. Calendar** | CalDAV helper scripts + `caldav-calendar.md` skill | 1 day |
-| **6. Contacts** | Install khard + vdirsyncer, write config + `khard-contacts.md` skill | 0.5 day |
+| **6. Contacts** | Add contacts CLI + `contacts.md` skill | 0.5 day |
 | **7. Scheduler** | APScheduler + morning briefing + periodic email check + memory consolidation + contact sync | 0.5 day |
 | **8. Permissions** | Permission engine + glob patterns + Telegram inline approval | 1 day |
 | **9. Voice** | Whisper STT + edge-tts + `voice.md` skill | 1 day |
@@ -1704,14 +1637,14 @@ To add any new capability:
 
 **Contact-aware messaging:**
 > You: "Text Simge that I'll be home late tonight"
-> Agent: *(runs: `khard phone Simge` → resolves number)*
+> Agent: *(runs: `python3 /app/tools/contacts.py search --provider <NAME> --query Simge --output json` → resolves number)*
 > I'll send this WhatsApp message to Simge (+41 78 ...):
 > "Hey, I'll be home a bit late tonight"
 > [Approve] [Edit] [Deny]
 
 **Sending on your behalf:**
 > You: "Email my accountant asking for the 2025 tax filing deadline"
-> Agent: *(runs: `khard email accountant` → resolves email)*
+> Agent: *(runs: `python3 /app/tools/contacts.py search --provider <NAME> --query accountant --output json` → resolves email)*
 > I'll send this from your personal email:
 > **To:** accountant@example.ch
 > **Subject:** Question re: 2025 tax filing deadline
