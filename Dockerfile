@@ -20,8 +20,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev --no-install-project
 
-# Install CLI tools for contacts (khard = CardDAV client, vdirsyncer = sync daemon)
-RUN uv pip install --system khard vdirsyncer[google]
+# Contacts tooling handled by native CLI in /app/tools
 
 # Create non-root user
 RUN groupadd --gid 10001 mpa && \
@@ -44,8 +43,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
     rm /tmp/tailwindcss
 
 # CLI config directories
-RUN mkdir -p /home/mpa/.config/himalaya /home/mpa/.config/khard /home/mpa/.config/vdirsyncer \
-    /home/mpa/.local/share/vdirsyncer /app/data \
+RUN mkdir -p /home/mpa/.config/himalaya /app/data \
     && chown -R mpa:mpa /home/mpa /app
 
 # Build wacli

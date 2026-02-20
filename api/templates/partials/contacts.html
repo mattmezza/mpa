@@ -3,7 +3,7 @@
   <div class="flex items-center justify-between gap-2 mb-4 flex-wrap">
     <div>
       <h3 class="text-xs text-muted uppercase tracking-wider">Contacts</h3>
-      <p class="text-muted text-xs">Grant the agent access to one or more address book providers. Each provider syncs to its own local contact store.</p>
+      <p class="text-muted text-xs">Grant the agent access to one or more address book providers for direct lookups.</p>
     </div>
     <button class="btn btn-sm" type="button" @click="addProvider()">Add provider</button>
   </div>
@@ -64,7 +64,7 @@
           <ul class="list-disc ml-5 mt-1 space-y-1">
             <li>CardDAV providers include iCloud, Fastmail, and most work accounts.</li>
             <li>Google Contacts requires the CardDAV OAuth scope and a one-time authorization.</li>
-            <li>Each provider syncs into its own folder under <code>~/.local/share/vdirsyncer/contacts/</code>.</li>
+            <li>Contacts are queried directly from the provider (no local sync).</li>
           </ul>
         </div>
       </div>

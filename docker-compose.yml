@@ -12,7 +12,4 @@ services:
       - ./personalia.md:/app/personalia.md
       - ./skills:/app/skills:ro
       - ./cli-configs/himalaya.toml:/home/mpa/.config/himalaya/config.toml:ro
-      - ./cli-configs/khard.conf:/home/mpa/.config/khard/khard.conf:ro
-      - ./cli-configs/vdirsyncer.conf:/home/mpa/.config/vdirsyncer/config:ro
-      - ./data/vdirsyncer:/home/mpa/.local/share/vdirsyncer
     env_file: .env

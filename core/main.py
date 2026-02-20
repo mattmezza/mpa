@@ -19,7 +19,6 @@ from fastapi.responses import HTMLResponse
 
 from api.admin import AgentState, create_admin_app, install_log_buffer
 from core.config_store import ConfigStore
-from core.contacts_config import materialize_vdirsyncer_config
 from core.email_config import materialize_himalaya_config
 
 logging.basicConfig(
@@ -113,7 +112,6 @@ async def main() -> None:
     await config_store.seed_if_empty()
     await config_store.ensure_admin_password()
     await materialize_himalaya_config(config_store)
-    await materialize_vdirsyncer_config(config_store)
 
     setup_complete = await config_store.is_setup_complete()
 
