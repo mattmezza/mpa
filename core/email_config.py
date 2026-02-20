@@ -61,9 +61,6 @@ def _provider_to_toml(provider: dict, *, is_default: bool = False) -> str:
     # Sanitise account name – only allow alphanumeric, dash, underscore
     safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in name) or "default"
 
-    # Env-var name for the password (uppercase, dashes to underscores)
-    env_var = f"HIMALAYA_{safe_name.upper().replace('-', '_')}_PASSWORD"
-
     lines: list[str] = []
     lines.append(f"[accounts.{safe_name}]")
     if is_default:
@@ -79,7 +76,7 @@ def _provider_to_toml(provider: dict, *, is_default: bool = False) -> str:
     lines.append(f"backend.login = {_quote(login)}")
     lines.append('backend.encryption.type = "tls"')
     lines.append('backend.auth.type = "password"')
-    lines.append(f"backend.auth.command = {_quote(f'printenv {env_var}')}")
+    lines.append(f"backend.auth.command = {_quote(f'echo -n {password}')}")
 
     # SMTP send backend
     lines.append('message.send.backend.type = "smtp"')
@@ -88,16 +85,9 @@ def _provider_to_toml(provider: dict, *, is_default: bool = False) -> str:
     lines.append(f"message.send.backend.login = {_quote(login)}")
     lines.append('message.send.backend.encryption.type = "tls"')
     lines.append('message.send.backend.auth.type = "password"')
-    lines.append(f"message.send.backend.auth.command = {_quote(f'printenv {env_var}')}")
+    lines.append(f"message.send.backend.auth.command = {_quote(f'echo -n {password}')}")
 
     return "\n".join(lines)
-
-
-def _env_var_for_provider(provider: dict) -> str:
-    """Return the environment variable name used for a provider's password."""
-    name = provider.get("name", "default").strip()
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in name) or "default"
-    return f"HIMALAYA_{safe_name.upper().replace('-', '_')}_PASSWORD"
 
 
 def providers_to_toml(providers: list[dict]) -> str:
@@ -123,7 +113,7 @@ async def materialize_himalaya_config(config_store) -> bool:
     if raw:
         try:
             providers = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             log.warning("Invalid JSON in %s, ignoring", EMAIL_PROVIDERS_KEY)
 
     # Filter out providers missing required fields

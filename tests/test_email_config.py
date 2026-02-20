@@ -55,7 +55,7 @@ def test_single_provider_generates_valid_toml() -> None:
     assert 'backend.host = "imap.example.com"' in toml
     assert "backend.port = 993" in toml
     assert 'backend.login = "me@example.com"' in toml
-    assert 'backend.auth.command = "printenv HIMALAYA_PERSONAL_PASSWORD"' in toml
+    assert 'backend.auth.command = "echo -n secret"' in toml
     assert 'message.send.backend.type = "smtp"' in toml
     assert 'message.send.backend.host = "smtp.example.com"' in toml
     assert "message.send.backend.port = 465" in toml
@@ -104,7 +104,7 @@ def test_login_defaults_to_email() -> None:
     assert 'message.send.backend.login = "user@example.com"' in toml
 
 
-def test_env_var_name_sanitised() -> None:
+def test_password_embedded_in_auth_command() -> None:
     toml = providers_to_toml(
         [
             {
@@ -112,11 +112,12 @@ def test_env_var_name_sanitised() -> None:
                 "email": "a@b.com",
                 "imap_host": "imap.b.com",
                 "smtp_host": "smtp.b.com",
+                "password": "s3cret",
             }
         ]
     )
-    # Dashes in name should become underscores in env var
-    assert "HIMALAYA_MY_WORK_PASSWORD" in toml
+    assert 'backend.auth.command = "echo -n s3cret"' in toml
+    assert 'message.send.backend.auth.command = "echo -n s3cret"' in toml
 
 
 def test_provider_without_display_name_omits_field() -> None:

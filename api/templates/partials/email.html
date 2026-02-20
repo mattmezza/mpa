@@ -71,12 +71,6 @@
           </div>
         </div>
 
-        <div class="mt-3 text-xs text-muted" x-show="provider.name">
-          <strong>Environment variable</strong>:
-          The password for this account will be read at runtime from
-          <code x-text="'HIMALAYA_' + (provider.name || 'default').toUpperCase().replace(/[^A-Z0-9_]/g, '_') + '_PASSWORD'"></code>.
-          Set it in your <code>.env</code> file.
-        </div>
       </div>
     </template>
 
