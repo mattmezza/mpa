@@ -38,6 +38,7 @@ class ToolExecutor:
         "himalaya",
         "jq",
         "wacli",
+        "python3 /app/tools/skills.py",
         "python3 /app/tools/contacts.py",
         "sqlite3",
         "python3 /app/tools/",

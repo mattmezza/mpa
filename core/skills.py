@@ -52,27 +52,25 @@ class SkillsStore:
             return int(row[0]) if row else 0
 
     async def ensure_seeded(self) -> bool:
-        """Seed from markdown files if the store is empty."""
+        """Seed missing skills from markdown files."""
         await self._ensure_schema()
-        count = await self._count()
-        if count > 0:
-            return False
         if not self.seed_dir or not self.seed_dir.exists():
             return False
 
         inserted = 0
         async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT name FROM skills")
+            existing = {row[0] for row in await cursor.fetchall()}
             for skill_file in sorted(self.seed_dir.glob("*.md")):
                 content = skill_file.read_text().strip()
                 if not content:
                     continue
                 name = skill_file.stem
+                if name in existing:
+                    continue
                 summary = _extract_summary(content)
                 await db.execute(
-                    "INSERT INTO skills (name, content, summary) VALUES (?, ?, ?) "
-                    "ON CONFLICT(name) DO UPDATE SET "
-                    "content = excluded.content, summary = excluded.summary, "
-                    "updated_at = datetime('now')",
+                    "INSERT INTO skills (name, content, summary) VALUES (?, ?, ?)",
                     (name, content, summary),
                 )
                 inserted += 1
