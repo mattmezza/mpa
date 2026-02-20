@@ -695,12 +695,6 @@ def create_admin_app(
         providers = await _contact_providers_context(config_store)
         return _render_partial("partials/contacts.html", providers=providers)
 
-    @app.get("/partials/contacts", dependencies=[Depends(auth)])
-    async def partial_contacts() -> HTMLResponse:
-        """Contacts tab partial."""
-        providers = await _contact_providers_context(config_store)
-        return _render_partial("partials/contacts.html", providers=providers)
-
     @app.get("/partials/email", dependencies=[Depends(auth)])
     async def partial_email() -> HTMLResponse:
         """Email tab partial."""
@@ -1195,6 +1189,33 @@ def create_admin_app(
         await config_store.set("calendar.providers", json.dumps(providers))
         return {"ok": True}
 
+    @app.post("/contacts/providers", dependencies=[Depends(auth)])
+    async def save_contact_providers(body: ContactProvidersIn) -> dict:
+        providers = []
+        for p in body.providers:
+            name = str(p.get("name", "")).strip()
+            provider_type = str(p.get("type", "carddav")).strip() or "carddav"
+            url = str(p.get("url", "")).strip()
+            username = str(p.get("username", "")).strip()
+            password = str(p.get("password", "")).strip()
+            client_id = str(p.get("client_id", "")).strip()
+            client_secret = str(p.get("client_secret", "")).strip()
+            if not any([name, url, username, password, client_id, client_secret]):
+                continue
+            providers.append(
+                {
+                    "name": name,
+                    "type": provider_type,
+                    "url": url,
+                    "username": username,
+                    "password": password,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                }
+            )
+        await config_store.set("contacts.providers", json.dumps(providers))
+        return {"ok": True}
+
     # ── Google Calendar OAuth 2.0 flow ─────────────────────────────────
 
     @app.post("/calendar/google/oauth/save-credentials", dependencies=[Depends(auth)])
@@ -1324,60 +1345,6 @@ def create_admin_app(
         has_token = bool(token_raw)
         client_id = await config_store.get("calendar.google_oauth_client_id") or ""
         return {"connected": has_token, "client_id": client_id}
-
-    @app.post("/contacts/providers", dependencies=[Depends(auth)])
-    async def save_contact_providers(body: ContactProvidersIn) -> dict:
-        providers = []
-        for p in body.providers:
-            name = str(p.get("name", "")).strip()
-            provider_type = str(p.get("type", "carddav")).strip() or "carddav"
-            url = str(p.get("url", "")).strip()
-            username = str(p.get("username", "")).strip()
-            password = str(p.get("password", "")).strip()
-            client_id = str(p.get("client_id", "")).strip()
-            client_secret = str(p.get("client_secret", "")).strip()
-            if not any([name, url, username, password, client_id, client_secret]):
-                continue
-            providers.append(
-                {
-                    "name": name,
-                    "type": provider_type,
-                    "url": url,
-                    "username": username,
-                    "password": password,
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                }
-            )
-        await config_store.set("contacts.providers", json.dumps(providers))
-        return {"ok": True}
-
-    @app.post("/contacts/providers", dependencies=[Depends(auth)])
-    async def save_contact_providers(body: ContactProvidersIn) -> dict:
-        providers = []
-        for p in body.providers:
-            name = str(p.get("name", "")).strip()
-            provider_type = str(p.get("type", "carddav")).strip() or "carddav"
-            url = str(p.get("url", "")).strip()
-            username = str(p.get("username", "")).strip()
-            password = str(p.get("password", "")).strip()
-            client_id = str(p.get("client_id", "")).strip()
-            client_secret = str(p.get("client_secret", "")).strip()
-            if not any([name, url, username, password, client_id, client_secret]):
-                continue
-            providers.append(
-                {
-                    "name": name,
-                    "type": provider_type,
-                    "url": url,
-                    "username": username,
-                    "password": password,
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                }
-            )
-        await config_store.set("contacts.providers", json.dumps(providers))
-        return {"ok": True}
 
     # ── Permissions API ────────────────────────────────────────────────
 
