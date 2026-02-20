@@ -6,11 +6,10 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-import httpx
-
 if TYPE_CHECKING:
     from core.agent import AgentCore
     from core.config import WhatsAppConfig
+    from core.wacli import WacliManager
 
 log = logging.getLogger(__name__)
 
@@ -30,19 +29,17 @@ def _normalize_number(value: str) -> str:
 
 
 class WhatsAppChannel:
-    def __init__(self, config: WhatsAppConfig, agent: AgentCore):
+    def __init__(self, config: WhatsAppConfig, agent: AgentCore, wacli: WacliManager):
         self.config = config
         self.agent = agent
+        self.wacli = wacli
         self.allowed_numbers = {_normalize_number(n) for n in (config.allowed_numbers or []) if n}
 
     async def send(self, to: str, text: str) -> None:
-        payload = {"to": to, "text": text}
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                "http://localhost:8000/channels/whatsapp/send",
-                json=payload,
-            )
-            resp.raise_for_status()
+        res = await self.wacli.send_text(to, text)
+        if res.get("success") is not True:
+            error = res.get("error", "Unknown wacli error")
+            raise RuntimeError(f"wacli send failed: {error}")
 
     async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
         message = (

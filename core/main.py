@@ -84,7 +84,10 @@ async def _start_agent(config_store: ConfigStore):
 
     # -- WhatsApp --
     if config.channels.whatsapp.enabled:
-        wa = WhatsAppChannel(config.channels.whatsapp, agent)
+        from core.wacli import WacliManager
+
+        wacli = WacliManager()
+        wa = WhatsAppChannel(config.channels.whatsapp, agent, wacli=wacli)
         agent.channels["whatsapp"] = wa
         log.info("WhatsApp channel enabled (wacli)")
 

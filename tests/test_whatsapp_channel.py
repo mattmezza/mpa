@@ -1,4 +1,5 @@
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,6 +22,12 @@ class FakeAgent:
         self.permissions = permissions
 
 
+def _fake_wacli() -> Any:
+    wacli = AsyncMock()
+    wacli.send_text.return_value = {"success": True}
+    return wacli
+
+
 def test_normalize_number() -> None:
     assert _normalize_number("+39 333 1234567@c.us") == "393331234567"
     assert _normalize_number(" +1 (415) 555-1234 ") == "14155551234"
@@ -28,7 +35,7 @@ def test_normalize_number() -> None:
 
 def test_allowed_numbers_match() -> None:
     config = WhatsAppConfig(allowed_numbers=["+14155551234"])
-    channel = WhatsAppChannel(config, cast(Any, FakeAgent(FakePermissions())))
+    channel = WhatsAppChannel(config, cast(Any, FakeAgent(FakePermissions())), wacli=_fake_wacli())
     assert channel._is_allowed("+1 415-555-1234") is True
     assert channel._is_allowed("14155551234@c.us") is True
     assert channel._is_allowed("+442071838750") is False
@@ -40,6 +47,7 @@ async def test_approval_commands_send_responses() -> None:
     channel = WhatsAppChannel(
         WhatsAppConfig(),
         cast(Any, FakeAgent(permissions)),
+        wacli=_fake_wacli(),
     )
     sent: list[tuple[str, str]] = []
 
@@ -65,6 +73,7 @@ async def test_approval_missing_id() -> None:
     channel = WhatsAppChannel(
         WhatsAppConfig(),
         cast(Any, FakeAgent(permissions)),
+        wacli=_fake_wacli(),
     )
     sent: list[tuple[str, str]] = []
 
