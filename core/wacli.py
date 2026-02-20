@@ -144,10 +144,15 @@ class WacliManager:
 
     async def stop_sync(self) -> None:
         async with self.lock:
-            if self.sync_proc is None:
+            proc = self.sync_proc
+            if proc is None:
                 return
-            self.sync_proc.terminate()
             self.sync_proc = None
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                proc.kill()
 
     async def logout(self) -> None:
         await self.stop_auth()
@@ -159,7 +164,14 @@ class WacliManager:
             pass
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
-        return await self._run_json(["send", "text", "--to", to, "--message", text])
+        was_syncing = self.sync_proc is not None
+        if was_syncing:
+            await self.stop_sync()
+        try:
+            return await self._run_json(["send", "text", "--to", to, "--message", text])
+        finally:
+            if was_syncing:
+                await self.start_sync()
 
     async def list_messages(self, limit: int = 100) -> list[dict[str, Any]]:
         res = await self._run_json(["messages", "list", "--limit", str(limit)])

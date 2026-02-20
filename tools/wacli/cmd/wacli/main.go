@@ -24,7 +24,7 @@ func applyDeviceLabel() {
 		store.DeviceProps.PlatformType = platform.Enum()
 	}
 	if label == "" {
-		return
+		label = "MPA"
 	}
 	store.SetOSInfo(label, [3]uint32{0, 1, 0})
 	store.BaseClientPayload.UserAgent.Device = proto.String(label)

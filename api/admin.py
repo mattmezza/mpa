@@ -384,6 +384,12 @@ def create_admin_app(
         redoc_url=None,
         openapi_url=None,
     )
+    app.state.wacli = wacli
+
+    @app.on_event("shutdown")
+    async def _shutdown_wacli() -> None:
+        await wacli.stop_auth()
+        await wacli.stop_sync()
 
     # Mount static files
     static_dir = Path(__file__).parent / "static"
