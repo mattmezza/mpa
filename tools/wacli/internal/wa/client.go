@@ -114,11 +114,32 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 		qrChan = ch
 	}
 
+	// For already-authenticated sessions, register an event handler to
+	// detect when the connection handshake completes before we return.
+	connReady := make(chan struct{}, 1)
+	if authed {
+		handlerID := cli.AddEventHandler(func(evt interface{}) {
+			if _, ok := evt.(*events.Connected); ok {
+				select {
+				case connReady <- struct{}{}:
+				default:
+				}
+			}
+		})
+		defer cli.RemoveEventHandler(handlerID)
+	}
+
 	if err := cli.ConnectContext(ctx); err != nil {
 		return err
 	}
 
 	if authed {
+		// Wait until the Connected event fires or context expires.
+		select {
+		case <-connReady:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		return nil
 	}
 
@@ -259,6 +280,7 @@ func ParseUserOrJID(s string) (types.JID, error) {
 	if strings.Contains(s, "@") {
 		return types.ParseJID(s)
 	}
+	s = strings.TrimPrefix(s, "+")
 	return types.JID{User: s, Server: types.DefaultUserServer}, nil
 }
 

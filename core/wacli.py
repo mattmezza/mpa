@@ -38,7 +38,7 @@ class WacliManager:
     def available(self) -> bool:
         return Path(self.bin_path).exists()
 
-    async def _run_json(self, args: list[str]) -> dict[str, Any]:
+    async def _run_json(self, args: list[str], *, timeout: float = 30) -> dict[str, Any]:
         if not self.available():
             return {"success": False, "error": "wacli not found"}
         proc = await asyncio.create_subprocess_exec(
@@ -46,15 +46,29 @@ class WacliManager:
             "--store",
             self.store_dir,
             "--json",
+            "--timeout",
+            f"{int(timeout)}s",
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 5)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {"success": False, "error": "wacli timed out"}
         output = (stdout or b"").decode().strip().split("\n")
         last = output[-1] if output else ""
         if proc.returncode != 0:
-            return {"success": False, "error": (stderr or b"").decode().strip() or last}
+            err_text = (stderr or b"").decode().strip() or last
+            try:
+                err_json = json.loads(err_text)
+                if isinstance(err_json, dict):
+                    return err_json
+            except json.JSONDecodeError, ValueError:
+                pass
+            return {"success": False, "error": err_text}
         try:
             return json.loads(last)
         except json.JSONDecodeError:

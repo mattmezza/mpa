@@ -22,6 +22,14 @@ func TestParseUserOrJID(t *testing.T) {
 	if !IsGroupJID(j) {
 		t.Fatalf("expected group jid, got %+v", j)
 	}
+
+	j, err = ParseUserOrJID("+41772909259")
+	if err != nil {
+		t.Fatalf("ParseUserOrJID with + prefix: %v", err)
+	}
+	if j.User != "41772909259" || j.Server != types.DefaultUserServer {
+		t.Fatalf("expected + stripped, got %+v", j)
+	}
 }
 
 func TestBestContactName(t *testing.T) {
