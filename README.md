@@ -7,7 +7,7 @@ A self-hosted personal AI agent that runs in a single Docker container. MPA acts
 - **Messaging** — Telegram (and WhatsApp) with text and voice messages
 - **Email** — Read, compose, and manage emails via [Himalaya](https://github.com/pimalaya/himalaya) CLI
 - **Calendar** — CalDAV integration (Google Calendar, iCloud, etc.)
-- **Contacts** — CardDAV sync via [khard](https://github.com/lucc/khard) and [vdirsyncer](https://github.com/pimutils/vdirsyncer)
+- **Contacts** — CardDAV providers via the built-in contacts CLI
 - **Memory** — Two-tier system: permanent long-term facts and expiring short-term context, both extracted automatically from conversations
 - **Scheduled tasks** — Cron-based jobs for morning briefings, email checks, contact sync, and custom tasks
 - **Voice** — Speech-to-text (faster-whisper) and text-to-speech (edge-tts)
@@ -25,7 +25,7 @@ MPA follows a **Python orchestrator + CLI tools** design. Python glues everythin
 |---------|------|
 | LLM | Anthropic Claude, OpenAI, Grok (xAI), DeepSeek |
 | Email | Himalaya CLI (Rust) |
-| Contacts | khard + vdirsyncer |
+| Contacts | Built-in contacts CLI |
 | Calendar | python-caldav |
 | Storage | SQLite (4 databases) |
 | Voice | faster-whisper (STT) + edge-tts (TTS) |
@@ -88,7 +88,7 @@ MPA uses a dual-layer config system:
 | `character.md` | Agent personality and communication style (editable) |
 | `personalia.md` | Agent identity facts — name, owner, context (append-only) |
 | `skills/*.md` | Skill documents that teach the agent how to use tools |
-| `cli-configs/` | Configuration for Himalaya, khard, and vdirsyncer |
+| `cli-configs/` | Configuration for Himalaya |
 
 ## Project structure
 
@@ -146,7 +146,7 @@ Skills are markdown files that teach the agent how to use CLI tools. Instead of 
 
 Example skills included:
 - `himalaya-email.md` — Email management via Himalaya CLI
-- `khard-contacts.md` — Contact lookup and management
+- `contacts.md` — Contact lookup and management
 - `caldav-calendar.md` — Calendar event reading and creation
 - `memory.md` — Memory querying via sqlite3
 - `voice.md` — Voice response conventions

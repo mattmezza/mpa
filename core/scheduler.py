@@ -95,7 +95,6 @@ async def run_system_command(command: str) -> None:
         log.error("Scheduler system command dropped; agent not initialized")
         return
 
-    command = _maybe_rewrite_vdirsyncer(command)
     log.info("Scheduler running system command: %s", command[:100])
     try:
         result = await agent.executor.run_command_trusted(command)
@@ -107,10 +106,6 @@ async def run_system_command(command: str) -> None:
             )
     except Exception:
         log.exception("Scheduler system command failed: %s", command[:100])
-
-
-def _maybe_rewrite_vdirsyncer(command: str) -> str:
-    return command
 
 
 async def run_memory_consolidation() -> None:
