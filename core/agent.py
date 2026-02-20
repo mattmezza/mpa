@@ -303,10 +303,11 @@ class AgentCore:
         )
 
         # Agentic loop — keep going while the LLM wants to call tools
+        request_state = {"write_executed": False, "write_decision": None, "approvals": {}}
         while response.tool_calls:
             tool_results = []
             for call in response.tool_calls:
-                result = await self._execute_tool(call, channel, user_id)
+                result = await self._execute_tool(call, channel, user_id, request_state)
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -325,7 +326,6 @@ class AgentCore:
                 messages=messages,
                 tools=cast(Any, TOOLS),
             )
-
         final_text = response.text
         log.info("Response: %s", final_text[:200])
 
@@ -382,10 +382,11 @@ class AgentCore:
 
         # Agentic loop — keep going while the LLM wants to call tools
         new_messages: list[dict] = []
+        request_state = {"write_executed": False, "write_decision": None, "approvals": {}}
         while response.tool_calls:
             tool_results = []
             for call in response.tool_calls:
-                result = await self._execute_tool(call, channel, user_id)
+                result = await self._execute_tool(call, channel, user_id, request_state)
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -457,10 +458,25 @@ class AgentCore:
                 log.exception("TTS synthesis failed, sending text only")
         return None
 
-    async def _execute_tool(self, tool_call: LLMToolCall, channel: str, user_id: str) -> dict:
+    async def _execute_tool(
+        self,
+        tool_call: LLMToolCall,
+        channel: str,
+        user_id: str,
+        request_state: dict | None = None,
+    ) -> dict:
         """Dispatch a tool call from the LLM, with permission checks."""
         name = tool_call.name
         params = tool_call.arguments
+
+        if request_state is None:
+            request_state = {"write_executed": False, "write_decision": None, "approvals": {}}
+
+        is_write_action = self.permissions.is_write_action(name, params)
+        if is_write_action and request_state.get("write_executed"):
+            return {"error": "Request already fulfilled; not repeating write actions."}
+        if is_write_action and request_state.get("write_decision") is False:
+            return {"error": "Action denied by user."}
 
         # --- Permission check ---
         level = self.permissions.check(name, params)
@@ -470,10 +486,28 @@ class AgentCore:
             return {"error": "This action is not allowed."}
 
         if level == PermissionLevel.ASK and channel != "system":
-            approved = await self._request_approval(name, params, channel, user_id)
+            match_key = self.permissions.match_key(name, params)
+            approvals = request_state.get("approvals", {})
+            if is_write_action and request_state.get("write_decision") is not None:
+                approved = bool(request_state.get("write_decision"))
+            elif isinstance(approvals, dict) and match_key in approvals:
+                approved = bool(approvals[match_key])
+            else:
+                approved = await self._request_approval(name, params, channel, user_id)
+                if isinstance(approvals, dict):
+                    approvals[match_key] = approved
+                    request_state["approvals"] = approvals
+                if is_write_action:
+                    request_state["write_decision"] = approved
             if not approved:
                 log.info("Permission DENIED (user rejected): %s", name)
                 return {"error": "Action denied by user."}
+
+            if not is_write_action:
+                self.permissions.add_rule(
+                    self.permissions.match_key(name, params),
+                    PermissionLevel.ALWAYS,
+                )
 
         # --- Dispatch ---
         if name == "run_command":
@@ -481,16 +515,28 @@ class AgentCore:
             return await self.executor.run_command(params["command"])
 
         if name == "send_email":
-            return await self._tool_send_email(params)
+            result = await self._tool_send_email(params)
+            if is_write_action and self._is_tool_success(result):
+                request_state["write_executed"] = True
+            return result
 
         if name == "reply_email":
-            return await self._tool_reply_email(params)
+            result = await self._tool_reply_email(params)
+            if is_write_action and self._is_tool_success(result):
+                request_state["write_executed"] = True
+            return result
 
         if name == "send_message":
-            return await self._tool_send_message(params)
+            result = await self._tool_send_message(params)
+            if is_write_action and self._is_tool_success(result):
+                request_state["write_executed"] = True
+            return result
 
         if name == "create_calendar_event":
-            return await self._tool_create_calendar_event(params)
+            result = await self._tool_create_calendar_event(params)
+            if is_write_action and self._is_tool_success(result):
+                request_state["write_executed"] = True
+            return result
 
         if name == "web_search":
             log.info("Tool call: web_search — %s", params.get("query", ""))
@@ -507,9 +553,24 @@ class AgentCore:
 
         if name == "schedule_task":
             log.info("Tool call: schedule_task — %s", params.get("task", ""))
-            return self._tool_schedule_task(params)
+            result = self._tool_schedule_task(params)
+            if is_write_action and self._is_tool_success(result):
+                request_state["write_executed"] = True
+            return result
 
         return {"error": f"Unknown tool: {name}"}
+
+    @staticmethod
+    def _is_tool_success(result: dict) -> bool:
+        if not isinstance(result, dict):
+            return False
+        if "error" in result:
+            return False
+        if "exit_code" in result:
+            return result.get("exit_code") == 0
+        if "ok" in result:
+            return result.get("ok") is True
+        return True
 
     # -- Structured tool implementations --
 

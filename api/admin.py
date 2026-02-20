@@ -14,6 +14,7 @@ import json
 import logging
 import secrets
 import urllib.parse
+from contextlib import asynccontextmanager
 from base64 import urlsafe_b64encode
 from datetime import datetime
 from pathlib import Path
@@ -459,6 +460,16 @@ def create_admin_app(
     lifespan=None,
 ) -> tuple[FastAPI, object]:
     wacli = WacliManager()
+
+    if lifespan is None:
+
+        @asynccontextmanager
+        async def _lifespan(app: FastAPI):  # noqa: ANN001
+            yield
+            await wacli.stop_auth()
+
+        lifespan = _lifespan
+
     app = FastAPI(
         title="Personal Agent Admin",
         version="0.1.0",
@@ -468,10 +479,6 @@ def create_admin_app(
         lifespan=lifespan,
     )
     app.state.wacli = wacli
-
-    @app.on_event("shutdown")
-    async def _shutdown_wacli() -> None:
-        await wacli.stop_auth()
 
     # Mount static files
     static_dir = Path(__file__).parent / "static"
