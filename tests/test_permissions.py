@@ -40,7 +40,27 @@ async def test_approval_request_lifecycle() -> None:
 
     resolved = engine.resolve_approval(request_id, True)
     assert resolved is True
-    assert await future is True
+    assert await future == "approved"
+
+
+@pytest.mark.asyncio
+async def test_approval_denied() -> None:
+    engine = PermissionEngine()
+    request_id, future = engine.create_approval_request()
+
+    resolved = engine.resolve_approval(request_id, False)
+    assert resolved is True
+    assert await future == "denied"
+
+
+@pytest.mark.asyncio
+async def test_approval_skipped() -> None:
+    engine = PermissionEngine()
+    request_id, future = engine.create_approval_request()
+
+    resolved = engine.resolve_approval(request_id, False, skipped=True)
+    assert resolved is True
+    assert await future == "skipped"
 
 
 def test_format_approval_message_run_command_includes_purpose() -> None:

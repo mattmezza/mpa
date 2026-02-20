@@ -569,8 +569,16 @@ class AgentCore:
         is_write_action = self.permissions.is_write_action(name, params)
         if is_write_action and request_state.get("write_executed"):
             return {"error": "Request already fulfilled; not repeating write actions."}
-        if is_write_action and request_state.get("write_decision") is False:
+        if is_write_action and request_state.get("write_decision") == "denied":
             return {"error": "Action denied by user."}
+        if is_write_action and request_state.get("write_decision") == "skipped":
+            return {
+                "error": (
+                    "User skipped this action. "
+                    "Do not retry this action or attempt similar alternatives — "
+                    "move on to something else."
+                )
+            }
 
         # --- Permission check ---
         level = self.permissions.check(name, params)
@@ -583,17 +591,26 @@ class AgentCore:
             match_key = self.permissions.match_key(name, params)
             approvals = request_state.get("approvals", {})
             if is_write_action and request_state.get("write_decision") is not None:
-                approved = bool(request_state.get("write_decision"))
+                decision = request_state.get("write_decision")
             elif isinstance(approvals, dict) and match_key in approvals:
-                approved = bool(approvals[match_key])
+                decision = approvals[match_key]
             else:
-                approved = await self._request_approval(name, params, channel, user_id)
+                decision = await self._request_approval(name, params, channel, user_id)
                 if isinstance(approvals, dict):
-                    approvals[match_key] = approved
+                    approvals[match_key] = decision
                     request_state["approvals"] = approvals
                 if is_write_action:
-                    request_state["write_decision"] = approved
-            if not approved:
+                    request_state["write_decision"] = decision
+            if decision == "skipped":
+                log.info("Permission SKIPPED by user: %s", name)
+                return {
+                    "error": (
+                        "User skipped this action. "
+                        "Do not retry this action or attempt similar alternatives — "
+                        "move on to something else."
+                    )
+                }
+            if decision != "approved":
                 log.info("Permission DENIED (user rejected): %s", name)
                 return {"error": "Action denied by user."}
 
@@ -909,17 +926,19 @@ class AgentCore:
 
     async def _request_approval(
         self, tool_name: str, params: dict, channel: str, user_id: str
-    ) -> bool:
+    ) -> str:
         """Ask the user for approval via their channel (e.g. Telegram inline keyboard).
 
         Creates a pending approval future, sends the prompt to the channel,
-        and waits for the user to respond. Returns True if approved.
+        and waits for the user to respond.
+
+        Returns one of ``"approved"``, ``"denied"``, or ``"skipped"``.
         """
         ch = self.channels.get(channel)
         if not ch:
             # No channel available to ask — auto-approve (e.g. admin API)
             log.warning("No channel %r for approval, auto-approving %s", channel, tool_name)
-            return True
+            return "approved"
 
         request_id, future = self.permissions.create_approval_request(tool_name, params)
         description = format_approval_message(tool_name, params)
@@ -931,11 +950,11 @@ class AgentCore:
             # Channel doesn't support approval requests — auto-approve
             log.warning("Channel %r doesn't support approvals, auto-approving", channel)
             self.permissions.resolve_approval(request_id, True)
-            return True
+            return "approved"
         except Exception:
             log.exception("Failed to send approval request")
             self.permissions.resolve_approval(request_id, True)
-            return True
+            return "approved"
 
         # Wait for the user's response (timeout after 2 minutes)
         try:
@@ -943,7 +962,7 @@ class AgentCore:
         except TimeoutError:
             log.info("Approval request %s timed out", request_id)
             self.permissions._pending.pop(request_id, None)
-            return False
+            return "skipped"
 
     async def _extract_memories(self, user_msg: str, agent_msg: str) -> None:
         """Run automatic memory extraction in the background.

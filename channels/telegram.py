@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
+from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
 if TYPE_CHECKING:
@@ -23,6 +25,11 @@ log = logging.getLogger(__name__)
 _APPROVE_PREFIX = "perm_approve:"
 _DENY_PREFIX = "perm_deny:"
 _ALWAYS_PREFIX = "perm_always:"
+_SKIP_PREFIX = "perm_skip:"
+_HTML_TAG_RE = re.compile(
+    r"</?(b|strong|i|em|u|ins|s|strike|del|code|pre|a|tg-spoiler)(\s+[^>]*)?>",
+    re.IGNORECASE,
+)
 
 
 class TelegramChannel:
@@ -75,8 +82,8 @@ class TelegramChannel:
         chat_id = chat.id if chat else user_id
         if not self.voice:
             await self.app.bot.send_message(
-                chat_id=chat_id,
-                text="Voice messages are not supported (voice pipeline not configured).",
+                chat_id,
+                "Voice messages are not supported (voice pipeline not configured).",
             )
             return
 
@@ -150,6 +157,11 @@ class TelegramChannel:
             resolved = self.agent.permissions.resolve_approval(request_id, False)
             await self._finalize_approval_response(query, resolved, "Denied")
 
+        elif data.startswith(_SKIP_PREFIX):
+            request_id = data[len(_SKIP_PREFIX) :]
+            resolved = self.agent.permissions.resolve_approval(request_id, False, skipped=True)
+            await self._finalize_approval_response(query, resolved, "Skipped")
+
         elif data.startswith(_ALWAYS_PREFIX):
             request_id = data[len(_ALWAYS_PREFIX) :]
             resolved = self.agent.permissions.resolve_approval(request_id, True, always_allow=True)
@@ -159,7 +171,15 @@ class TelegramChannel:
 
     async def send(self, chat_id: int | str, text: str) -> None:
         """Send a message to a specific chat (used by scheduler, send_message tool, etc.)."""
-        await self.app.bot.send_message(chat_id=chat_id, text=text)
+        parse_mode = "HTML" if _HTML_TAG_RE.search(text) else None
+        try:
+            await self.app.bot.send_message(chat_id, text, parse_mode=parse_mode)
+        except BadRequest as exc:
+            if parse_mode and "parse entities" in str(exc).lower():
+                log.warning("Telegram HTML parse failed; sending without formatting: %s", exc)
+                await self.app.bot.send_message(chat_id, text)
+                return
+            raise
 
     async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
         """Send a permission approval prompt with Approve/Deny inline buttons."""
@@ -170,15 +190,18 @@ class TelegramChannel:
                 [
                     InlineKeyboardButton("Approve", callback_data=f"{_APPROVE_PREFIX}{request_id}"),
                     InlineKeyboardButton("Deny", callback_data=f"{_DENY_PREFIX}{request_id}"),
+                ],
+                [
+                    InlineKeyboardButton("Skip", callback_data=f"{_SKIP_PREFIX}{request_id}"),
                     InlineKeyboardButton(
                         "Always allow", callback_data=f"{_ALWAYS_PREFIX}{request_id}"
                     ),
-                ]
+                ],
             ]
         )
         await self.app.bot.send_message(
-            chat_id=chat_id,
-            text=f"Permission request:\n\n{description}",
+            chat_id,
+            f"Permission request:\n\n{description}",
             reply_markup=keyboard,
         )
 
@@ -195,7 +218,7 @@ class TelegramChannel:
         async def _send_typing():
             try:
                 while True:
-                    await self.app.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                    await self.app.bot.send_chat_action(chat_id, action=ChatAction.TYPING)
                     await asyncio.sleep(4)
             except asyncio.CancelledError:
                 pass
@@ -235,12 +258,16 @@ class TelegramChannel:
             log.info(
                 "Transcribing voice message from user %s (%d bytes)", user_id, len(audio_bytes)
             )
-            transcript = await self.voice.transcribe(bytes(audio_bytes))
+            voice = self.voice
+            if not voice:
+                await self.send(
+                    chat_id, "Voice messages are not supported (voice pipeline not configured)."
+                )
+                return
+            transcript = await voice.transcribe(bytes(audio_bytes))
 
             if not transcript.strip():
-                await self.app.bot.send_message(
-                    chat_id=chat_id, text="(could not transcribe voice)"
-                )
+                await self.app.bot.send_message(chat_id, "(could not transcribe voice)")
                 return
 
             log.info("Transcript: %s", transcript[:200])
@@ -282,8 +309,8 @@ class TelegramChannel:
 
             if not attachments:
                 await self.app.bot.send_message(
-                    chat_id=chat_id,
-                    text="Sorry, I can only process image files (JPEG, PNG, GIF, WebP) for now.",
+                    chat_id,
+                    "Sorry, I can only process image files (JPEG, PNG, GIF, WebP) for now.",
                 )
                 return
 
@@ -299,9 +326,9 @@ class TelegramChannel:
     async def _send_response(self, chat_id: int, response) -> None:
         """Send an AgentResponse back — voice if present, otherwise text."""
         if response.voice:
-            await self.app.bot.send_voice(chat_id=chat_id, voice=response.voice)
+            await self.app.bot.send_voice(chat_id, response.voice)
         elif response.text:
-            await self.app.bot.send_message(chat_id=chat_id, text=response.text)
+            await self.send(chat_id, response.text)
         else:
             log.warning("Skipping empty response for chat_id=%s", chat_id)
 
@@ -317,6 +344,6 @@ class TelegramChannel:
             if text:
                 await query.edit_message_text(text + f"\n\n--- {label}")
             else:
-                await self.app.bot.send_message(chat_id=query.from_user.id, text=f"{label}.")
+                await self.app.bot.send_message(query.from_user.id, f"{label}.")
         except Exception:
             log.exception("Failed to update approval message")

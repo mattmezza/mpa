@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 _APPROVE_ACTIONS = {"approve", "approved", "yes"}
 _DENY_ACTIONS = {"deny", "denied", "no"}
 _ALWAYS_ACTIONS = {"always", "allow"}
+_SKIP_ACTIONS = {"skip", "skipped"}
 
 
 def _normalize_number(value: str) -> str:
@@ -47,6 +48,7 @@ class WhatsAppChannel:
             f"Reply with:\n"
             f"- approve {request_id}\n"
             f"- deny {request_id}\n"
+            f"- skip {request_id}\n"
             f"- always {request_id}"
         )
         await self.send(user_id, message)
@@ -90,7 +92,7 @@ class WhatsAppChannel:
             return False
 
         action = tokens[0]
-        if action not in _APPROVE_ACTIONS | _DENY_ACTIONS | _ALWAYS_ACTIONS:
+        if action not in _APPROVE_ACTIONS | _DENY_ACTIONS | _ALWAYS_ACTIONS | _SKIP_ACTIONS:
             return False
 
         request_id = tokens[1] if len(tokens) > 1 else ""
@@ -102,14 +104,20 @@ class WhatsAppChannel:
             return True
 
         always_allow = action in _ALWAYS_ACTIONS
+        is_skip = action in _SKIP_ACTIONS
         approved = action in _APPROVE_ACTIONS or always_allow
         resolved = self.agent.permissions.resolve_approval(
-            request_id, approved, always_allow=always_allow
+            request_id, approved, always_allow=always_allow, skipped=is_skip
         )
         if resolved:
-            label = "Approved" if approved else "Denied"
-            if always_allow:
+            if is_skip:
+                label = "Skipped"
+            elif always_allow:
                 label = "Always allowed"
+            elif approved:
+                label = "Approved"
+            else:
+                label = "Denied"
             await self.send(sender, f"{label}.")
         else:
             await self.send(sender, "No pending approval found for that ID.")

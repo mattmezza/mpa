@@ -9,11 +9,18 @@ from core.config import WhatsAppConfig
 
 class FakePermissions:
     def __init__(self, resolved: bool = True):
-        self.calls: list[tuple[str, bool, bool]] = []
+        self.calls: list[tuple[str, bool, bool, bool]] = []
         self.resolved = resolved
 
-    def resolve_approval(self, request_id: str, approved: bool, always_allow: bool = False) -> bool:
-        self.calls.append((request_id, approved, always_allow))
+    def resolve_approval(
+        self,
+        request_id: str,
+        approved: bool,
+        always_allow: bool = False,
+        *,
+        skipped: bool = False,
+    ) -> bool:
+        self.calls.append((request_id, approved, always_allow, skipped))
         return self.resolved
 
 
@@ -58,12 +65,12 @@ async def test_approval_commands_send_responses() -> None:
 
     handled = await channel._maybe_handle_approval("sender", "approve abcdef123456")
     assert handled is True
-    assert permissions.calls == [("abcdef123456", True, False)]
+    assert permissions.calls == [("abcdef123456", True, False, False)]
     assert sent[-1][1] == "Approved."
 
     handled = await channel._maybe_handle_approval("sender", "always abcdef123456")
     assert handled is True
-    assert permissions.calls[-1] == ("abcdef123456", True, True)
+    assert permissions.calls[-1] == ("abcdef123456", True, True, False)
     assert sent[-1][1] == "Always allowed."
 
 
@@ -86,3 +93,24 @@ async def test_approval_missing_id() -> None:
     assert handled is True
     assert permissions.calls == []
     assert sent[-1][1] == "Missing approval ID. Reply with: approve <id>."
+
+
+@pytest.mark.asyncio
+async def test_skip_approval_command() -> None:
+    permissions = FakePermissions(resolved=True)
+    channel = WhatsAppChannel(
+        WhatsAppConfig(),
+        cast(Any, FakeAgent(permissions)),
+        wacli=_fake_wacli(),
+    )
+    sent: list[tuple[str, str]] = []
+
+    async def fake_send(to: str, text: str) -> None:
+        sent.append((to, text))
+
+    channel.send = fake_send
+
+    handled = await channel._maybe_handle_approval("sender", "skip abcdef123456")
+    assert handled is True
+    assert permissions.calls == [("abcdef123456", False, False, True)]
+    assert sent[-1][1] == "Skipped."
