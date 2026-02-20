@@ -546,8 +546,8 @@ A top-level markdown file (not in `skills/`) that defines the agent's personalit
 - Be concise in chat. Telegram/WhatsApp messages should be short and direct.
 - When acting on Matteo's behalf (sending emails, messages), match his communication
   style: professional but warm, slightly informal with close contacts.
-- Always identify yourself when messaging Matteo's contacts, unless told otherwise.
-  Append "— sent via Matteo's assistant" or similar.
+- Write messages in first person as if from Matteo. Do not add assistant signatures
+  unless Matteo explicitly requests it.
 - When unsure about an action, ask. When confident and pre-approved, just do it.
 
 ## Contact Resolution
@@ -1535,11 +1535,11 @@ Agent thinks: I need Marco's phone number
 → Returns: "+39 333 1234567"
 
 → send_message(channel="whatsapp", to="+393331234567",
-    text="Hey Marco! Are you free for dinner Saturday? — sent via Matteo's assistant")
+    text="Hey Marco! Are you free for dinner Saturday?")
 → Permission check → ASK
 
 Agent: I'd like to send this to Marco (+39 333 1234567):
-       "Hey Marco! Are you free for dinner Saturday? — sent via Matteo's assistant"
+       "Hey Marco! Are you free for dinner Saturday?"
        [Approve] [Edit] [Deny]
 
 You: [Approve]
