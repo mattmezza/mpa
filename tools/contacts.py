@@ -229,20 +229,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Contacts CLI")
     parser.add_argument("--config", default="config.yml", help="Path to config.yml")
     parser.add_argument("--db", default="data/config.db", help="Path to config DB")
-    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
-
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     list_cmd = sub.add_parser("list", help="List all contacts")
     list_cmd.add_argument("--provider", "-p", required=True)
+    list_cmd.add_argument("--output", "-o", choices=["json", "text"], default="json")
 
     search_cmd = sub.add_parser("search", help="Search contacts")
     search_cmd.add_argument("--provider", "-p", required=True)
     search_cmd.add_argument("--query", "-q", required=True)
+    search_cmd.add_argument("--output", "-o", choices=["json", "text"], default="json")
 
     get_cmd = sub.add_parser("get", help="Get contact details")
     get_cmd.add_argument("--provider", "-p", required=True)
     get_cmd.add_argument("--id", required=True)
+    get_cmd.add_argument("--output", "-o", choices=["json", "text"], default="json")
 
     args = parser.parse_args()
     providers = _load_contacts_providers(args.config, args.db)

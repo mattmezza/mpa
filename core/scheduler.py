@@ -3,7 +3,7 @@
 Three job types:
   - "agent": natural-language task → agent.process() → send result to channel
   - "system": raw CLI command → executor.run_command_trusted()
-    (e.g. vdirsyncer sync, memory cleanup)
+    (e.g. memory cleanup)
   - "memory_consolidation": review short-term memories, promote worthy ones
     to long-term, delete expired entries (uses a lightweight LLM call)
 """

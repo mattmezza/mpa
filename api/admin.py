@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
-_GOOGLE_CONTACTS_SCOPES = ["https://www.googleapis.com/auth/carddav"]
+_GOOGLE_CONTACTS_SCOPES = ["https://www.googleapis.com/auth/contacts.readonly"]
 
 # In-memory PKCE state (short-lived, per auth attempt)
 _oauth_pending: dict[str, dict] = {}  # state -> {code_verifier, client_id, client_secret}
@@ -143,7 +143,7 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
                     ctx["cal_url"] = p.get("url", "")
                     ctx["cal_username"] = p.get("username", "")
                     ctx["cal_password"] = p.get("password", "")
-            except (json.JSONDecodeError, IndexError):
+            except json.JSONDecodeError, IndexError:
                 pass
     elif step == "search":
         val = await config_store.get("search.api_key")
@@ -396,6 +396,10 @@ class WhatsAppTestIn(BaseModel):
 
 
 class ContactProvidersIn(BaseModel):
+    providers: list[dict[str, str]]
+
+
+class EmailProvidersIn(BaseModel):
     providers: list[dict[str, str]]
 
 
@@ -699,8 +703,12 @@ def create_admin_app(
     @app.get("/partials/email", dependencies=[Depends(auth)])
     async def partial_email() -> HTMLResponse:
         """Email tab partial."""
-        himalaya_toml = await config_store.get("email.himalaya.toml") or ""
-        return _render_partial("partials/email.html", himalaya_toml=himalaya_toml)
+        raw = await config_store.get("email.providers") or "[]"
+        try:
+            providers = json.loads(raw)
+        except json.JSONDecodeError, TypeError:
+            providers = []
+        return _render_partial("partials/email.html", providers=providers)
 
     @app.get("/partials/admin", dependencies=[Depends(auth)])
     async def partial_admin() -> HTMLResponse:
@@ -1217,6 +1225,38 @@ def create_admin_app(
         await config_store.set("contacts.providers", json.dumps(providers))
         return {"ok": True}
 
+    @app.post("/email/providers", dependencies=[Depends(auth)])
+    async def save_email_providers(body: EmailProvidersIn) -> dict:
+        """Save structured email (IMAP/SMTP) providers to the config store."""
+        providers = []
+        for p in body.providers:
+            name = str(p.get("name", "")).strip()
+            email = str(p.get("email", "")).strip()
+            display_name = str(p.get("display_name", "")).strip()
+            imap_host = str(p.get("imap_host", "")).strip()
+            imap_port = str(p.get("imap_port", "993")).strip() or "993"
+            smtp_host = str(p.get("smtp_host", "")).strip()
+            smtp_port = str(p.get("smtp_port", "465")).strip() or "465"
+            login = str(p.get("login", "")).strip()
+            password = str(p.get("password", "")).strip()
+            if not any([name, email, imap_host, smtp_host]):
+                continue
+            providers.append(
+                {
+                    "name": name,
+                    "email": email,
+                    "display_name": display_name,
+                    "imap_host": imap_host,
+                    "imap_port": imap_port,
+                    "smtp_host": smtp_host,
+                    "smtp_port": smtp_port,
+                    "login": login,
+                    "password": password,
+                }
+            )
+        await config_store.set("email.providers", json.dumps(providers))
+        return {"ok": True}
+
     # ── Google Calendar OAuth 2.0 flow ─────────────────────────────────
 
     @app.post("/calendar/google/oauth/save-credentials", dependencies=[Depends(auth)])
@@ -1685,7 +1725,7 @@ def create_admin_app(
         # Coerce to int (form-encoded values arrive as strings)
         try:
             memory_id = int(cast(str, memory_id_raw))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise HTTPException(400, "memory_id must be an integer")
 
         import aiosqlite
