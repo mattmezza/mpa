@@ -28,7 +28,21 @@ def _load_token_from_db(db_path: str = CONFIG_DB_PATH) -> dict | None:
     return None
 
 
-def _refresh_access_token(token_data: dict) -> tuple[str, int]:
+def _save_token_to_db(token_data: dict, db_path: str = CONFIG_DB_PATH) -> None:
+    try:
+        db = sqlite3.connect(db_path)
+        db.execute(
+            "INSERT INTO config (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (TOKEN_DB_KEY, json.dumps(token_data)),
+        )
+        db.commit()
+        db.close()
+    except Exception:
+        pass
+
+
+def _refresh_access_token(token_data: dict) -> tuple[str, int, dict]:
     resp = requests.post(
         GOOGLE_TOKEN_URL,
         data={
@@ -41,7 +55,7 @@ def _refresh_access_token(token_data: dict) -> tuple[str, int]:
     )
     resp.raise_for_status()
     data = resp.json()
-    return data["access_token"], data.get("expires_in", 3600)
+    return data["access_token"], data.get("expires_in", 3600), data
 
 
 def get_google_access_token(db_path: str = CONFIG_DB_PATH) -> str:
@@ -59,6 +73,13 @@ def get_google_access_token(db_path: str = CONFIG_DB_PATH) -> str:
         )
         sys.exit(1)
 
-    access_token, expires_in = _refresh_access_token(token_data)
+    access_token, expires_in, response = _refresh_access_token(token_data)
+    token_data["access_token"] = access_token
+    token_data["expires_in"] = expires_in
+    if response.get("scope"):
+        token_data["scope"] = response["scope"]
+    if response.get("token_type"):
+        token_data["token_type"] = response["token_type"]
+    _save_token_to_db(token_data, db_path=db_path)
     _token_cache = (access_token, time.time() + expires_in)
     return access_token
