@@ -142,7 +142,7 @@ uv run pytest -n auto  # run in parallel
 
 ## Skills
 
-Skills are markdown files that teach the agent how to use CLI tools. Instead of writing code, you describe the tool's commands and patterns in natural language. The agent loads skills on-demand during conversations.
+Skills are markdown documents stored in SQLite that teach the agent how to use CLI tools. Seed files in `skills/` are loaded into the DB at startup. The agent loads skills on-demand during conversations.
 
 Example skills included:
 - `himalaya-email.md` — Email management via Himalaya CLI
@@ -153,7 +153,11 @@ Example skills included:
 - `weather.md` — Weather lookups
 - `jq.md` — JSON processing
 
-Create new skills by adding `.md` files to the `skills/` directory or through the admin UI's skill editor.
+Create new skills by adding `.md` files to `skills/`, through the admin UI's skill editor, or via the skills CLI:
+
+```bash
+python3 /app/tools/skills.py upsert --name my-skill --stdin
+```
 
 ## WhatsApp
 

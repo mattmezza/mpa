@@ -106,7 +106,7 @@ The agent becomes a **thin orchestrator**: it reads skill files, passes them to 
 
 ## 4. The Skills System
 
-This is the central design idea. Instead of hardcoding how each integration works, the agent loads **skill files** — markdown documents that teach the LLM how to use each CLI tool. Skills are injected into the system prompt at runtime based on which tools are available.
+This is the central design idea. Instead of hardcoding how each integration works, the agent loads **skill docs** — markdown documents stored in SQLite that teach the LLM how to use each CLI tool. Seed files from `skills/` are inserted into the DB at startup. Skills are injected into the system prompt at runtime based on which tools are available.
 
 ### 4.1 How It Works
 
