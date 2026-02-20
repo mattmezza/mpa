@@ -114,9 +114,17 @@
           ]
         },
         init() {
-          // No normalisation on load — the server provides the correct
-          // model value and the <select> options are rendered via x-for,
-          // so touching the value before the DOM settles would clobber it.
+          // Preserve the server-provided values after Alpine's x-for has
+          // rendered the <option> elements — without this the browser
+          // resets <select> to the first option before options exist.
+          const savedModel = this.model;
+          const savedExtraction = this.extractionModel;
+          const savedConsolidation = this.consolidationModel;
+          this.$nextTick(() => {
+            this.model = savedModel;
+            this.extractionModel = savedExtraction;
+            this.consolidationModel = savedConsolidation;
+          });
         },
         resetModel() {
           const list = this.models[this.provider] || [];

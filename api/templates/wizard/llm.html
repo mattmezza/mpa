@@ -32,6 +32,10 @@
       {value: 'deepseek-vl2-latest', label: 'DeepSeek VL2 Latest'}
     ]
   },
+  init() {
+    const savedModel = this.model;
+    this.$nextTick(() => { this.model = savedModel; });
+  },
   resetModel() {
     const list = this.models[this.provider] || [];
     if (list.length) { this.model = list[0].value; }
