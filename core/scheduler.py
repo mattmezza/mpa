@@ -69,6 +69,7 @@ async def run_agent_task(
             message=task,
             channel="system",
             user_id="scheduler",
+            chat_id="scheduler",
         )
 
         # Deliver the response to the target channel

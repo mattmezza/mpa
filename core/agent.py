@@ -264,23 +264,39 @@ class AgentCore:
         channel: str,
         user_id: str,
         attachments: list[Attachment] | None = None,
+        chat_id: str = "",
     ) -> AgentResponse:
-        """Process an incoming message through the LLM with tool-use loop."""
+        """Process an incoming message through the LLM with tool-use loop.
+
+        ``chat_id`` distinguishes different chats for the same user (e.g.
+        a private Telegram chat vs. a group chat).  Each unique
+        (channel, user_id, chat_id) triple gets its own conversation history,
+        preventing context leakage across chats.
+        """
 
         # Handle /new command — clear conversational context.
         if message.strip().lower() == "/new":
             if self.history_mode == "session":
-                await self.history.clear_session(channel, user_id)
+                await self.history.clear_session(channel, user_id, chat_id)
             else:
-                await self.history.clear(channel, user_id)
-            log.info("Conversation cleared by user (channel=%s, user=%s)", channel, user_id)
+                await self.history.clear(channel, user_id, chat_id)
+            log.info(
+                "Conversation cleared by user (channel=%s, user=%s, chat=%s)",
+                channel,
+                user_id,
+                chat_id,
+            )
             return AgentResponse(text="Conversation cleared.")
 
         system = await self._build_system_prompt()
 
         if self.history_mode == "session":
-            return await self._process_session(system, message, channel, user_id, attachments)
-        return await self._process_injection(system, message, channel, user_id, attachments)
+            return await self._process_session(
+                system, message, channel, user_id, attachments, chat_id
+            )
+        return await self._process_injection(
+            system, message, channel, user_id, attachments, chat_id
+        )
 
     def _build_user_message(
         self,
@@ -308,9 +324,10 @@ class AgentCore:
         channel: str,
         user_id: str,
         attachments: list[Attachment] | None = None,
+        chat_id: str = "",
     ) -> AgentResponse:
         """Injection mode: replay windowed history as native alternating messages."""
-        history = await self.history.get_messages(channel, user_id)
+        history = await self.history.get_messages(channel, user_id, chat_id)
         messages: list[dict] = []
 
         if history:
@@ -321,7 +338,13 @@ class AgentCore:
         # The actual current request — always the last user message.
         messages.append(self._build_user_message(message, attachments))
 
-        log.info("Processing message (injection) from %s/%s: %s", channel, user_id, message[:100])
+        log.info(
+            "Processing message (injection) from %s/%s/%s: %s",
+            channel,
+            user_id,
+            chat_id,
+            message[:100],
+        )
 
         # Initial LLM call
         response = await self.llm.generate(
@@ -366,8 +389,8 @@ class AgentCore:
 
         # Persist the turn (user message + final assistant text only)
         history_message = self._history_message_text(message, attachments)
-        await self.history.add_turn(channel, user_id, "user", history_message)
-        await self.history.add_turn(channel, user_id, "assistant", final_text)
+        await self.history.add_turn(channel, user_id, "user", history_message, chat_id)
+        await self.history.add_turn(channel, user_id, "assistant", final_text, chat_id)
 
         # Automatic memory extraction
         if channel != "system":
@@ -385,21 +408,28 @@ class AgentCore:
         channel: str,
         user_id: str,
         attachments: list[Attachment] | None = None,
+        chat_id: str = "",
     ) -> AgentResponse:
-        """Session mode: sticky session per (channel, user_id).
+        """Session mode: sticky session per (channel, user_id, chat_id).
 
         The full message array is kept in memory and persisted to SQLite.
         New messages are appended, giving the LLM full conversational
         continuity with a cache-friendly prefix.
         """
         # Load existing session (from memory cache or DB)
-        session = await self.history.get_session(channel, user_id)
+        session = await self.history.get_session(channel, user_id, chat_id)
 
         # Append the new user message
         user_msg = self._build_user_message(message, attachments)
-        await self.history.append_session_message(channel, user_id, user_msg)
+        await self.history.append_session_message(channel, user_id, user_msg, chat_id)
 
-        log.info("Processing message (session) from %s/%s: %s", channel, user_id, message[:100])
+        log.info(
+            "Processing message (session) from %s/%s/%s: %s",
+            channel,
+            user_id,
+            chat_id,
+            message[:100],
+        )
 
         # Initial LLM call with the full session
         response = await self.llm.generate(
@@ -435,7 +465,7 @@ class AgentCore:
             # The in-memory session list is mutated by append_session_messages
             # so the next generate() call sees the updated messages.
             await self.history.append_session_messages(
-                channel, user_id, [assistant_msg, *tool_result_msgs]
+                channel, user_id, [assistant_msg, *tool_result_msgs], chat_id
             )
 
             response = await self.llm.generate(
@@ -448,7 +478,7 @@ class AgentCore:
 
         # Append the final assistant response to the session
         final_assistant_msg = {"role": "assistant", "content": response.text}
-        await self.history.append_session_message(channel, user_id, final_assistant_msg)
+        await self.history.append_session_message(channel, user_id, final_assistant_msg, chat_id)
 
         final_text = response.text
         log.info("Response: %s", final_text[:200])

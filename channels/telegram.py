@@ -222,6 +222,7 @@ class TelegramChannel:
                 message=text,
                 channel="telegram",
                 user_id=str(user_id),
+                chat_id=str(chat_id),
             )
         await self._send_response(chat_id, response)
 
@@ -248,6 +249,7 @@ class TelegramChannel:
                 message=f"[voice] {transcript}",
                 channel="telegram",
                 user_id=str(user_id),
+                chat_id=str(chat_id),
             )
         await self._send_response(chat_id, response)
 
@@ -290,6 +292,7 @@ class TelegramChannel:
                 channel="telegram",
                 user_id=str(user_id),
                 attachments=attachments,
+                chat_id=str(chat_id),
             )
         await self._send_response(chat_id, response)
 

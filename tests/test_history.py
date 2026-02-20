@@ -142,7 +142,7 @@ async def test_session_persists_across_instances(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_session_isolation_by_channel_user(tmp_path) -> None:
-    """Sessions are isolated per (channel, user_id)."""
+    """Sessions are isolated per (channel, user_id, chat_id)."""
     db_path = str(tmp_path / "agent.db")
     history = ConversationHistory(db_path=db_path)
 
@@ -157,6 +157,76 @@ async def test_session_isolation_by_channel_user(tmp_path) -> None:
     assert len(s1) == 1 and s1[0]["content"] == "tg-u1"
     assert len(s2) == 1 and s2[0]["content"] == "wa-u1"
     assert len(s3) == 1 and s3[0]["content"] == "tg-u2"
+
+
+@pytest.mark.asyncio
+async def test_session_isolation_by_chat_id(tmp_path) -> None:
+    """Sessions for the same user in different chats are fully isolated.
+
+    This is the key scenario: a user talking in a private chat vs. a group
+    chat should not share conversation history.
+    """
+    db_path = str(tmp_path / "agent.db")
+    history = ConversationHistory(db_path=db_path)
+
+    # Same user, same channel, different chat_ids (private vs group)
+    await history.append_session_message(
+        "telegram", "u1", {"role": "user", "content": "private msg"}, chat_id="100"
+    )
+    await history.append_session_message(
+        "telegram", "u1", {"role": "user", "content": "group msg"}, chat_id="200"
+    )
+
+    private_session = await history.get_session("telegram", "u1", chat_id="100")
+    group_session = await history.get_session("telegram", "u1", chat_id="200")
+
+    assert len(private_session) == 1
+    assert private_session[0]["content"] == "private msg"
+    assert len(group_session) == 1
+    assert group_session[0]["content"] == "group msg"
+
+
+@pytest.mark.asyncio
+async def test_injection_isolation_by_chat_id(tmp_path) -> None:
+    """Injection-mode history for the same user in different chats is isolated."""
+    db_path = str(tmp_path / "agent.db")
+    history = ConversationHistory(db_path=db_path, max_turns=10)
+
+    await history.add_turn("telegram", "u1", "user", "private hi", chat_id="100")
+    await history.add_turn("telegram", "u1", "assistant", "private hello", chat_id="100")
+    await history.add_turn("telegram", "u1", "user", "group hi", chat_id="200")
+    await history.add_turn("telegram", "u1", "assistant", "group hello", chat_id="200")
+
+    private_msgs = await history.get_messages("telegram", "u1", chat_id="100")
+    group_msgs = await history.get_messages("telegram", "u1", chat_id="200")
+
+    assert len(private_msgs) == 2
+    assert private_msgs[0]["content"] == "private hi"
+    assert len(group_msgs) == 2
+    assert group_msgs[0]["content"] == "group hi"
+
+
+@pytest.mark.asyncio
+async def test_clear_session_only_affects_specific_chat(tmp_path) -> None:
+    """Clearing a session for one chat_id does not affect another."""
+    db_path = str(tmp_path / "agent.db")
+    history = ConversationHistory(db_path=db_path)
+
+    await history.append_session_message(
+        "telegram", "u1", {"role": "user", "content": "private"}, chat_id="100"
+    )
+    await history.append_session_message(
+        "telegram", "u1", {"role": "user", "content": "group"}, chat_id="200"
+    )
+
+    await history.clear_session("telegram", "u1", chat_id="100")
+
+    private_session = await history.get_session("telegram", "u1", chat_id="100")
+    group_session = await history.get_session("telegram", "u1", chat_id="200")
+
+    assert private_session == []
+    assert len(group_session) == 1
+    assert group_session[0]["content"] == "group"
 
 
 @pytest.mark.asyncio

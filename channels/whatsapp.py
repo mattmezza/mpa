@@ -64,10 +64,16 @@ class WhatsAppChannel:
         if await self._maybe_handle_approval(sender, text):
             return {"ok": True, "handled": "approval"}
 
+        # Use chatId from the payload when available (e.g. group chats),
+        # otherwise fall back to the sender so that each conversation
+        # (private or group) gets its own history.
+        chat_id = str(payload.get("chatId", sender)).strip() or sender
+
         response = await self.agent.process(
             message=text,
             channel="whatsapp",
             user_id=sender,
+            chat_id=chat_id,
         )
         await self.send(sender, response.text)
         return {"ok": True}
