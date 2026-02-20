@@ -36,7 +36,7 @@
         <label class="label">Model</label>
         <select class="input-sm" style="max-width:500px" x-model="model">
           <template x-for="item in (models[provider] || [])" :key="item.value">
-            <option :value="item.value" x-text="item.label"></option>
+            <option :value="item.value" :selected="item.value === model" x-text="item.label"></option>
           </template>
         </select>
         <p class="text-muted text-xs mt-1">Pick a model that matches your provider.</p>
@@ -101,7 +101,7 @@
         <label class="label">Extraction model</label>
         <select class="input-sm" style="max-width:500px" x-model="extractionModel">
           <template x-for="item in (models[extractionProvider] || [])" :key="'ext-' + item.value">
-            <option :value="item.value" x-text="item.label"></option>
+            <option :value="item.value" :selected="item.value === extractionModel" x-text="item.label"></option>
           </template>
         </select>
         <p class="text-muted text-xs mt-1">Model used to extract memories from conversations.</p>
@@ -123,7 +123,7 @@
         <label class="label">Consolidation model</label>
         <select class="input-sm" style="max-width:500px" x-model="consolidationModel">
           <template x-for="item in (models[consolidationProvider] || [])" :key="'con-' + item.value">
-            <option :value="item.value" x-text="item.label"></option>
+            <option :value="item.value" :selected="item.value === consolidationModel" x-text="item.label"></option>
           </template>
         </select>
         <p class="text-muted text-xs mt-1">Model used to consolidate and merge duplicate memories.</p>

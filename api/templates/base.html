@@ -128,14 +128,26 @@
         },
         resetModel() {
           const list = this.models[this.provider] || [];
-          if (list.length) { this.model = list[0].value; }
+          if (!list.length) return;
+          const current = this.model || '';
+          const isValid = list.some(item => item.value === current);
+          if (!isValid) { this.model = list[0].value; }
         },
         resetMemoryModel(kind) {
           const prov = kind === 'extraction' ? this.extractionProvider : this.consolidationProvider;
           const list = this.models[prov] || [];
           if (!list.length) return;
-          if (kind === 'extraction') { this.extractionModel = list[0].value; }
-          else { this.consolidationModel = list[0].value; }
+          if (kind === 'extraction') {
+            const current = this.extractionModel || '';
+            if (!list.some(item => item.value === current)) {
+              this.extractionModel = list[0].value;
+            }
+            return;
+          }
+          const current = this.consolidationModel || '';
+          if (!list.some(item => item.value === current)) {
+            this.consolidationModel = list[0].value;
+          }
         },
         keyFor(service) {
           if (service === 'openai') return this.openaiKey;
