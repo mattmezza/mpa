@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -91,6 +92,82 @@ Rules:
 - If nothing is worth remembering, return an empty array: []
 
 Respond with ONLY the JSON array, no other text."""
+
+# Regex to match a fenced code block: ```json ... ``` (or just ``` ... ```)
+_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)```", re.DOTALL)
+
+
+def _extract_json_array(raw: str) -> list | None:
+    """Best-effort extraction of a JSON array from an LLM response.
+
+    Handles common quirks:
+    - Markdown code fences (```json ... ```)
+    - Preamble / trailing prose around the JSON
+    - Leading/trailing whitespace
+    - Empty responses
+
+    Returns the parsed list on success, or ``None`` if no valid JSON
+    array could be extracted.
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    # 1. Try parsing the raw response directly (happy path).
+    try:
+        result = json.loads(raw)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Try extracting from markdown code fences.
+    fence_match = _FENCE_RE.search(raw)
+    if fence_match:
+        try:
+            result = json.loads(fence_match.group(1).strip())
+            if isinstance(result, list):
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Find the outermost [ ... ] bracket pair in the response.
+    start = raw.find("[")
+    if start != -1:
+        # Walk forward to find the matching closing bracket.
+        depth = 0
+        in_string = False
+        escape = False
+        end = -1
+        for i in range(start, len(raw)):
+            ch = raw[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end != -1:
+            try:
+                result = json.loads(raw[start : end + 1])
+                if isinstance(result, list):
+                    return result
+            except json.JSONDecodeError:
+                pass
+
+    return None
 
 
 class MemoryStore:
@@ -180,21 +257,10 @@ class MemoryStore:
         except Exception:
             log.exception("Memory extraction LLM call failed")
             return 0
-        # Strip markdown code fences if the LLM wrapped its response
-        if raw.startswith("```"):
-            # Remove opening fence (```json or ```)
-            raw = raw.split("\n", 1)[-1]
-            # Remove closing fence
-            if raw.endswith("```"):
-                raw = raw[:-3].rstrip()
-        try:
-            memories = json.loads(raw)
-        except json.JSONDecodeError:
-            log.warning("Memory extraction returned non-JSON: %s", raw[:200])
-            return 0
 
-        if not isinstance(memories, list):
-            log.warning("Memory extraction returned non-list: %s", type(memories).__name__)
+        memories = _extract_json_array(raw)
+        if memories is None:
+            log.warning("Memory extraction returned non-JSON: %s", raw[:200])
             return 0
 
         stored = 0
@@ -357,14 +423,9 @@ class MemoryStore:
             log.exception("Consolidation LLM call failed")
             return 0
 
-        try:
-            promotions = json.loads(raw)
-        except json.JSONDecodeError:
+        promotions = _extract_json_array(raw)
+        if promotions is None:
             log.warning("Consolidation LLM returned non-JSON: %s", raw[:200])
-            return 0
-
-        if not isinstance(promotions, list):
-            log.warning("Consolidation LLM returned non-list: %s", type(promotions).__name__)
             return 0
 
         stored = 0

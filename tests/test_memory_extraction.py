@@ -7,7 +7,7 @@ import json
 import aiosqlite
 import pytest
 
-from core.memory import MemoryStore
+from core.memory import MemoryStore, _extract_json_array
 
 
 @pytest.fixture
@@ -118,3 +118,92 @@ async def test_extract_memories_strips_markdown_code_fences(store) -> None:
 
     assert stored == 1
     assert await _count_rows(store.db_path, "long_term") == 1
+
+
+@pytest.mark.asyncio
+async def test_extract_memories_with_preamble_text(store) -> None:
+    """LLMs sometimes add prose before/after the JSON array."""
+    llm = _LLMStub([])
+    llm._response = (
+        "Here are the extracted memories:\n"
+        '[{"tier": "LONG_TERM", "category": "preference", "subject": "matteo", '
+        '"content": "Likes hiking"}]\n'
+        "I hope that helps!"
+    )
+
+    stored = await store.extract_memories(
+        llm,
+        model="claude-haiku-4-5",
+        user_msg="I love hiking",
+        agent_msg="Noted",
+    )
+
+    assert stored == 1
+    assert await _count_rows(store.db_path, "long_term") == 1
+
+
+@pytest.mark.asyncio
+async def test_extract_memories_with_indented_json(store) -> None:
+    """LLMs sometimes return pretty-printed / indented JSON."""
+    llm = _LLMStub([])
+    llm._response = (
+        "[\n"
+        "    {\n"
+        '        "tier": "SHORT_TERM",\n'
+        '        "content": "User is handling tasks manually",\n'
+        '        "context": "workflow preference",\n'
+        '        "ttl_hours": 8\n'
+        "    }\n"
+        "]"
+    )
+
+    stored = await store.extract_memories(
+        llm,
+        model="claude-haiku-4-5",
+        user_msg="I'm handling tasks manually",
+        agent_msg="Understood",
+    )
+
+    assert stored == 1
+    assert await _count_rows(store.db_path, "short_term") == 1
+
+
+# -- Unit tests for _extract_json_array --
+
+
+class TestExtractJsonArray:
+    def test_plain_json(self):
+        assert _extract_json_array('[{"a": 1}]') == [{"a": 1}]
+
+    def test_empty_array(self):
+        assert _extract_json_array("[]") == []
+
+    def test_markdown_fenced(self):
+        raw = '```json\n[{"a": 1}]\n```'
+        assert _extract_json_array(raw) == [{"a": 1}]
+
+    def test_preamble_and_trailing_text(self):
+        raw = 'Here is the result:\n[{"a": 1}]\nHope that helps!'
+        assert _extract_json_array(raw) == [{"a": 1}]
+
+    def test_indented_json(self):
+        raw = '[\n    {\n        "a": 1\n    }\n]'
+        assert _extract_json_array(raw) == [{"a": 1}]
+
+    def test_empty_string(self):
+        assert _extract_json_array("") is None
+
+    def test_no_json(self):
+        assert _extract_json_array("No memories to extract.") is None
+
+    def test_json_object_not_array(self):
+        assert _extract_json_array('{"a": 1}') is None
+
+    def test_brackets_in_strings(self):
+        raw = '[{"content": "array [1, 2] inside"}]'
+        result = _extract_json_array(raw)
+        assert result == [{"content": "array [1, 2] inside"}]
+
+    def test_fence_with_preamble(self):
+        raw = 'Here are the memories:\n```json\n[{"a": 1}]\n```\nDone.'
+        assert _extract_json_array(raw) == [{"a": 1}]
