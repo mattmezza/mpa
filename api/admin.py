@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
-_GOOGLE_CONTACTS_SCOPES = ["https://www.googleapis.com/auth/contacts"]
+_GOOGLE_CONTACTS_SCOPES = ["https://www.googleapis.com/auth/carddav"]
 
 # In-memory PKCE state (short-lived, per auth attempt)
 _oauth_pending: dict[str, dict] = {}  # state -> {code_verifier, client_id, client_secret}
@@ -1333,8 +1333,14 @@ def create_admin_app(
             "client_id": pending["client_id"],
             "client_secret": pending["client_secret"],
             "refresh_token": token_data["refresh_token"],
-            "token_type": "Bearer",
+            "token_type": token_data.get("token_type", "Bearer"),
         }
+        if token_data.get("access_token"):
+            token_out["access_token"] = token_data["access_token"]
+        if token_data.get("expires_in"):
+            token_out["expires_in"] = token_data["expires_in"]
+        if token_data.get("scope"):
+            token_out["scope"] = token_data["scope"]
         if pending.get("kind") == "contacts" or kind == "contacts":
             await config_store.set("contacts.google_oauth_token", json.dumps(token_out))
             log.info("Google Contacts OAuth token saved to config store")
