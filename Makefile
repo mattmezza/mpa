@@ -40,7 +40,7 @@ format:
 test:
 	$(UV) run pytest
 
-# Run the agent
+# Run the agent (production)
 run:
 	$(UV) run python -m core.main
 
@@ -61,9 +61,12 @@ dev:
 		echo ""; \
 	fi
 
-# Dev: agent with auto-restart on Python file changes
+# Dev: admin API with auto-reload on code changes (agent managed via UI)
 dev-agent:
-	$(UV) run watchfiles --filter python 'python -m core.main' api core channels schema skills tools voice
+	PYTHONWARNINGS="ignore::UserWarning:multiprocessing.resource_tracker" \
+	$(UV) run uvicorn core.main:app --reload --host 0.0.0.0 --port 8000 --log-level info \
+		--reload-dir api --reload-dir core --reload-dir channels --reload-dir schema \
+		--reload-dir skills --reload-dir tools --reload-dir voice
 
 # Dev: Tailwind CSS watcher
 dev-css:

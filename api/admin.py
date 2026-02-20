@@ -456,6 +456,7 @@ def _make_auth_dependency(config_store: ConfigStore):
 def create_admin_app(
     agent_state: AgentState,
     config_store: ConfigStore,
+    lifespan=None,
 ) -> tuple[FastAPI, object]:
     wacli = WacliManager()
     app = FastAPI(
@@ -464,6 +465,7 @@ def create_admin_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
     app.state.wacli = wacli
 

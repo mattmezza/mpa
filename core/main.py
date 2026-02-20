@@ -6,12 +6,17 @@ Supports two boot modes:
      Telegram, no scheduler.
   2. **Normal mode** — setup complete.  Full agent with all channels,
      scheduler, and admin API.
+
+Usage:
+  Production:  ``python -m core.main``
+  Development: ``uvicorn core.main:app --reload``
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import Depends, Request
@@ -24,6 +29,7 @@ from core.email_config import materialize_himalaya_config
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+    force=True,
 )
 log = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -107,90 +113,58 @@ async def _stop_agent(agent) -> None:
         await tg.app.shutdown()
 
 
-async def main() -> None:
-    config_store = ConfigStore()
+# ---------------------------------------------------------------------------
+# Shared state — populated once during lifespan, used by lifecycle routes.
+# ---------------------------------------------------------------------------
 
-    # Seed from YAML/.env on first boot (or if config.db is empty)
-    await config_store.seed_if_empty()
-    await config_store.ensure_admin_password()
-    await materialize_himalaya_config(config_store)
+_config_store = ConfigStore()
+_agent_state = AgentState()
 
-    setup_complete = await config_store.is_setup_complete()
 
-    agent_state = AgentState()
+@asynccontextmanager
+async def _lifespan(application):  # noqa: ANN001
+    """FastAPI lifespan: seed config, start agent, yield, then tear down."""
+    # -- startup --
+    await _config_store.seed_if_empty()
+    await _config_store.ensure_admin_password()
+    await materialize_himalaya_config(_config_store)
+
+    setup_complete = await _config_store.is_setup_complete()
+
     if setup_complete:
         log.info("Setup complete — starting agent")
-        agent_state.status = "STARTING"
+        _agent_state.status = "STARTING"
         try:
-            agent_state.agent = await _start_agent(config_store)
-            agent_state.status = "RUNNING"
+            _agent_state.agent = await _start_agent(_config_store)
+            _agent_state.status = "RUNNING"
         except Exception:
             log.exception("Failed to start agent — falling back to setup mode")
-            agent_state.status = "STOPPED"
+            _agent_state.status = "STOPPED"
     else:
         log.info("Setup not complete — running in setup-only mode (admin API + wizard)")
-        agent_state.status = "STOPPED"
+        _agent_state.status = "STOPPED"
 
-    # -- Admin API (always runs) --
-    admin_app, auth = create_admin_app(agent_state, config_store)
+    yield
 
-    # Add lifecycle endpoints that can start/stop the agent
-    _attach_lifecycle_routes(admin_app, config_store, agent_state, auth)
-
-    port = 8000
-    if setup_complete:
-        port_val = await config_store.get("admin.port")
-        if port_val:
-            try:
-                port = int(port_val)
-            except ValueError:
-                pass
-
-    uvi_config = uvicorn.Config(
-        admin_app,
-        host="0.0.0.0",
-        port=port,
-        log_level="info",
-        log_config=None,
-    )
-    server = uvicorn.Server(uvi_config)
-    # Prevent uvicorn from installing its own signal handlers — we manage
-    # shutdown ourselves so that Ctrl-C / SIGTERM cleanly stops everything.
-    server.install_signal_handlers = lambda: None  # type: ignore[assignment]
-    log.info("Starting admin API on port %s…", port)
-
-    # Graceful shutdown
-    stop = asyncio.Event()
-
-    def _signal_handler() -> None:
-        log.info("Shutdown signal received")
-        stop.set()
-
-    loop = asyncio.get_running_loop()
-    for sig_name in ("SIGINT", "SIGTERM"):
-        try:
-            loop.add_signal_handler(getattr(__import__("signal"), sig_name), _signal_handler)
-        except NotImplementedError:
-            pass  # Windows
-
-    # Run server until shutdown signal
-    server_task = asyncio.create_task(server.serve())
-
-    await stop.wait()
-
+    # -- shutdown --
     log.info("Shutting down…")
-
-    if agent_state.agent:
-        agent_state.status = "STOPPING"
-        await _stop_agent(agent_state.agent)
-        agent_state.status = "STOPPED"
-
-    # Tell uvicorn to exit gracefully and wait for it to finish
-    server.should_exit = True
-    await server_task
+    if _agent_state.agent:
+        _agent_state.status = "STOPPING"
+        await _stop_agent(_agent_state.agent)
+        _agent_state.agent = None
+        _agent_state.status = "STOPPED"
 
 
-def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentState, auth) -> None:
+# ---------------------------------------------------------------------------
+# Build the FastAPI app at module level so ``uvicorn core.main:app`` works.
+# ---------------------------------------------------------------------------
+
+app, _auth = create_admin_app(_agent_state, _config_store, lifespan=_lifespan)
+
+
+def _attach_lifecycle_routes(
+    application, config_store: ConfigStore, agent_state: AgentState, auth
+) -> None:
     """Add /agent/start, /agent/stop, and /agent/restart endpoints.
 
     These share the same ``AgentState`` object used by ``create_admin_app``
@@ -204,7 +178,7 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
     def _is_htmx(request: Request) -> bool:
         return request.headers.get("HX-Request") == "true"
 
-    @app.post("/agent/start", dependencies=[Depends(auth)])
+    @application.post("/agent/start", dependencies=[Depends(auth)])
     async def start_agent(request: Request):
         if agent_state.agent is not None:
             result = {
@@ -238,7 +212,7 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
             return resp
         return result
 
-    @app.post("/agent/stop", dependencies=[Depends(auth)])
+    @application.post("/agent/stop", dependencies=[Depends(auth)])
     async def stop_agent(request: Request):
         if agent_state.agent is None:
             result = {"status": "not_running"}
@@ -263,7 +237,7 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
             return resp
         return result
 
-    @app.post("/agent/restart", dependencies=[Depends(auth)])
+    @application.post("/agent/restart", dependencies=[Depends(auth)])
     async def restart_agent(request: Request):
         # Stop
         if agent_state.agent is not None:
@@ -299,5 +273,18 @@ def _attach_lifecycle_routes(app, config_store: ConfigStore, agent_state: AgentS
         return result
 
 
+_attach_lifecycle_routes(app, _config_store, _agent_state, _auth)
+
+
+# ---------------------------------------------------------------------------
+# Production entrypoint: ``python -m core.main``
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info",
+        log_config=None,
+    )
