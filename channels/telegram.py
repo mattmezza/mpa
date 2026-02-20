@@ -34,7 +34,7 @@ class TelegramChannel:
         self.voice = voice
         self._last_chat_for_user: dict[int, int] = {}
         self.app = Application.builder().token(config.bot_token).concurrent_updates(8).build()
-        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
+        self.app.add_handler(MessageHandler(filters.TEXT, self._on_text))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
         self.app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, self._on_photo))
         self.app.add_handler(CallbackQueryHandler(self._on_approval_callback))

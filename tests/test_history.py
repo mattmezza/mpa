@@ -236,3 +236,104 @@ async def test_session_preserves_complex_messages(tmp_path) -> None:
     assert len(session) == 2
     assert session[0] == tool_msg
     assert session[1] == tool_result
+
+
+# ---------------------------------------------------------------------------
+# /new command (tested via AgentCore.process)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_command_clears_injection_history(tmp_path) -> None:
+    """/new clears windowed history in injection mode."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from core.agent import AgentCore
+
+    config = MagicMock()
+    config.history.db_path = str(tmp_path / "agent.db")
+    config.history.max_turns = 10
+    config.history.mode = "injection"
+    config.memory.db_path = str(tmp_path / "memory.db")
+    config.memory.long_term_limit = 50
+
+    agent = object.__new__(AgentCore)
+    agent.config = config
+    agent.history = ConversationHistory(
+        db_path=config.history.db_path, max_turns=config.history.max_turns
+    )
+    agent.history_mode = "injection"
+
+    # Seed some history
+    await agent.history.add_turn("telegram", "u1", "user", "hello")
+    await agent.history.add_turn("telegram", "u1", "assistant", "hi there")
+    assert len(await agent.history.get_messages("telegram", "u1")) == 2
+
+    response = await agent.process("/new", channel="telegram", user_id="u1")
+
+    assert response.text == "Conversation cleared."
+    assert await agent.history.get_messages("telegram", "u1") == []
+
+
+@pytest.mark.asyncio
+async def test_new_command_clears_session(tmp_path) -> None:
+    """/new clears the sticky session in session mode."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from core.agent import AgentCore
+
+    config = MagicMock()
+    config.history.db_path = str(tmp_path / "agent.db")
+    config.history.max_turns = 10
+    config.history.mode = "session"
+    config.memory.db_path = str(tmp_path / "memory.db")
+    config.memory.long_term_limit = 50
+
+    agent = object.__new__(AgentCore)
+    agent.config = config
+    agent.history = ConversationHistory(
+        db_path=config.history.db_path, max_turns=config.history.max_turns
+    )
+    agent.history_mode = "session"
+
+    # Seed a session
+    await agent.history.append_session_message(
+        "telegram", "u1", {"role": "user", "content": "hello"}
+    )
+    await agent.history.append_session_message(
+        "telegram", "u1", {"role": "assistant", "content": "hi"}
+    )
+    assert len(await agent.history.get_session("telegram", "u1")) == 2
+
+    response = await agent.process("/new", channel="telegram", user_id="u1")
+
+    assert response.text == "Conversation cleared."
+    assert await agent.history.get_session("telegram", "u1") == []
+
+
+@pytest.mark.asyncio
+async def test_new_command_case_insensitive(tmp_path) -> None:
+    """/NEW and /New should also work."""
+    from unittest.mock import MagicMock
+
+    from core.agent import AgentCore
+
+    config = MagicMock()
+    config.history.db_path = str(tmp_path / "agent.db")
+    config.history.max_turns = 10
+    config.history.mode = "injection"
+
+    agent = object.__new__(AgentCore)
+    agent.config = config
+    agent.history = ConversationHistory(
+        db_path=config.history.db_path, max_turns=config.history.max_turns
+    )
+    agent.history_mode = "injection"
+
+    await agent.history.add_turn("telegram", "u1", "user", "hello")
+    await agent.history.add_turn("telegram", "u1", "assistant", "hi")
+
+    response = await agent.process("  /New  ", channel="telegram", user_id="u1")
+
+    assert response.text == "Conversation cleared."
+    assert await agent.history.get_messages("telegram", "u1") == []

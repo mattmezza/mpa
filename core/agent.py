@@ -236,6 +236,16 @@ class AgentCore:
         attachments: list[Attachment] | None = None,
     ) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop."""
+
+        # Handle /new command — clear conversational context.
+        if message.strip().lower() == "/new":
+            if self.history_mode == "session":
+                await self.history.clear_session(channel, user_id)
+            else:
+                await self.history.clear(channel, user_id)
+            log.info("Conversation cleared by user (channel=%s, user=%s)", channel, user_id)
+            return AgentResponse(text="Conversation cleared.")
+
         system = await self._build_system_prompt()
 
         if self.history_mode == "session":
