@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 
 from core.email_config import himalaya_env
 
@@ -29,6 +30,17 @@ class ToolExecutor:
         "cal",
     ]
 
+    def _resolve_command(self, command: str) -> str:
+        """Rewrite /app/tools paths for local dev when needed."""
+        if "/app/tools/" not in command:
+            return command
+        if Path("/app/tools").exists():
+            return command
+        local_tools_dir = Path(__file__).resolve().parents[1] / "tools"
+        if not local_tools_dir.exists():
+            return command
+        return command.replace("/app/tools/", f"{local_tools_dir}/")
+
     async def run_command(self, command: str, timeout: int = 30) -> dict:
         """Execute a shell command and return its output."""
         # Security: validate against whitelist
@@ -36,7 +48,7 @@ class ToolExecutor:
             return {
                 "error": f"Command not allowed. Must start with one of: {self.ALLOWED_PREFIXES}"
             }
-        return await self._exec(command, timeout)
+        return await self._exec(self._resolve_command(command), timeout)
 
     async def run_command_trusted(self, command: str, timeout: int = 30) -> dict:
         """Execute a shell command without prefix validation.
@@ -44,7 +56,7 @@ class ToolExecutor:
         Only use this for commands constructed internally by the agent code,
         never for commands originating from LLM tool calls.
         """
-        return await self._exec(command, timeout)
+        return await self._exec(self._resolve_command(command), timeout)
 
     async def _exec(self, command: str, timeout: int) -> dict:
         """Run a shell command and capture output."""
