@@ -524,26 +524,85 @@
     }
     window.contactsTab = contactsTab;
 
-    function emailTab(toml) {
+    function emailTab(providers) {
+      const list = Array.isArray(providers) ? providers : [];
       return {
-        toml: toml || '',
+        providers: list.map((p, idx) => ({
+          id: p.id || String(Date.now() + idx),
+          name: p.name || '',
+          email: p.email || '',
+          display_name: p.display_name || '',
+          imap_host: p.imap_host || '',
+          imap_port: p.imap_port || '993',
+          smtp_host: p.smtp_host || '',
+          smtp_port: p.smtp_port || '465',
+          login: p.login || '',
+          password: p.password || ''
+        })),
+        status: '',
         result: '',
         resultOk: false,
-        save() {
-          fetch('/config', {
-            method: 'PATCH',
+
+        addProvider() {
+          this.providers.push({
+            id: String(Date.now() + Math.random()),
+            name: '',
+            email: '',
+            display_name: '',
+            imap_host: '',
+            imap_port: '993',
+            smtp_host: '',
+            smtp_port: '465',
+            login: '',
+            password: ''
+          });
+        },
+        removeProvider(index) {
+          this.providers.splice(index, 1);
+        },
+
+        saveProviders() {
+          this.status = 'Saving...';
+          this.result = '';
+          const cleaned = this.providers
+            .map(p => ({
+              name: (p.name || '').trim(),
+              email: (p.email || '').trim(),
+              display_name: (p.display_name || '').trim(),
+              imap_host: (p.imap_host || '').trim(),
+              imap_port: (p.imap_port || '993').toString().trim(),
+              smtp_host: (p.smtp_host || '').trim(),
+              smtp_port: (p.smtp_port || '465').toString().trim(),
+              login: (p.login || '').trim(),
+              password: (p.password || '').trim()
+            }))
+            .filter(p => p.name || p.email || p.imap_host || p.smtp_host);
+          fetch('/email/providers', {
+            method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
             },
-            body: JSON.stringify({values: {'email.himalaya.toml': this.toml}})
+            credentials: 'same-origin',
+            body: JSON.stringify({providers: cleaned})
           })
-            .then(r => { this.resultOk = r.ok; return r.json(); })
-            .then(d => {
-              this.result = this.resultOk ? 'Email config saved' : (d.detail || 'Error');
-              if (this.resultOk && window.showToast) { window.showToast('Email config saved'); }
+            .then(async r => {
+              const text = await r.text();
+              let data = {};
+              try { data = text ? JSON.parse(text) : {}; } catch (err) { data = {error: text || 'Invalid response'}; }
+              return {ok: r.ok, data};
             })
-            .catch(e => { this.resultOk = false; this.result = e.message; });
+            .then(({ok, data}) => {
+              this.resultOk = ok && data.ok;
+              this.result = this.resultOk ? 'Email accounts saved' : (data.error || data.detail || 'Save failed');
+              this.status = '';
+              if (this.resultOk && window.showToast) { window.showToast('Email accounts saved'); }
+            })
+            .catch(e => {
+              this.resultOk = false;
+              this.result = e.message || 'Network error';
+              this.status = '';
+            });
         }
       };
     }

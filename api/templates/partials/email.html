@@ -1,30 +1,95 @@
-{# Email tab partial #}
-<div class="space-y-6" x-data="emailTab({{ himalaya_toml|default('', true)|tojson|forceescape }})">
-  <div class="card">
-    <h2 class="text-base mb-1">Email (Himalaya)</h2>
-    <p class="text-muted text-xs mb-4">
-      Store your Himalaya TOML configuration in the config database. It is materialized into a
-      temporary file at runtime for the CLI.
-    </p>
+{# Email tab partial – structured IMAP / SMTP provider form #}
+<div x-data='emailTab({{ providers|tojson }})'>
 
-    <div class="space-y-3">
-      <div>
-        <label class="label">Himalaya config (TOML)</label>
-        <textarea class="input-sm" style="min-height: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;"
-                  x-model="toml" placeholder="[accounts.personal]\nemail = \"you@example.com\"\n..."></textarea>
-        <p class="text-muted text-xs mt-1">Saved to <code>/tmp/mpa-himalaya-config.toml</code> on change and at startup.</p>
+  <div class="flex items-center justify-between gap-2 mb-4 flex-wrap">
+    <div>
+      <h3 class="text-xs text-muted uppercase tracking-wider">Email Accounts (IMAP / SMTP)</h3>
+      <p class="text-muted text-xs">Configure one or more email accounts. Credentials are stored in the database and used to generate the Himalaya CLI config at runtime.</p>
+    </div>
+    <button class="btn btn-sm" type="button" @click="addProvider()">Add account</button>
+  </div>
+
+  <div class="grid gap-4">
+    <template x-for="(provider, idx) in providers" :key="provider.id">
+      <div class="card">
+        <div class="flex items-center justify-between gap-2 mb-3">
+          <div>
+            <h4 class="text-sm">Account <span x-text="idx + 1"></span></h4>
+            <p class="text-muted text-xs">Give each account a unique name, e.g. personal, work.</p>
+          </div>
+          <button class="btn-danger btn-sm" type="button" @click="removeProvider(idx)">Remove</button>
+        </div>
+
+        <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+          <div>
+            <label class="label">Account name</label>
+            <input type="text" class="input-sm" x-model="provider.name" placeholder="personal">
+            <p class="text-muted text-xs mt-1">Slug used to identify this account (alphanumeric, dashes).</p>
+          </div>
+          <div>
+            <label class="label">Email address</label>
+            <input type="email" class="input-sm" x-model="provider.email" placeholder="you@example.com">
+          </div>
+          <div>
+            <label class="label">Display name</label>
+            <input type="text" class="input-sm" x-model="provider.display_name" placeholder="Your Name">
+            <p class="text-muted text-xs mt-1">Sender name shown in outgoing mail (optional).</p>
+          </div>
+          <div>
+            <label class="label">Login username</label>
+            <input type="text" class="input-sm" x-model="provider.login" placeholder="you@example.com">
+            <p class="text-muted text-xs mt-1">Defaults to your email address if left blank.</p>
+          </div>
+        </div>
+
+        <div class="grid gap-3 mt-3" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+          <div>
+            <label class="label">IMAP host</label>
+            <input type="text" class="input-sm" x-model="provider.imap_host" placeholder="imap.example.com">
+          </div>
+          <div>
+            <label class="label">IMAP port</label>
+            <input type="number" class="input-sm" x-model="provider.imap_port" placeholder="993">
+            <p class="text-muted text-xs mt-1">Usually 993 (TLS).</p>
+          </div>
+          <div>
+            <label class="label">SMTP host</label>
+            <input type="text" class="input-sm" x-model="provider.smtp_host" placeholder="smtp.example.com">
+          </div>
+          <div>
+            <label class="label">SMTP port</label>
+            <input type="number" class="input-sm" x-model="provider.smtp_port" placeholder="465">
+            <p class="text-muted text-xs mt-1">Usually 465 (TLS) or 587 (STARTTLS).</p>
+          </div>
+        </div>
+
+        <div class="grid gap-3 mt-3" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+          <div>
+            <label class="label">App password</label>
+            <input type="password" class="input-sm" x-model="provider.password" placeholder="xxxx-xxxx-xxxx-xxxx" autocomplete="new-password">
+            <p class="text-muted text-xs mt-1">Use an app-specific password, not your main login password.</p>
+          </div>
+        </div>
+
+        <div class="mt-3 text-xs text-muted" x-show="provider.name">
+          <strong>Environment variable</strong>:
+          The password for this account will be read at runtime from
+          <code x-text="'HIMALAYA_' + (provider.name || 'default').toUpperCase().replace(/[^A-Z0-9_]/g, '_') + '_PASSWORD'"></code>.
+          Set it in your <code>.env</code> file.
+        </div>
       </div>
-    </div>
+    </template>
 
-    <div class="flex items-center gap-2 mt-4">
-      <button class="btn-primary btn-sm"
-              @click="save()">
-        Save
-      </button>
-    </div>
-
-    <template x-if="result">
-      <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
+    <template x-if="providers.length === 0">
+      <div class="text-muted text-xs">No email accounts configured. Click "Add account" to get started.</div>
     </template>
   </div>
+
+  <div class="flex items-center gap-2 mt-4">
+    <button class="btn-primary btn-sm" type="button" @click="saveProviders()">Save email accounts</button>
+    <span class="text-xs text-muted" x-text="status"></span>
+  </div>
+  <template x-if="result">
+    <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
+  </template>
 </div>
