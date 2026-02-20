@@ -550,7 +550,7 @@
         if (qrResp.ok) {
           const qrData = await qrResp.json();
           if (qrData && qrData.qr) {
-            qrBox.innerHTML = '<div id="wa-qr-container"></div>';
+             qrBox.innerHTML = '<div id="wa-qr-container" style="display:inline-block;padding:24px;background:#fff;border-radius:8px;"></div>';
             if (window.QRCode) {
               const el = document.getElementById('wa-qr-container');
               el.innerHTML = '';
@@ -612,7 +612,7 @@
         if (qrResp.ok) {
           const qrData = await qrResp.json();
           if (qrData && qrData.qr) {
-            qrBox.innerHTML = '<div id="wa-qr-container"></div>';
+            qrBox.innerHTML = '<div id="wa-qr-container" style="display:inline-block;padding:24px;background:#fff;border-radius:8px;"></div>';
             if (window.QRCode) {
               const el = document.getElementById('wa-qr-container');
               el.innerHTML = '';
