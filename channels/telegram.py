@@ -25,7 +25,6 @@ log = logging.getLogger(__name__)
 _APPROVE_PREFIX = "perm_approve:"
 _DENY_PREFIX = "perm_deny:"
 _ALWAYS_PREFIX = "perm_always:"
-_SKIP_PREFIX = "perm_skip:"
 _HTML_TAG_RE = re.compile(
     r"</?(b|strong|i|em|u|ins|s|strike|del|code|pre|a|tg-spoiler)(\s+[^>]*)?>",
     re.IGNORECASE,
@@ -48,6 +47,36 @@ class TelegramChannel:
 
     # -- Incoming handlers ---------------------------------------------------
 
+    def _reply_context(self, message) -> str:
+        reply = getattr(message, "reply_to_message", None)
+        if not reply:
+            return ""
+        author = ""
+        from_user = getattr(reply, "from_user", None)
+        if from_user:
+            author = from_user.full_name or from_user.username or str(from_user.id)
+        sender_chat = getattr(reply, "sender_chat", None)
+        if not author and sender_chat:
+            author = sender_chat.title or sender_chat.username or str(sender_chat.id)
+        if not author:
+            author = "Unknown"
+
+        text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
+        if not text:
+            if getattr(reply, "photo", None):
+                text = "(photo)"
+            elif getattr(reply, "document", None):
+                filename = getattr(reply.document, "file_name", None)
+                text = f"(document: {filename})" if filename else "(document)"
+            elif getattr(reply, "voice", None):
+                text = "(voice message)"
+            elif getattr(reply, "audio", None):
+                text = "(audio message)"
+            else:
+                text = "(non-text message)"
+
+        return f"[reply_to]\n{author}: {text}\n[/reply_to]\n"
+
     async def _on_text(self, update: Update, context) -> None:
         user = update.effective_user
         message = update.message
@@ -61,8 +90,11 @@ class TelegramChannel:
             return
 
         chat_id = chat.id if chat else user_id
+        reply_context = self._reply_context(message)
+        text = (message.text or "").strip()
+        payload = f"{reply_context}{text}" if reply_context else text
         asyncio.create_task(
-            self._handle_text(message.text or "", user_id, chat_id),
+            self._handle_text(payload, user_id, chat_id),
             name=f"tg-text-{user_id}",
         )
 
@@ -91,8 +123,9 @@ class TelegramChannel:
         voice_msg = message.voice or message.audio
         if not voice_msg:
             return
+        reply_context = self._reply_context(message)
         asyncio.create_task(
-            self._handle_voice(voice_msg.file_id, user_id, chat_id),
+            self._handle_voice(voice_msg.file_id, user_id, chat_id, reply_context),
             name=f"tg-voice-{user_id}",
         )
 
@@ -125,8 +158,9 @@ class TelegramChannel:
         if not file_ids:
             return
 
+        reply_context = self._reply_context(message)
         asyncio.create_task(
-            self._handle_photo(file_ids, caption, user_id, chat_id),
+            self._handle_photo(file_ids, caption, reply_context, user_id, chat_id),
             name=f"tg-photo-{user_id}",
         )
 
@@ -157,11 +191,6 @@ class TelegramChannel:
             resolved = self.agent.permissions.resolve_approval(request_id, False)
             await self._finalize_approval_response(query, resolved, "Denied")
 
-        elif data.startswith(_SKIP_PREFIX):
-            request_id = data[len(_SKIP_PREFIX) :]
-            resolved = self.agent.permissions.resolve_approval(request_id, False, skipped=True)
-            await self._finalize_approval_response(query, resolved, "Skipped")
-
         elif data.startswith(_ALWAYS_PREFIX):
             request_id = data[len(_ALWAYS_PREFIX) :]
             resolved = self.agent.permissions.resolve_approval(request_id, True, always_allow=True)
@@ -190,13 +219,10 @@ class TelegramChannel:
                 [
                     InlineKeyboardButton("Approve", callback_data=f"{_APPROVE_PREFIX}{request_id}"),
                     InlineKeyboardButton("Deny", callback_data=f"{_DENY_PREFIX}{request_id}"),
-                ],
-                [
-                    InlineKeyboardButton("Skip", callback_data=f"{_SKIP_PREFIX}{request_id}"),
                     InlineKeyboardButton(
                         "Always allow", callback_data=f"{_ALWAYS_PREFIX}{request_id}"
                     ),
-                ],
+                ]
             ]
         )
         await self.app.bot.send_message(
@@ -249,7 +275,9 @@ class TelegramChannel:
             )
         await self._send_response(chat_id, response)
 
-    async def _handle_voice(self, file_id: str, user_id: int, chat_id: int) -> None:
+    async def _handle_voice(
+        self, file_id: str, user_id: int, chat_id: int, reply_context: str
+    ) -> None:
         async with self._typing(chat_id):
             file = await self.app.bot.get_file(file_id)
             audio_bytes = await file.download_as_bytearray()
@@ -272,8 +300,11 @@ class TelegramChannel:
 
             log.info("Transcript: %s", transcript[:200])
 
+            content = f"[voice] {transcript}"
+            if reply_context:
+                content = f"{reply_context}{content}"
             response = await self.agent.process(
-                message=f"[voice] {transcript}",
+                message=content,
                 channel="telegram",
                 user_id=str(user_id),
                 chat_id=str(chat_id),
@@ -284,6 +315,7 @@ class TelegramChannel:
         self,
         file_ids: list[tuple[str, str | None]],
         caption: str,
+        reply_context: str,
         user_id: int,
         chat_id: int,
     ) -> None:
@@ -314,8 +346,11 @@ class TelegramChannel:
                 )
                 return
 
+            content = caption.strip()
+            if reply_context:
+                content = f"{reply_context}{content}" if content else reply_context
             response = await self.agent.process(
-                message=caption,
+                message=content,
                 channel="telegram",
                 user_id=str(user_id),
                 attachments=attachments,

@@ -17,7 +17,6 @@ log = logging.getLogger(__name__)
 _APPROVE_ACTIONS = {"approve", "approved", "yes"}
 _DENY_ACTIONS = {"deny", "denied", "no"}
 _ALWAYS_ACTIONS = {"always", "allow"}
-_SKIP_ACTIONS = {"skip", "skipped"}
 
 
 def _normalize_number(value: str) -> str:
@@ -48,10 +47,52 @@ class WhatsAppChannel:
             f"Reply with:\n"
             f"- approve {request_id}\n"
             f"- deny {request_id}\n"
-            f"- skip {request_id}\n"
             f"- always {request_id}"
         )
         await self.send(user_id, message)
+
+    @staticmethod
+    def _reply_context(payload: dict) -> str:
+        context = payload.get("context") or {}
+        quoted = None
+        if isinstance(context, dict):
+            quoted = context.get("quotedMessage") or context.get("quoted_message")
+        if not quoted:
+            return ""
+
+        author = ""
+        if isinstance(context, dict):
+            author = (
+                str(context.get("participant") or "")
+                or str(context.get("quotedAuthor") or "")
+                or str(context.get("quoted_author") or "")
+            )
+        author = author.strip() or "Unknown"
+
+        text = ""
+        if isinstance(quoted, dict):
+            text = str(quoted.get("conversation") or quoted.get("text") or "")
+            if not text:
+                for key in (
+                    "extendedTextMessage",
+                    "imageMessage",
+                    "videoMessage",
+                    "documentMessage",
+                ):
+                    if key in quoted and isinstance(quoted[key], dict):
+                        text = str(
+                            quoted[key].get("text")
+                            or quoted[key].get("caption")
+                            or quoted[key].get("fileName")
+                            or ""
+                        )
+                        if text:
+                            break
+        text = text.strip()
+        if not text:
+            text = "(non-text message)"
+
+        return f"[reply_to]\n{author}: {text}\n[/reply_to]\n"
 
     async def handle_webhook(self, payload: dict) -> dict:
         sender = str(payload.get("from", "")).strip()
@@ -71,8 +112,10 @@ class WhatsAppChannel:
         # (private or group) gets its own history.
         chat_id = str(payload.get("chatId", sender)).strip() or sender
 
+        reply_context = self._reply_context(payload)
+        content = f"{reply_context}{text}" if reply_context else text
         response = await self.agent.process(
-            message=text,
+            message=content,
             channel="whatsapp",
             user_id=sender,
             chat_id=chat_id,
@@ -92,7 +135,7 @@ class WhatsAppChannel:
             return False
 
         action = tokens[0]
-        if action not in _APPROVE_ACTIONS | _DENY_ACTIONS | _ALWAYS_ACTIONS | _SKIP_ACTIONS:
+        if action not in _APPROVE_ACTIONS | _DENY_ACTIONS | _ALWAYS_ACTIONS:
             return False
 
         request_id = tokens[1] if len(tokens) > 1 else ""
@@ -104,15 +147,12 @@ class WhatsAppChannel:
             return True
 
         always_allow = action in _ALWAYS_ACTIONS
-        is_skip = action in _SKIP_ACTIONS
         approved = action in _APPROVE_ACTIONS or always_allow
         resolved = self.agent.permissions.resolve_approval(
-            request_id, approved, always_allow=always_allow, skipped=is_skip
+            request_id, approved, always_allow=always_allow
         )
         if resolved:
-            if is_skip:
-                label = "Skipped"
-            elif always_allow:
+            if always_allow:
                 label = "Always allowed"
             elif approved:
                 label = "Approved"

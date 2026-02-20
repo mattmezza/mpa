@@ -250,13 +250,11 @@ class PermissionEngine:
 
     def create_approval_request(
         self, tool_name: str | None = None, params: dict | None = None
-    ) -> tuple[str, asyncio.Future[str]]:
+    ) -> tuple[str, asyncio.Future[bool]]:
         """Create a pending approval request. Returns (request_id, future).
 
-        The caller awaits the future. When the user approves/denies/skips via
+        The caller awaits the future. When the user approves/denies via
         Telegram callback, resolve_approval() completes the future.
-
-        The future resolves to one of: ``"approved"``, ``"denied"``, ``"skipped"``.
         """
         request_id = uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
@@ -279,33 +277,24 @@ class PermissionEngine:
         request_id: str,
         approved: bool,
         always_allow: bool = False,
-        *,
-        skipped: bool = False,
     ) -> bool:
-        """Resolve a pending approval request. Returns False if not found.
-
-        ``skipped=True`` means the user wants to skip this action without
-        creating a permission record — the agent should not retry.
-        """
+        """Resolve a pending approval request. Returns False if not found."""
         entry = self._pending.pop(request_id, None)
         if not entry:
             return False
         future = entry["future"]
         if future.done():
             return False
-        if skipped:
-            future.set_result("skipped")
-            return True
         if always_allow:
             match_key = entry.get("match_key")
             if isinstance(match_key, str) and match_key not in self.rules:
                 self.add_rule(match_key, PermissionLevel.ALWAYS)
-        future.set_result("approved" if approved else "denied")
+        future.set_result(approved)
         return True
 
 
 class PendingApproval(TypedDict):
-    future: asyncio.Future[str]  # resolves to "approved", "denied", or "skipped"
+    future: asyncio.Future[bool]
     match_key: str
 
 
