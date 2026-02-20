@@ -44,6 +44,7 @@ async def _start_agent(config_store: ConfigStore):
     from channels.telegram import TelegramChannel
     from channels.whatsapp import WhatsAppChannel
     from core.agent import AgentCore
+    from core.job_store import JobStore
     from voice.pipeline import VoicePipeline
 
     config = await config_store.export_to_config()
@@ -54,6 +55,14 @@ async def _start_agent(config_store: ConfigStore):
     from core.scheduler import set_agent_context
 
     set_agent_context(agent)
+
+    # -- Migrate jobs from config store to jobs.db (one-time) --
+    await agent.job_store.migrate_from_config_store(config_store)
+
+    # -- Seed jobs from config.yml if jobs.db is empty --
+    if config.scheduler.jobs:
+        seed_data = [j.model_dump() for j in config.scheduler.jobs]
+        await agent.job_store.seed_from_config(seed_data)
 
     # -- Voice pipeline --
     voice: VoicePipeline | None = None
@@ -92,9 +101,7 @@ async def _start_agent(config_store: ConfigStore):
         log.info("WhatsApp channel enabled (wacli)")
 
     # -- Scheduler --
-    if config.scheduler.jobs:
-        agent.scheduler.load_jobs(config.scheduler)
-
+    await agent.scheduler.load_jobs()
     agent.scheduler.start()
     log.info("Scheduler started with %d jobs", len(agent.scheduler.scheduler.get_jobs()))
 

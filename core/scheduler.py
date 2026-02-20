@@ -1,9 +1,12 @@
-"""Scheduler — APScheduler wrapper for cron jobs and one-shot tasks.
+"""Scheduler — APScheduler wrapper backed by JobStore.
+
+The JobStore (``data/jobs.db``) is the single source of truth.
+APScheduler runs in-memory only (no SQLAlchemy jobstore) and is
+re-synced from the JobStore whenever jobs change.
 
 Three job types:
-  - "agent": natural-language task → agent.process() → send result to channel
-  - "system": raw CLI command → executor.run_command_trusted()
-    (e.g. memory cleanup)
+  - "agent" / "agent_silent": natural-language task -> agent.process() -> send result to channel
+  - "system": raw CLI command -> executor.run_command_trusted()
   - "memory_consolidation": review short-term memories, promote worthy ones
     to long-term, delete expired entries (uses a lightweight LLM call)
 """
@@ -11,16 +14,15 @@ Three job types:
 from __future__ import annotations
 
 import logging
-import shlex
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 if TYPE_CHECKING:
     from core.agent import AgentCore
     from core.config import SchedulerConfig
+    from core.job_store import JobStore
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +89,13 @@ async def run_agent_task(
     except Exception:
         log.exception("Scheduler agent task failed: %s", task[:100])
 
+    # Mark one-shot jobs as done
+    if job_id and agent.job_store:
+        job = await agent.job_store.get_job(job_id)
+        if job and job.get("schedule") == "once" and job.get("status") == "active":
+            await agent.job_store.update_status(job_id, "done")
+            log.info("One-shot job %r marked as done", job_id)
+
 
 async def run_system_command(command: str) -> None:
     """Execute a raw CLI command (e.g. memory cleanup)."""
@@ -145,7 +154,7 @@ def _parse_cron(expr: str) -> dict:
     """Parse a standard 5-field cron expression into APScheduler kwargs.
 
     Format: minute hour day_of_month month day_of_week
-    Example: "0 7 * * *" → every day at 07:00
+    Example: "0 7 * * *" -> every day at 07:00
     """
     parts = expr.strip().split()
     if len(parts) != 5:
@@ -160,55 +169,149 @@ def _parse_cron(expr: str) -> dict:
 
 
 class AgentScheduler:
-    """Wraps APScheduler with agent-aware job execution."""
+    """Wraps APScheduler with JobStore as the source of truth."""
 
-    def __init__(self, db_path: str, agent: AgentCore):
+    def __init__(self, agent: AgentCore, job_store: JobStore):
         self.agent = agent
+        self.job_store = job_store
         set_agent_context(agent)
-        self.scheduler = AsyncIOScheduler(
-            jobstores={"default": SQLAlchemyJobStore(url=f"sqlite:///{db_path}")},
-        )
+        # In-memory only scheduler — no SQLAlchemy jobstore.
+        # Jobs are persisted in JobStore; APScheduler just runs them.
+        self.scheduler = AsyncIOScheduler()
 
-    def load_jobs(self, config: SchedulerConfig) -> None:
-        """Register cron jobs from config. Replaces any existing jobs with the same ID."""
-        for job in config.jobs:
-            cron_kwargs = _parse_cron(job.cron)
+    async def load_jobs(self) -> None:
+        """Load all active jobs from JobStore into APScheduler."""
+        jobs = await self.job_store.list_jobs(status="active")
+        for job in jobs:
+            self._register_job(job)
 
-            if job.type == "system":
-                self.scheduler.add_job(
-                    run_system_command,
-                    "cron",
-                    id=job.id,
-                    kwargs={"command": job.task},
-                    replace_existing=True,
-                    **cron_kwargs,
-                )
-            elif job.type == "memory_consolidation":
-                self.scheduler.add_job(
-                    run_memory_consolidation,
-                    "cron",
-                    id=job.id,
-                    replace_existing=True,
-                    **cron_kwargs,
-                )
+    def _register_job(self, job: dict) -> None:
+        """Register a single job dict into APScheduler."""
+        job_id = job["id"]
+        job_type = job["type"]
+        schedule = job.get("schedule", "cron")
+        task = job.get("task", "")
+        channel = job.get("channel", "telegram")
+        silent = job_type == "agent_silent"
+
+        try:
+            if schedule == "once":
+                run_at_str = job.get("run_at")
+                if not run_at_str:
+                    log.warning("One-shot job %r has no run_at; skipping", job_id)
+                    return
+                try:
+                    run_at = datetime.fromisoformat(run_at_str)
+                except ValueError:
+                    log.warning(
+                        "One-shot job %r has invalid run_at %r; skipping", job_id, run_at_str
+                    )
+                    return
+                # Skip one-shots in the past
+                if run_at < datetime.now(run_at.tzinfo):
+                    log.info("One-shot job %r is in the past; marking done", job_id)
+                    # Can't await here, but we'll handle it in load_jobs
+                    return
+
+                if job_type == "system":
+                    self.scheduler.add_job(
+                        run_system_command,
+                        "date",
+                        id=job_id,
+                        run_date=run_at,
+                        kwargs={"command": task},
+                        replace_existing=True,
+                    )
+                elif job_type == "memory_consolidation":
+                    self.scheduler.add_job(
+                        run_memory_consolidation,
+                        "date",
+                        id=job_id,
+                        run_date=run_at,
+                        replace_existing=True,
+                    )
+                else:
+                    self.scheduler.add_job(
+                        run_agent_task,
+                        "date",
+                        id=job_id,
+                        run_date=run_at,
+                        kwargs={
+                            "task": task,
+                            "channel": channel,
+                            "job_id": job_id,
+                            "silent": silent,
+                        },
+                        replace_existing=True,
+                    )
             else:
-                self.scheduler.add_job(
-                    run_agent_task,
-                    "cron",
-                    id=job.id,
-                    kwargs={
-                        "task": job.task,
-                        "channel": job.channel,
-                        "job_id": job.id,
-                    },
-                    replace_existing=True,
-                    **cron_kwargs,
-                )
+                # Cron job
+                cron_expr = job.get("cron")
+                if not cron_expr:
+                    log.warning("Cron job %r has no cron expression; skipping", job_id)
+                    return
+                cron_kwargs = _parse_cron(cron_expr)
 
-            log.info("Registered cron job %r: %s (%s)", job.id, job.cron, job.type)
+                if job_type == "system":
+                    self.scheduler.add_job(
+                        run_system_command,
+                        "cron",
+                        id=job_id,
+                        kwargs={"command": task},
+                        replace_existing=True,
+                        **cron_kwargs,
+                    )
+                elif job_type == "memory_consolidation":
+                    self.scheduler.add_job(
+                        run_memory_consolidation,
+                        "cron",
+                        id=job_id,
+                        replace_existing=True,
+                        **cron_kwargs,
+                    )
+                else:
+                    self.scheduler.add_job(
+                        run_agent_task,
+                        "cron",
+                        id=job_id,
+                        kwargs={
+                            "task": task,
+                            "channel": channel,
+                            "job_id": job_id,
+                            "silent": silent,
+                        },
+                        replace_existing=True,
+                        **cron_kwargs,
+                    )
+
+            log.info("Registered %s job %r", schedule, job_id)
+
+        except Exception:
+            log.exception("Failed to register job %r", job_id)
+
+    async def sync_job(self, job_id: str) -> None:
+        """Re-sync a single job from JobStore into APScheduler.
+
+        Call this after creating/editing/cancelling a job so APScheduler
+        picks up the change without a full reload.
+        """
+        # Remove the old APScheduler job if it exists
+        try:
+            self.scheduler.remove_job(job_id)
+        except Exception:
+            pass
+
+        # If the job is still active, re-register it
+        job = await self.job_store.get_job(job_id)
+        if job and job["status"] == "active":
+            self._register_job(job)
+        elif job:
+            log.info("Job %r has status %r; removed from scheduler", job_id, job["status"])
+        else:
+            log.info("Job %r deleted; removed from scheduler", job_id)
 
     def add_one_shot(self, job_id: str, run_at: datetime, task: str, channel: str) -> None:
-        """Schedule a one-time future task (used by the schedule_task tool)."""
+        """Schedule a one-time future task (legacy helper, used by schedule_task tool)."""
         self.scheduler.add_job(
             run_agent_task,
             "date",

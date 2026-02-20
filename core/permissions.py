@@ -66,6 +66,26 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:sqlite3*data/memory.db*INSERT*": "ALWAYS",
     "run_command:sqlite3*data/memory.db*UPDATE*": "ALWAYS",
     "run_command:sqlite3*data/memory.db*DELETE*": "ALWAYS",
+    "run_command:python3 /app/tools/jobs.py list*": "ALWAYS",
+    "run_command:python3 /app/tools/jobs.py show*": "ALWAYS",
+    "run_command:python3 tools/jobs.py list*": "ALWAYS",
+    "run_command:python3 tools/jobs.py show*": "ALWAYS",
+    "run_command:python3 /app/tools/jobs.py create*": "ASK",
+    "run_command:python3 /app/tools/jobs.py edit*": "ASK",
+    "run_command:python3 /app/tools/jobs.py remove*": "ASK",
+    "run_command:python3 /app/tools/jobs.py cancel*": "ASK",
+    "run_command:python3 tools/jobs.py create*": "ASK",
+    "run_command:python3 tools/jobs.py edit*": "ASK",
+    "run_command:python3 tools/jobs.py remove*": "ASK",
+    "run_command:python3 tools/jobs.py cancel*": "ASK",
+    "run_command:python3 /app/tools/skills.py list*": "ALWAYS",
+    "run_command:python3 /app/tools/skills.py show*": "ALWAYS",
+    "run_command:python3 /app/tools/skills.py upsert*": "ASK",
+    "run_command:python3 /app/tools/skills.py delete*": "ASK",
+    "run_command:python3 tools/skills.py list*": "ALWAYS",
+    "run_command:python3 tools/skills.py show*": "ALWAYS",
+    "run_command:python3 tools/skills.py upsert*": "ASK",
+    "run_command:python3 tools/skills.py delete*": "ASK",
     "run_command:jq*": "ALWAYS",
     "run_command:curl*wttr.in*": "ALWAYS",
     "run_command:w3m*": "ALWAYS",
@@ -99,6 +119,7 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:himalaya*delete*": "ASK",
     "run_command:himalaya*move*": "ASK",
     "schedule_task": "ASK",
+    "manage_jobs": "ASK",
     # Dangerous — never allow
     "run_command:sqlite3*DROP*": "NEVER",
     "run_command:sqlite3*ALTER*": "NEVER",
@@ -169,6 +190,7 @@ class PermissionEngine:
             "send_message",
             "create_calendar_event",
             "schedule_task",
+            "manage_jobs",
         }:
             return True
 
@@ -295,6 +317,20 @@ def format_approval_message(tool_name: str, params: dict) -> str:
         task = params.get("task", "?")
         run_at = params.get("run_at", "?")
         return f"Schedule task at {run_at}\n{task}"
+    if tool_name == "manage_jobs":
+        action = params.get("action", "?")
+        if action == "create":
+            task = params.get("task", "?")
+            cron = params.get("cron")
+            run_at = params.get("run_at")
+            schedule = f"cron: {cron}" if cron else f"once at {run_at}" if run_at else "?"
+            return f"Create scheduled job ({schedule})\n{task}"
+        if action == "cancel":
+            job_id = params.get("job_id", "?")
+            return f"Cancel scheduled job: {job_id}"
+        if action == "list":
+            return "List all scheduled jobs"
+        return f"Manage jobs: {action}"
     if tool_name == "run_command":
         cmd = params.get("command", "?")
         purpose = params.get("purpose", "")

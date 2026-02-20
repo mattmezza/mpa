@@ -15,6 +15,7 @@ from tavily import TavilyClient
 from core.config import Config
 from core.executor import ToolExecutor
 from core.history import ConversationHistory
+from core.job_store import JobStore
 from core.llm import LLMClient, LLMToolCall
 from core.memory import MemoryStore
 from core.models import AgentResponse, Attachment
@@ -170,25 +171,53 @@ TOOLS = [
         },
     },
     {
-        "name": "schedule_task",
-        "description": "Schedule a one-time future task (e.g. a reminder).",
+        "name": "manage_jobs",
+        "description": (
+            "Create, list, or cancel scheduled jobs. "
+            "Use action='create' to schedule a one-time or recurring task. "
+            "Use action='list' to see all active jobs. "
+            "Use action='cancel' to stop a job from running."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["create", "list", "cancel"],
+                    "description": "What to do: create a new job, list existing jobs, or cancel a job",
+                },
+                "job_id": {
+                    "type": "string",
+                    "description": (
+                        "For create: a short unique identifier (lowercase, dashes ok). "
+                        "For cancel: the ID of the job to cancel."
+                    ),
+                },
                 "task": {
                     "type": "string",
-                    "description": "What the agent should do when the time comes",
+                    "description": "What the agent should do when the job runs (natural language instruction)",
                 },
                 "run_at": {
                     "type": "string",
-                    "description": "ISO datetime when the task should run",
+                    "description": "For one-time jobs: ISO datetime when the task should run",
+                },
+                "cron": {
+                    "type": "string",
+                    "description": (
+                        "For recurring jobs: 5-field cron expression (minute hour day month weekday). "
+                        "Example: '30 7 * * 1-5' = weekdays at 07:30"
+                    ),
                 },
                 "channel": {
                     "type": "string",
                     "description": "Channel to deliver the result on (default: telegram)",
                 },
+                "description": {
+                    "type": "string",
+                    "description": "Short human-readable description of this job",
+                },
             },
-            "required": ["task", "run_at"],
+            "required": ["action"],
         },
     },
 ]
@@ -214,8 +243,9 @@ class AgentCore:
         )
         self.channels: dict = {}
         self.voice: VoicePipeline | None = None
+        self.job_store = JobStore(db_path="data/jobs.db")
+        self.scheduler = AgentScheduler(self, self.job_store)
         config_db = "data/config.db"
-        self.scheduler = AgentScheduler(config_db, self)
         self.permissions = PermissionEngine(db_path=config_db)
 
         # Web search (Tavily)
@@ -551,9 +581,9 @@ class AgentCore:
                 return {"error": f"Skill not found: {skill_name}"}
             return {"name": skill_name, "content": content}
 
-        if name == "schedule_task":
-            log.info("Tool call: schedule_task — %s", params.get("task", ""))
-            result = self._tool_schedule_task(params)
+        if name == "manage_jobs":
+            log.info("Tool call: manage_jobs — %s", params.get("action", ""))
+            result = await self._tool_manage_jobs(params)
             if is_write_action and self._is_tool_success(result):
                 request_state["write_executed"] = True
             return result
@@ -659,29 +689,117 @@ class AgentCore:
 
         return await self.executor.run_command(" ".join(cmd_parts))
 
-    def _tool_schedule_task(self, params: dict) -> dict:
-        """Schedule a one-shot future task via APScheduler."""
-        task = params["task"]
-        run_at_str = params["run_at"]
-        channel = params.get("channel", "telegram")
+    async def _tool_manage_jobs(self, params: dict) -> dict:
+        """Create, list, or cancel scheduled jobs via the JobStore."""
+        action = params.get("action", "")
 
-        try:
-            run_at = datetime.fromisoformat(run_at_str)
-        except ValueError:
-            return {"error": f"Invalid datetime format: {run_at_str!r}. Use ISO format."}
-
-        job_id = f"oneshot_{uuid.uuid4().hex[:8]}"
-        try:
-            self.scheduler.add_one_shot(job_id, run_at, task, channel)
+        if action == "list":
+            jobs = await self.job_store.list_jobs()
             return {
                 "ok": True,
-                "job_id": job_id,
-                "run_at": run_at.isoformat(),
-                "task": task,
-                "channel": channel,
+                "jobs": [
+                    {
+                        "id": j["id"],
+                        "type": j["type"],
+                        "schedule": j["schedule"],
+                        "cron": j.get("cron"),
+                        "run_at": j.get("run_at"),
+                        "task": j["task"],
+                        "channel": j["channel"],
+                        "status": j["status"],
+                        "description": j.get("description", ""),
+                        "created_by": j.get("created_by", ""),
+                    }
+                    for j in jobs
+                ],
             }
-        except Exception as exc:
-            return {"error": f"Failed to schedule task: {exc}"}
+
+        if action == "cancel":
+            job_id = params.get("job_id", "").strip()
+            if not job_id:
+                return {"error": "Missing job_id for cancel action."}
+            existing = await self.job_store.get_job(job_id)
+            if not existing:
+                return {"error": f"Job not found: {job_id}"}
+            await self.job_store.update_status(job_id, "cancelled")
+            await self.scheduler.sync_job(job_id)
+            return {"ok": True, "cancelled": job_id}
+
+        if action == "create":
+            task = params.get("task", "").strip()
+            if not task:
+                return {"error": "Missing 'task' for create action."}
+
+            job_id = params.get("job_id", "").strip()
+            if not job_id:
+                job_id = f"agent_{uuid.uuid4().hex[:8]}"
+
+            channel = params.get("channel", "telegram")
+            description = params.get("description", "")
+            cron_expr = params.get("cron")
+            run_at_str = params.get("run_at")
+
+            if cron_expr:
+                # Recurring cron job
+                from core.scheduler import _parse_cron
+
+                try:
+                    _parse_cron(cron_expr)
+                except ValueError as exc:
+                    return {"error": str(exc)}
+
+                job = await self.job_store.upsert_job(
+                    job_id=job_id,
+                    type="agent",
+                    schedule="cron",
+                    cron=cron_expr,
+                    task=task,
+                    channel=channel,
+                    status="active",
+                    created_by="agent",
+                    description=description,
+                )
+                await self.scheduler.sync_job(job_id)
+                return {
+                    "ok": True,
+                    "job_id": job_id,
+                    "schedule": "cron",
+                    "cron": cron_expr,
+                    "task": task,
+                    "channel": channel,
+                }
+
+            elif run_at_str:
+                # One-shot job
+                try:
+                    run_at = datetime.fromisoformat(run_at_str)
+                except ValueError:
+                    return {"error": f"Invalid datetime format: {run_at_str!r}. Use ISO format."}
+
+                job = await self.job_store.upsert_job(
+                    job_id=job_id,
+                    type="agent",
+                    schedule="once",
+                    run_at=run_at.isoformat(),
+                    task=task,
+                    channel=channel,
+                    status="active",
+                    created_by="agent",
+                    description=description,
+                )
+                await self.scheduler.sync_job(job_id)
+                return {
+                    "ok": True,
+                    "job_id": job_id,
+                    "schedule": "once",
+                    "run_at": run_at.isoformat(),
+                    "task": task,
+                    "channel": channel,
+                }
+            else:
+                return {"error": "Must specify 'cron' for recurring or 'run_at' for one-time jobs."}
+
+        return {"error": f"Unknown action: {action!r}. Use 'create', 'list', or 'cancel'."}
 
     async def _tool_web_search(self, params: dict) -> dict:
         """Search the web via Tavily API."""
@@ -822,8 +940,12 @@ Today is {datetime.now().strftime("%A, %B %d, %Y")}. Timezone: {cfg.timezone}.
 {about_user_block}<tool_usage>
 For write actions (sending emails, replying to emails, sending messages, creating calendar events,
 scheduling tasks), ALWAYS use the dedicated structured tools: `send_email`, `reply_email`,
-`send_message`, `create_calendar_event`, `schedule_task`. NEVER use `run_command` for these — the
+`send_message`, `create_calendar_event`, `manage_jobs`. NEVER use `run_command` for these — the
 structured tools handle quoting, piping, and permissions correctly.
+
+For scheduling, use the `manage_jobs` tool to create, list, and cancel jobs. For more advanced
+operations (editing jobs, pausing, viewing details), use the `jobs.py` CLI via `run_command`
+after loading the `scheduling` skill.
 
 Use `run_command` only for read/query operations (listing emails, reading messages, searching,
 managing flags/folders, contacts, memory, etc.).
@@ -832,6 +954,8 @@ If you don't have the skill content in context, call `load_skill` with the skill
 Parse JSON output when available (himalaya supports -o json, sqlite3 supports -json).
 If a command fails, read the error and try to fix it.
 Never guess at command syntax — always refer to the skill file.
+
+You may create or update skills using the `skills.py` CLI after loading the `skill-creator` skill.
 </tool_usage>
 
 You can store and recall memories using the sqlite3 CLI (see the memory skill).
