@@ -34,13 +34,20 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:python3 /app/tools/contacts.py*": "ALWAYS",
     "run_command:python3 tools/contacts.py*": "ALWAYS",
     "run_command:python3 /app/tools/calendar_read.py*": "ALWAYS",
+    "run_command:python3 tools/calendar_read.py*": "ALWAYS",
+    # wacli read operations — all pre-approved
     "run_command:wacli*messages*": "ALWAYS",
-    "run_command:wacli*contacts*": "ALWAYS",
+    "run_command:wacli*contacts search*": "ALWAYS",
+    "run_command:wacli*contacts show*": "ALWAYS",
     "run_command:wacli*chats*": "ALWAYS",
     "run_command:wacli*groups list*": "ALWAYS",
     "run_command:wacli*groups info*": "ALWAYS",
     "run_command:wacli*sync*": "ALWAYS",
     "run_command:wacli*search*": "ALWAYS",
+    # wacli write operations — require approval
+    "run_command:wacli*contacts refresh*": "ASK",
+    "run_command:wacli*contacts alias*": "ASK",
+    "run_command:wacli*contacts tags*": "ASK",
     "run_command:wacli*groups refresh*": "ASK",
     "run_command:wacli*groups rename*": "ASK",
     "run_command:wacli*groups participants*": "ASK",
@@ -48,6 +55,9 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:wacli*groups join*": "ASK",
     "run_command:wacli*groups leave*": "ASK",
     "run_command:wacli*send*": "ASK",
+    # Block direct access to wacli's internal SQLite databases
+    "run_command:sqlite3*wacli*": "NEVER",
+    "run_command:sqlite3*.wacli*": "NEVER",
     "run_command:sqlite3*/app/data/memory.db*SELECT*": "ALWAYS",
     "run_command:sqlite3*/app/data/memory.db*INSERT*": "ALWAYS",
     "run_command:sqlite3*/app/data/memory.db*UPDATE*": "ALWAYS",
@@ -142,6 +152,43 @@ class PermissionEngine:
         if tool_name == "run_command" and params and "command" in params:
             return f"run_command:{params['command']}"
         return tool_name
+
+    def match_key(self, tool_name: str, params: dict | None = None) -> str:
+        """Public helper to build the match key for a tool call."""
+        return self._build_match_key(tool_name, params)
+
+    def is_write_action(self, tool_name: str, params: dict | None = None) -> bool:
+        """Return True if a tool call is a write-like action.
+
+        Write-like actions should prompt for permission each time. Read actions
+        can be auto-approved after the first user confirmation.
+        """
+        if tool_name in {
+            "send_email",
+            "reply_email",
+            "send_message",
+            "create_calendar_event",
+            "schedule_task",
+        }:
+            return True
+
+        match_key = self._build_match_key(tool_name, params)
+        if match_key.startswith("run_command:"):
+            command = match_key[len("run_command:") :].strip().lower()
+            for pattern, level in self.rules.items():
+                if level != PermissionLevel.ASK:
+                    continue
+                if not pattern.startswith("run_command:"):
+                    continue
+                if fnmatch.fnmatch(match_key, pattern):
+                    return True
+            if any(
+                token in command
+                for token in ("send", "delete", "move", "invite", "rename", "join", "leave")
+            ):
+                return True
+
+        return False
 
     def check(self, tool_name: str, params: dict | None = None) -> str:
         """Return the permission level for a tool call.

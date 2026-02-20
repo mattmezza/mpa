@@ -1,26 +1,38 @@
 # wacli -- WhatsApp CLI
 
-You have access to `wacli` to read WhatsApp messages, search conversations,
-look up contacts, and manage groups. wacli keeps a local SQLite database
-synced from WhatsApp — most read commands query locally and are fast.
+You have access to `wacli`, a CLI tool for interacting with WhatsApp. Use it for
+**all** read operations: listing messages, searching conversations, looking up
+contacts, browsing chats, and inspecting groups. All read commands are
+pre-approved and run without user confirmation.
 
-## Important: sending messages
+wacli keeps a local SQLite database synced from WhatsApp. Read commands query
+this local database and are fast. You can and should use wacli freely for any
+non-write WhatsApp interaction.
 
-**Do NOT use `run_command` with `wacli send` to send WhatsApp messages.**
-Use the `send_message` tool instead (channel="whatsapp"). It handles
-delivery through the admin API.
+## Critical rules
 
-## Syncing
+1. **Always sync before checking for new messages.** Before reading messages,
+   checking if someone replied, or looking for recent conversations, run a sync
+   first to pull the latest data from WhatsApp:
 
-wacli's local database may be stale. Before reading messages or contacts,
-run a quick sync to pull the latest data:
+   ```bash
+   wacli --json sync --once --idle-exit 5s
+   ```
 
-```bash
-wacli --json sync --once --idle-exit 5s
-```
+   This connects to WhatsApp, pulls new messages, and exits after 5 seconds of
+   idle. It typically completes in under 10 seconds. **Do this every time** the
+   user asks about new or recent messages.
 
-This connects to WhatsApp, pulls new messages, and exits after 5 seconds
-of idle. It typically completes in under 10 seconds.
+2. **Do NOT use `run_command` with `wacli send` to send WhatsApp messages.**
+   Use the `send_message` tool instead (channel="whatsapp"). It handles delivery
+   through the proper channel.
+
+3. **NEVER read wacli's internal SQLite database directly.** Do not use
+   `sqlite3` to query `~/.wacli/wacli.db` or `~/.wacli/session.db` or any
+   database inside the wacli store directory. Always use the `wacli` CLI
+   commands instead — they provide the correct interface to the data with proper
+   formatting and field names. The internal database schema is an implementation
+   detail and may change without notice.
 
 ## Reading messages
 
@@ -68,23 +80,41 @@ wacli --json messages show --chat 41772909259@s.whatsapp.net --id 3EB0ABC123
 wacli --json messages context --chat 41772909259@s.whatsapp.net --id 3EB0ABC123 --before 5 --after 5
 ```
 
-## Contacts
+## Looking up contacts
+
+### Search contacts in wacli
 
 ```bash
-# Search contacts by name or phone
+# Search contacts by name, phone, or alias
 wacli --json contacts search "Marco"
 
-# Show a specific contact
+# Show a specific contact by JID
 wacli --json contacts show --jid 41772909259@s.whatsapp.net
+```
 
-# Refresh contacts from WhatsApp into local DB
+### Fallback: use the contacts tool
+
+If you cannot find a contact via `wacli contacts search` (e.g. the person is not
+in WhatsApp contacts, or you only have a name without a phone number), use the
+**contacts tool** (`python3 /app/tools/contacts.py`) to search across Google
+Contacts or CardDAV. This can help you find phone numbers or email addresses
+that you can then use to construct the WhatsApp JID.
+
+```bash
+# Search contacts tool for phone number
+python3 /app/tools/contacts.py search --provider <NAME> --query "Marco" --output json
+```
+
+### Refresh contacts from WhatsApp (live query)
+
+```bash
 wacli --json contacts refresh
 ```
 
 ## Chats
 
 ```bash
-# List all chats
+# List all chats (sorted by last message)
 wacli --json chats list --limit 30
 
 # Search chats by name
@@ -100,11 +130,11 @@ wacli --json chats show --jid 41772909259@s.whatsapp.net
 # List known groups
 wacli --json groups list
 
-# Refresh groups from WhatsApp (live query)
-wacli --json groups refresh
-
 # Get group info
 wacli --json groups info --jid 123456789@g.us
+
+# Refresh groups from WhatsApp (live query)
+wacli --json groups refresh
 
 # Rename a group
 wacli --json groups rename --jid 123456789@g.us --name "New Name"
@@ -120,11 +150,28 @@ WhatsApp identifies users and groups by JID (Jabber ID):
 When the user gives you a phone number like "+41 77 290 92 59", strip spaces
 and the leading `+` to form the JID: `41772909259@s.whatsapp.net`.
 
+## Allowed operations (no user approval needed)
+
+All of these run immediately without asking the user:
+
+- `wacli sync` — sync latest messages from WhatsApp
+- `wacli messages list` / `search` / `show` / `context` — read messages
+- `wacli contacts search` / `show` — look up contacts
+- `wacli chats list` / `show` — browse chats
+- `wacli groups list` / `info` — view groups
+
+## Operations requiring approval
+
+These require user confirmation before running:
+
+- `wacli groups refresh` / `rename` / `participants` / `invite` / `join` / `leave`
+- `wacli contacts refresh`
+- Sending messages (use `send_message` tool, not `wacli send`)
+
 ## Important notes
 
 - Always use `--json` when you need to parse results programmatically.
-- Run `wacli --json sync --once --idle-exit 5s` before reading if freshness matters.
 - Read commands (`messages`, `contacts search/show`, `chats`, `groups list`) query the local DB and do not require a WhatsApp connection.
 - Write commands (`sync`, `contacts refresh`, `groups refresh/info/rename`) connect to WhatsApp and acquire an exclusive file lock.
 - Only one wacli process can hold the lock at a time. If another is running, the command will fail immediately.
-- When the user says "check my WhatsApp" or "any new messages", sync first, then list recent messages.
+- When the user says "check my WhatsApp" or "any new messages", **always sync first**, then list recent messages.

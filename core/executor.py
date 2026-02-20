@@ -5,9 +5,29 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 from pathlib import Path
 
 from core.email_config import himalaya_env
+
+
+def _find_wacli_bin() -> str:
+    """Locate the wacli binary — works in Docker and local dev."""
+    env = os.getenv("WACLI_BIN")
+    if env and Path(env).exists():
+        return env
+    from_path = shutil.which("wacli")
+    if from_path:
+        return from_path
+    # Docker: /app/tools/wacli/dist/wacli
+    docker_path = Path("/app/tools/wacli/dist/wacli")
+    if docker_path.exists():
+        return str(docker_path)
+    # Local dev: <project_root>/tools/wacli/dist/wacli
+    local_path = Path(__file__).resolve().parents[1] / "tools" / "wacli" / "dist" / "wacli"
+    if local_path.exists():
+        return str(local_path)
+    return "wacli"  # fallback — let the shell try PATH
 
 
 class ToolExecutor:
@@ -32,7 +52,14 @@ class ToolExecutor:
     ]
 
     def _resolve_command(self, command: str) -> str:
-        """Rewrite /app/tools paths for local dev when needed."""
+        """Rewrite tool paths for local dev when needed."""
+        # Resolve bare `wacli` to the full binary path
+        if command == "wacli" or command.startswith("wacli "):
+            wacli_bin = _find_wacli_bin()
+            if wacli_bin != "wacli":
+                command = wacli_bin + command[5:]
+
+        # Resolve /app/tools/ python script paths for local dev
         if "/app/tools/" not in command:
             return command
         if Path("/app/tools").exists():
