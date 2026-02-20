@@ -556,11 +556,11 @@
               el.innerHTML = '';
               new QRCode(el, {
                 text: qrData.qr,
-                width: 300,
-                height: 300,
+                width: 400,
+                height: 400,
                 colorDark: '#000000',
                 colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.H
+                correctLevel: QRCode.CorrectLevel.L
               });
             } else {
               qrBox.textContent = 'QR library missing.';
@@ -618,11 +618,11 @@
               el.innerHTML = '';
               new QRCode(el, {
                 text: qrData.qr,
-                width: 300,
-                height: 300,
+                width: 400,
+                height: 400,
                 colorDark: '#000000',
                 colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.H
+                correctLevel: QRCode.CorrectLevel.L
               });
             } else {
               qrBox.textContent = 'QR library missing.';

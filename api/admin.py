@@ -1213,7 +1213,14 @@ def create_admin_app(
     @app.post("/channels/whatsapp/test", dependencies=[Depends(auth)])
     async def test_channel_whatsapp(body: WhatsAppTestIn) -> dict:
         status = await wacli.auth_status()
-        return {"ok": status.get("available") is True, "response": status}
+        available = status.get("available") is True
+        result: dict = {"ok": available, "response": status}
+        if not available:
+            result["error"] = (
+                "wacli binary not found. "
+                "Run 'make dev-wa' or 'cd tools/wacli && pnpm build' to compile it."
+            )
+        return result
 
     @app.get("/channels/whatsapp/auth/status", dependencies=[Depends(auth)])
     async def whatsapp_auth_status() -> dict:
