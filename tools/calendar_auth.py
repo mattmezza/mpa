@@ -1,23 +1,40 @@
 """Shared OAuth 2.0 helper for CalDAV calendar tools.
 
-Loads a Google OAuth token file, refreshes the access token if needed,
-and provides a `caldav.DAVClient` that uses Bearer auth.
+Loads Google OAuth token from the ConfigStore DB, refreshes the access
+token as needed, and provides a `caldav.DAVClient` with Bearer auth.
+
+Non-Google CalDAV providers still use Basic Auth (username/password).
 """
 
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import time
-from pathlib import Path
 
 import caldav
 import requests
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+CONFIG_DB_PATH = "data/config.db"
+TOKEN_DB_KEY = "calendar.google_oauth_token"
 
-# Cache: (access_token, expiry_timestamp)
-_token_cache: dict[str, tuple[str, float]] = {}
+# In-memory cache: (access_token, expiry_timestamp)
+_token_cache: tuple[str, float] | None = None
+
+
+def _load_token_from_db(db_path: str = CONFIG_DB_PATH) -> dict | None:
+    """Read the OAuth token JSON from the config store (sync)."""
+    try:
+        db = sqlite3.connect(db_path)
+        row = db.execute("SELECT value FROM config WHERE key = ?", (TOKEN_DB_KEY,)).fetchone()
+        db.close()
+        if row:
+            return json.loads(row[0])
+    except Exception:
+        pass
+    return None
 
 
 def _refresh_access_token(token_data: dict) -> tuple[str, int]:
@@ -37,30 +54,34 @@ def _refresh_access_token(token_data: dict) -> tuple[str, int]:
     return data["access_token"], data.get("expires_in", 3600)
 
 
-def get_access_token(token_file: str) -> str:
-    """Return a valid access token, refreshing if expired."""
-    cached = _token_cache.get(token_file)
-    if cached:
-        token, expiry = cached
+def get_access_token(db_path: str = CONFIG_DB_PATH) -> str:
+    """Return a valid access token, refreshing from the DB token if expired."""
+    global _token_cache
+    if _token_cache:
+        token, expiry = _token_cache
         if time.time() < expiry - 60:  # 60s safety margin
             return token
 
-    path = Path(token_file)
-    if not path.exists():
-        print(f"Error: token file not found: {token_file}", file=sys.stderr)
-        print("Run tools/google_oauth.py to authorize.", file=sys.stderr)
+    token_data = _load_token_from_db(db_path)
+    if not token_data:
+        print(
+            f"Error: no Google OAuth token found in DB (key: {TOKEN_DB_KEY}).",
+            file=sys.stderr,
+        )
+        print(
+            "Run: uv run python tools/google_oauth.py --client-id ... --client-secret ...",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    token_data = json.loads(path.read_text())
     access_token, expires_in = _refresh_access_token(token_data)
-    _token_cache[token_file] = (access_token, time.time() + expires_in)
+    _token_cache = (access_token, time.time() + expires_in)
     return access_token
 
 
 def connect_google(provider: dict) -> caldav.Calendar:
     """Connect to Google CalDAV using OAuth 2.0 Bearer token."""
-    token_file = provider.get("token_file", "data/google_calendar_token.json")
-    access_token = get_access_token(token_file)
+    access_token = get_access_token()
 
     client = caldav.DAVClient(
         url=provider["url"],

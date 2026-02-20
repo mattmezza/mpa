@@ -2,16 +2,13 @@
 """One-time OAuth 2.0 authorization for Google CalDAV.
 
 Opens a browser for the user to grant calendar access, then saves the
-refresh token to a JSON file that the calendar CLI tools use.
+refresh token to the ConfigStore DB (data/config.db) so that the
+calendar CLI tools can use it — including inside Docker containers.
 
 Usage:
     python3 tools/google_oauth.py \
         --client-id  "YOUR_CLIENT_ID" \
-        --client-secret "YOUR_CLIENT_SECRET" \
-        --token-file data/google_calendar_token.json
-
-The token file is then referenced in config.yml (or the admin UI) as
-the provider's `token_file` field.
+        --client-secret "YOUR_CLIENT_SECRET"
 """
 
 from __future__ import annotations
@@ -20,8 +17,8 @@ import argparse
 import hashlib
 import http.server
 import json
-import os
 import secrets
+import sqlite3
 import sys
 import threading
 import urllib.parse
@@ -36,6 +33,9 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 REDIRECT_PORT = 8085
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
+
+CONFIG_DB_PATH = "data/config.db"
+TOKEN_DB_KEY = "calendar.google_oauth_token"
 
 
 def _generate_pkce() -> tuple[str, str]:
@@ -78,14 +78,28 @@ def _exchange_code(code: str, client_id: str, client_secret: str, code_verifier:
     return resp.json()
 
 
+def _save_token_to_db(token_json: str, db_path: str = CONFIG_DB_PATH) -> None:
+    """Persist the OAuth token JSON to the config store."""
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(db_path)
+    db.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    db.execute(
+        "INSERT INTO config (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (TOKEN_DB_KEY, token_json),
+    )
+    db.commit()
+    db.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Authorize Google Calendar via OAuth 2.0")
     parser.add_argument("--client-id", required=True, help="Google OAuth client ID")
     parser.add_argument("--client-secret", required=True, help="Google OAuth client secret")
     parser.add_argument(
-        "--token-file",
-        default="data/google_calendar_token.json",
-        help="Path to save the token JSON (default: data/google_calendar_token.json)",
+        "--db",
+        default=CONFIG_DB_PATH,
+        help=f"Path to config DB (default: {CONFIG_DB_PATH})",
     )
     args = parser.parse_args()
 
@@ -127,7 +141,7 @@ def main():
     thread.start()
 
     auth_url = _build_auth_url(args.client_id, code_challenge, state)
-    print(f"Opening browser for authorization...\n")
+    print("Opening browser for authorization...\n")
     print(f"If the browser doesn't open, visit this URL:\n{auth_url}\n")
     webbrowser.open(auth_url)
 
@@ -150,18 +164,16 @@ def main():
         print(f"Response: {json.dumps(token_data, indent=2)}")
         sys.exit(1)
 
-    # Save token file
-    token_file = Path(args.token_file)
-    token_file.parent.mkdir(parents=True, exist_ok=True)
+    # Save to config DB
     token_out = {
         "client_id": args.client_id,
         "client_secret": args.client_secret,
         "refresh_token": token_data["refresh_token"],
         "token_type": "Bearer",
     }
-    token_file.write_text(json.dumps(token_out, indent=2))
-    print(f"\nToken saved to {token_file}")
-    print("Calendar tools will now use OAuth 2.0 for this provider.")
+    _save_token_to_db(json.dumps(token_out), db_path=args.db)
+    print(f"\nToken saved to DB ({args.db}, key: {TOKEN_DB_KEY})")
+    print("Calendar tools will now use OAuth 2.0 for Google providers.")
 
 
 if __name__ == "__main__":
