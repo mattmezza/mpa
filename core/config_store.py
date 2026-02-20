@@ -128,16 +128,17 @@ def _parse_value(value: str) -> object:
         return True
     if value.lower() == "false":
         return False
-    # Try int
-    try:
-        return int(value)
-    except ValueError:
-        pass
+    # Try int (but not strings starting with '+' — likely phone numbers)
+    if not value.startswith("+"):
+        try:
+            return int(value)
+        except ValueError:
+            pass
     # Try JSON (for lists)
     if value.startswith("[") or value.startswith("{"):
         try:
             return json.loads(value)
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             pass
     return value
 
@@ -174,7 +175,7 @@ def _verify_password(password: str, hashed: str, salt: str) -> bool:
     try:
         salt_bytes = base64.b64decode(salt.encode())
         expected = base64.b64decode(hashed.encode())
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return False
     derived = hashlib.pbkdf2_hmac("sha256", password.encode(), salt_bytes, 200_000)
     return hmac.compare_digest(derived, expected)

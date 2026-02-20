@@ -661,7 +661,12 @@ def create_admin_app(
     async def partial_permissions() -> HTMLResponse:
         """Permissions tab partial."""
         agent = agent_state.agent
-        rules = agent.permissions.rules if agent else {}
+        if agent:
+            rules = agent.permissions.rules
+        else:
+            from core.permissions import DEFAULT_RULES
+
+            rules = dict(DEFAULT_RULES)
         return _render_partial("partials/permissions.html", rules=rules)
 
     @app.get("/partials/skills", dependencies=[Depends(auth)])
@@ -777,16 +782,15 @@ def create_admin_app(
         # Memory config
         memory_long_term_limit = await config_store.get("memory.long_term_limit") or "50"
 
-        # Memory data
-        agent = agent_state.agent
+        # Memory data — read directly from DB (works even when agent is stopped)
+        import aiosqlite
+
+        memory_db = await config_store.get("memory.db_path") or "data/memory.db"
         long_term = []
         short_term = []
-        if agent:
-            import aiosqlite
-
-            await agent.memory._ensure_schema()
+        if Path(memory_db).exists():
             cols = "id, category, subject, content, source, confidence, created_at, updated_at"
-            async with aiosqlite.connect(agent.memory.db_path) as db:
+            async with aiosqlite.connect(memory_db) as db:
                 db.row_factory = aiosqlite.Row
                 cursor = await db.execute(f"SELECT {cols} FROM long_term ORDER BY updated_at DESC")
                 long_term = [dict(row) for row in await cursor.fetchall()]
@@ -874,11 +878,42 @@ def create_admin_app(
 
         await cs.set("scheduler.jobs", json.dumps(jobs_data))
 
+    def _get_jobs_from_config() -> list[dict]:
+        """Read persisted jobs from config DB (works when agent is stopped)."""
+        import sqlite3 as stdlib_sqlite3
+
+        db_path = config_store.db_path
+        try:
+            with stdlib_sqlite3.connect(db_path) as db:
+                row = db.execute("SELECT value FROM config WHERE key = 'scheduler.jobs'").fetchone()
+        except Exception:
+            return []
+        if not row or not row[0]:
+            return []
+        try:
+            jobs_data = json.loads(row[0])
+        except json.JSONDecodeError, TypeError:
+            return []
+        jobs = []
+        for j in jobs_data:
+            jobs.append(
+                {
+                    "id": j.get("id", ""),
+                    "cron": j.get("cron", ""),
+                    "type": j.get("type", "unknown"),
+                    "task": j.get("task", ""),
+                    "channel": j.get("channel", "telegram"),
+                    "next_run": "(agent stopped)",
+                }
+            )
+        return jobs
+
     def _get_jobs_list() -> list[dict]:
         """Build a list of job dicts from the running scheduler + config store."""
         agent = agent_state.agent
         if not agent:
-            return []
+            # Fall back to persisted jobs from config store (sync read)
+            return _get_jobs_from_config()
         jobs = []
         for ap_job in agent.scheduler.scheduler.get_jobs():
             trigger = ap_job.trigger

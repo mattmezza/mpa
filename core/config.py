@@ -77,6 +77,8 @@ class WhatsAppConfig(BaseModel):
     @field_validator("allowed_numbers", mode="before")
     @classmethod
     def parse_comma_separated_strings(cls, v):
+        if isinstance(v, (int, float)):
+            return [f"+{int(v)}"]
         if isinstance(v, str):
             v = v.strip()
             return [x.strip() for x in v.split(",") if x.strip()] if v else []
