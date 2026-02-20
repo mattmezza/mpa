@@ -1,7 +1,6 @@
 <div class="card" x-data="{
   provider: {{ step_ctx.provider|default('anthropic')|tojson|forceescape }},
   model: {{ step_ctx.model|default('', true)|tojson|forceescape }},
-  customModel: '',
   tests: { anthropic: false, openai: false, google: false, grok: false, deepseek: false },
   testResults: { anthropic: '', openai: '', google: '', grok: '', deepseek: '' },
   testing: false,
@@ -33,22 +32,9 @@
       {value: 'deepseek-vl2-latest', label: 'DeepSeek VL2 Latest'}
     ]
   },
-  init() {
-    this.normalizeModel();
-    this.$watch('provider', () => this.normalizeModel());
-  },
-  normalizeModel() {
+  resetModel() {
     const list = this.models[this.provider] || [];
-    if (!list.length) return;
-    const current = (this.model || '').trim();
-    if (!current) {
-      this.model = list[0].value;
-      this.customModel = '';
-      return;
-    }
-    const exists = list.some(item => item.value === current);
-    this.model = current;
-    this.customModel = exists ? '' : current;
+    if (list.length) { this.model = list[0].value; }
   }
 }">
   <h2 class="text-base mb-3">LLM Provider</h2>
@@ -58,7 +44,7 @@
     <p class="text-muted text-xs mb-3">Select the provider used for inference after testing it.</p>
 
     <label class="label" for="w-provider">Provider</label>
-    <select class="select" id="w-provider" name="provider" x-model="provider">
+    <select class="select" id="w-provider" name="provider" x-model="provider" @change="resetModel()">
       <option value="anthropic" {{ 'selected' if step_ctx.provider|default('anthropic') == 'anthropic' }}>Anthropic</option>
       <option value="openai" {{ 'selected' if step_ctx.provider|default('') == 'openai' }}>OpenAI</option>
       <option value="google" {{ 'selected' if step_ctx.provider|default('') == 'google' }}>Google Gemini</option>
@@ -68,7 +54,6 @@
 
   <label class="label mt-3" for="w-model">Model</label>
   <select class="select" id="w-model" name="model" x-model="model">
-    <option x-show="customModel" :value="customModel" x-text="customModel + ' (custom)'"></option>
     <template x-for="item in (models[provider] || [])" :key="item.value">
       <option :value="item.value" x-text="item.label"></option>
     </template>

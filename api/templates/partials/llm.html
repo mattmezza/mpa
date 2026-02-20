@@ -23,7 +23,7 @@
     <form class="space-y-3" @submit.prevent>
       <div>
         <label class="label">Provider</label>
-        <select class="input-sm" style="max-width:500px" x-model="provider">
+        <select class="input-sm" style="max-width:500px" x-model="provider" @change="resetModel()">
           <option value="anthropic">Anthropic</option>
           <option value="openai">OpenAI</option>
           <option value="google">Google Gemini</option>
@@ -89,7 +89,7 @@
     <form class="space-y-4" @submit.prevent>
       <div>
         <label class="label">Extraction provider</label>
-        <select class="input-sm" style="max-width:500px" x-model="extractionProvider">
+        <select class="input-sm" style="max-width:500px" x-model="extractionProvider" @change="resetMemoryModel('extraction')">
           <option value="anthropic">Anthropic</option>
           <option value="openai">OpenAI</option>
           <option value="google">Google Gemini</option>
@@ -111,7 +111,7 @@
 
       <div>
         <label class="label">Consolidation provider</label>
-        <select class="input-sm" style="max-width:500px" x-model="consolidationProvider">
+        <select class="input-sm" style="max-width:500px" x-model="consolidationProvider" @change="resetMemoryModel('consolidation')">
           <option value="anthropic">Anthropic</option>
           <option value="openai">OpenAI</option>
           <option value="google">Google Gemini</option>

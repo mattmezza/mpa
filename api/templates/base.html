@@ -48,7 +48,6 @@
         provider: currentProvider,
         apiKey: apiKey || '',
         model: model || '',
-        customModel: '',
         openaiKey: openaiKey || '',
         openaiBaseUrl: openaiBaseUrl || '',
         googleKey: googleKey || '',
@@ -59,10 +58,8 @@
         deepseekBaseUrl: deepseekBaseUrl || '',
         extractionProvider: extractionProvider || 'anthropic',
         extractionModel: extractionModel || 'claude-4-5-haiku',
-        extractionCustomModel: '',
         consolidationProvider: consolidationProvider || 'anthropic',
         consolidationModel: consolidationModel || 'claude-4-5-haiku',
-        consolidationCustomModel: '',
         memoryResult: '',
         memoryResultOk: false,
         result: '',
@@ -117,39 +114,20 @@
           ]
         },
         init() {
-          this.normalizeModel();
-          this.$watch('provider', () => this.normalizeModel());
-          this.normalizeMemoryModel('extraction');
-          this.normalizeMemoryModel('consolidation');
-          this.$watch('extractionProvider', () => this.normalizeMemoryModel('extraction'));
-          this.$watch('consolidationProvider', () => this.normalizeMemoryModel('consolidation'));
+          // No normalisation on load — the server provides the correct
+          // model value and the <select> options are rendered via x-for,
+          // so touching the value before the DOM settles would clobber it.
         },
-        normalizeModel() {
+        resetModel() {
           const list = this.models[this.provider] || [];
-          if (!list.length) return;
-          const current = (this.model || '').trim();
-          const exists = current && list.some(item => item.value === current);
-          if (exists) {
-            this.customModel = '';
-          } else {
-            this.model = list[0].value;
-            this.customModel = '';
-          }
+          if (list.length) { this.model = list[0].value; }
         },
-        normalizeMemoryModel(kind) {
+        resetMemoryModel(kind) {
           const prov = kind === 'extraction' ? this.extractionProvider : this.consolidationProvider;
           const list = this.models[prov] || [];
           if (!list.length) return;
-          const current = (kind === 'extraction' ? this.extractionModel : this.consolidationModel) || '';
-          const trimmed = current.trim();
-          const exists = trimmed && list.some(item => item.value === trimmed);
-          if (exists) {
-            if (kind === 'extraction') { this.extractionCustomModel = ''; }
-            else { this.consolidationCustomModel = ''; }
-          } else {
-            if (kind === 'extraction') { this.extractionModel = list[0].value; this.extractionCustomModel = ''; }
-            else { this.consolidationModel = list[0].value; this.consolidationCustomModel = ''; }
-          }
+          if (kind === 'extraction') { this.extractionModel = list[0].value; }
+          else { this.consolidationModel = list[0].value; }
         },
         keyFor(service) {
           if (service === 'openai') return this.openaiKey;
