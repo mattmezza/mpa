@@ -323,8 +323,8 @@ email client — each command is independent, no session state.
 ## Configuration
 
 Himalaya is pre-configured with these accounts:
-- `personal` — Matteo's personal Gmail
-- `work` — Matteo's work Fastmail
+- `personal` — Alex's personal Gmail
+- `work` — Alex's work Fastmail
 
 Always specify the account with `-a <account_name>`.
 
@@ -367,10 +367,10 @@ himalaya -a personal message read 123 --raw
 himalaya -a work envelope list --folder INBOX -o json -- "subject:invoice"
 
 # Search by sender
-himalaya -a personal envelope list -o json -- "from:simge"
+himalaya -a personal envelope list -o json -- "from:elena"
 
 # Combined search
-himalaya -a work envelope list -o json -- "from:ikea subject:contract"
+himalaya -a work envelope list -o json -- "from:nordicfurnishings subject:contract"
 ```
 
 ## Sending Emails
@@ -378,7 +378,7 @@ himalaya -a work envelope list -o json -- "from:ikea subject:contract"
 ### Send a new email
 ```bash
 # Using MML (MIME Meta Language) format via stdin
-echo 'From: matteo@example.com
+echo 'From: alex@example.com
 To: recipient@example.com
 Subject: Hello from the agent
 
@@ -391,7 +391,7 @@ This is the body of the email.' | himalaya -a personal message send
 echo 'Thank you for your email.
 
 Best regards,
-Matteo' | himalaya -a personal message reply 123
+Alex' | himalaya -a personal message reply 123
 ```
 
 ### Forward an email
@@ -453,7 +453,7 @@ python3 /app/tools/contacts.py get --provider <NAME> --id <CONTACT_ID> --output 
 
 ```json
 [
-  {"id": "...", "full_name": "Marco Rossi", "emails": ["marco@example.com"], "phones": ["+39 333 1234567"]}
+  {"id": "...", "full_name": "Marco Rossi", "emails": ["marco@example.com"], "phones": ["+49 151 5551234"]}
 ]
 ```
 
@@ -470,7 +470,7 @@ python3 /app/tools/contacts.py get --provider <NAME> --id <CONTACT_ID> --output 
 Calendar operations use helper scripts that wrap Python's caldav library.
 
 ## Available Calendars
-- `google` — Matteo's Google Calendar (primary, work events)
+- `google` — Alex's Google Calendar (primary, work events)
 - `icloud` — Shared family calendar
 
 ## Reading Events
@@ -494,7 +494,7 @@ JSON output:
     "start": "2025-02-17T09:00:00+01:00",
     "end": "2025-02-17T09:30:00+01:00",
     "location": "Google Meet",
-    "attendees": ["alice@ikea.com", "bob@ikea.com"]
+    "attendees": ["alice@nordicfurnishings.com", "bob@nordicfurnishings.com"]
   }
 ]
 ```
@@ -508,7 +508,7 @@ Use the `create_calendar_event` structured tool (requires permission). Provide:
 - `attendees`: optional list of email addresses (sends invites automatically)
 
 ## Important Notes
-- Always include timezone (Europe/Zurich = UTC+1, UTC+2 during DST)
+- Always include timezone (Europe/Berlin = UTC+1, UTC+2 during DST)
 - For all-day events, use date only: "2025-02-20"
 - Use `google` calendar for work events, `icloud` for family/personal
 ```
@@ -544,22 +544,22 @@ A top-level markdown file (not in `skills/`) that defines the agent's personalit
 
 ## Personality
 - Be concise in chat. Telegram/WhatsApp messages should be short and direct.
-- When acting on Matteo's behalf (sending emails, messages), match his communication
+- When acting on Alex's behalf (sending emails, messages), match his communication
   style: professional but warm, slightly informal with close contacts.
-- Write messages in first person as if from Matteo. Do not add assistant signatures
-  unless Matteo explicitly requests it.
+- Write messages in first person as if from Alex. Do not add assistant signatures
+  unless Alex explicitly requests it.
 - When unsure about an action, ask. When confident and pre-approved, just do it.
 
 ## Contact Resolution
-When Matteo refers to someone by first name:
+When Alex refers to someone by first name:
 1. Look up the contact using the contacts CLI
 2. If multiple matches, ask which one
 3. Use the contact's preferred channel (check notes field for preferences)
 
 ## Language
 - Default to English
-- Switch to Italian when Matteo speaks Italian or when messaging Italian contacts
-- Use German for formal Swiss correspondence if appropriate
+- Switch to Italian when Alex speaks Italian or when messaging Italian contacts
+- Use German for formal correspondence if appropriate
 
 ## Proactive Behaviors (Scheduled Tasks)
 When running scheduled tasks (morning briefing, email checks), be:
@@ -579,7 +579,7 @@ The distinction: `character.md` is _how_ the agent behaves (editable, tunable), 
 
 ## Identity
 - Name: Jarvis
-- Owner: Matteo
+- Owner: Alex
 - Role: Personal AI assistant
 
 ## Strengths
@@ -601,8 +601,8 @@ The distinction: `character.md` is _how_ the agent behaves (editable, tunable), 
 ## Limitations
 - Cannot make phone calls
 - Cannot access websites or browse the internet (except via web_search)
-- Cannot access files on Matteo's personal devices
-- Always needs permission before sending messages or emails on Matteo's behalf
+- Cannot access files on Alex's personal devices
+- Always needs permission before sending messages or emails on Alex's behalf
 
 ## History
 - 2025-02-17: Initial deployment with email, calendar, contacts, messaging, and voice support
@@ -639,7 +639,7 @@ Columns: id, content, context, expires_at, created_at
 
 ### Long-term memory (things that stay true)
 ```bash
-sqlite3 /app/data/memory.db "INSERT INTO long_term (category, subject, content, source) VALUES ('preference', 'matteo', 'Allergic to shellfish', 'conversation');"
+sqlite3 /app/data/memory.db "INSERT INTO long_term (category, subject, content, source) VALUES ('preference', 'alex', 'Allergic to shellfish', 'conversation');"
 ```
 
 ### Short-term fact (temporary context, default 24h expiry)
@@ -656,7 +656,7 @@ sqlite3 /app/data/memory.db "UPDATE long_term SET content = 'New value', updated
 
 ### Search by subject
 ```bash
-sqlite3 -json /app/data/memory.db "SELECT * FROM long_term WHERE subject = 'matteo';"
+sqlite3 -json /app/data/memory.db "SELECT * FROM long_term WHERE subject = 'alex';"
 ```
 
 ### Search by category
@@ -999,8 +999,8 @@ The agent has a two-tier memory system accessed via the `sqlite3` CLI. This foll
 
 | Tier | Purpose | Lifetime | Examples |
 |---|---|---|---|
-| **Long-term** | Facts worth keeping forever | Permanent (never auto-deleted) | "Matteo's wife is Simge", "Accountant's name is Dr. Weber", "Matteo prefers window seats" |
-| **Short-term** | Transient context worth keeping briefly | Configurable sliding window (default 24h), cleaned up periodically (default every 8h) | "Matteo is at the airport right now", "Matteo asked me to remind him about the report after lunch", "Simge is visiting her parents this weekend" |
+| **Long-term** | Facts worth keeping forever | Permanent (never auto-deleted) | "Alex's wife is Elena", "Accountant's name is Dr. Novak", "Alex prefers window seats" |
+| **Short-term** | Transient context worth keeping briefly | Configurable sliding window (default 24h), cleaned up periodically (default every 8h) | "Alex is at the airport right now", "Alex asked me to remind him about the report after lunch", "Elena is visiting her parents this weekend" |
 
 The distinction: if it would still be useful next month, it's long-term. If it's situational context that will be stale in a day or two, it's short-term.
 
@@ -1014,7 +1014,7 @@ The database lives at `data/memory.db` (separate from `data/agent.db` for conver
 CREATE TABLE IF NOT EXISTS long_term (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category TEXT NOT NULL,        -- e.g. "preference", "relationship", "fact", "routine"
-    subject TEXT NOT NULL,         -- who/what this is about, e.g. "matteo", "simge", "work"
+    subject TEXT NOT NULL,         -- who/what this is about, e.g. "alex", "elena", "work"
     content TEXT NOT NULL,         -- the actual memory, natural language
     source TEXT,                   -- where this came from: "conversation", "email", "inferred"
     confidence TEXT DEFAULT 'stated',  -- "stated" (user said it), "inferred" (agent deduced it)
@@ -1042,13 +1042,13 @@ The agent reads and writes memories by constructing `sqlite3` commands, taught b
 
 ```bash
 # Example: store a long-term memory
-sqlite3 /app/data/memory.db "INSERT INTO long_term (category, subject, content, source) VALUES ('preference', 'matteo', 'Prefers oat milk in coffee', 'conversation');"
+sqlite3 /app/data/memory.db "INSERT INTO long_term (category, subject, content, source) VALUES ('preference', 'alex', 'Prefers oat milk in coffee', 'conversation');"
 
 # Example: query long-term memories about a subject
-sqlite3 -json /app/data/memory.db "SELECT * FROM long_term WHERE subject = 'matteo' AND category = 'preference';"
+sqlite3 -json /app/data/memory.db "SELECT * FROM long_term WHERE subject = 'alex' AND category = 'preference';"
 
 # Example: store a short-term fact (expires in 24h)
-sqlite3 /app/data/memory.db "INSERT INTO short_term (content, context, expires_at) VALUES ('Matteo is working from home today', 'mentioned in morning chat', datetime('now', '+24 hours'));"
+sqlite3 /app/data/memory.db "INSERT INTO short_term (content, context, expires_at) VALUES ('Alex is working from home today', 'mentioned in morning chat', datetime('now', '+24 hours'));"
 
 # Example: search memories by content
 sqlite3 -json /app/data/memory.db "SELECT * FROM long_term WHERE content LIKE '%coffee%';"
@@ -1163,7 +1163,7 @@ For each fact, classify it:
 
 Return a JSON array. Example:
 [
-  {{"tier": "LONG_TERM", "category": "preference", "subject": "matteo", "content": "Prefers window seats on flights"}},
+  {{"tier": "LONG_TERM", "category": "preference", "subject": "alex", "content": "Prefers window seats on flights"}},
   {{"tier": "SHORT_TERM", "content": "Has a dentist appointment at 17:30 today", "context": "mentioned in morning chat", "ttl_hours": 12}}
 ]
 
@@ -1227,8 +1227,8 @@ class PermissionEngine:
 
 User can manage rules in chat:
 ```
-You: "Always allow sending emails to simge@example.com"
-Agent: ✅ Added rule: send_email to simge@example.com → ALWAYS
+You: "Always allow sending emails to elena@example.com"
+Agent: ✅ Added rule: send_email to elena@example.com → ALWAYS
 ```
 
 ---
@@ -1301,10 +1301,10 @@ personal-agent/
 ```yaml
 agent:
   name: "Jarvis"
-  owner_name: "Matteo"
+  owner_name: "Alex"
   anthropic_api_key: "${ANTHROPIC_API_KEY}"
   model: "claude-sonnet-4-5-20250514"
-  timezone: "Europe/Zurich"
+  timezone: "Europe/Berlin"
   skills_dir: "skills/"
 
 memory:
@@ -1321,7 +1321,7 @@ channels:
   whatsapp:
     enabled: true
     bridge_url: "local-wacli"
-    allowed_numbers: ["+41..."]
+    allowed_numbers: ["+49..."]
 
 calendar:
   providers:
@@ -1343,7 +1343,7 @@ scheduler:
   jobs:
     - id: "morning_briefing"
       cron: "0 7 * * *"
-      task: "Give me a morning briefing: weather in Zurich, today's calendar, unread emails summary"
+      task: "Give me a morning briefing: weather in Berlin, today's calendar, unread emails summary"
       channel: "telegram"
     - id: "email_check"
       cron: "*/15 * * * *"
@@ -1364,14 +1364,14 @@ admin:
 
 ```toml
 [accounts.personal]
-email = "matteo@example.com"
-display-name = "Matteo Merola"
+email = "alex@example.com"
+display-name = "Alex Chen"
 default = true
 
 backend.type = "imap"
 backend.host = "imap.gmail.com"
 backend.port = 993
-backend.login = "matteo@example.com"
+backend.login = "alex@example.com"
 backend.auth.type = "password"
 backend.auth.raw = "app-password-here"
 
@@ -1379,18 +1379,18 @@ message.send.backend.type = "smtp"
 message.send.backend.host = "smtp.gmail.com"
 message.send.backend.port = 587
 message.send.backend.starttls = true
-message.send.backend.login = "matteo@example.com"
+message.send.backend.login = "alex@example.com"
 message.send.backend.auth.type = "password"
 message.send.backend.auth.raw = "app-password-here"
 
 [accounts.work]
-email = "matteo@work.com"
-display-name = "Matteo Merola"
+email = "alex@work.com"
+display-name = "Alex Chen"
 
 backend.type = "imap"
 backend.host = "imap.fastmail.com"
 backend.port = 993
-backend.login = "matteo@work.com"
+backend.login = "alex@work.com"
 backend.auth.type = "password"
 backend.auth.raw = "app-password-here"
 
@@ -1398,7 +1398,7 @@ message.send.backend.type = "smtp"
 message.send.backend.host = "smtp.fastmail.com"
 message.send.backend.port = 587
 message.send.backend.starttls = true
-message.send.backend.login = "matteo@work.com"
+message.send.backend.login = "alex@work.com"
 message.send.backend.auth.type = "password"
 message.send.backend.auth.raw = "app-password-here"
 ```
@@ -1515,7 +1515,7 @@ Scheduled jobs pass natural language tasks to the agent. The agent uses its skil
 ```python
 async def morning_briefing(agent):
     response = await agent.process(
-        "Give me a morning briefing: weather in Zurich, today's calendar, unread emails summary",
+        "Give me a morning briefing: weather in Berlin, today's calendar, unread emails summary",
         channel="system", user_id="scheduler"
     )
     await agent.channels["telegram"].send(owner_chat_id, response.text)
@@ -1532,13 +1532,13 @@ You: "Send a WhatsApp message to Marco asking if he's free for dinner Saturday"
 
 Agent thinks: I need Marco's phone number
 → run_command("python3 /app/tools/contacts.py search --provider <NAME> --query Marco --output json", "Look up Marco's contact info")
-→ Returns: "+39 333 1234567"
+→ Returns: "+49 170 ..."
 
-→ send_message(channel="whatsapp", to="+393331234567",
+→ send_message(channel="whatsapp", to="+49170...",
     text="Hey Marco! Are you free for dinner Saturday?")
 → Permission check → ASK
 
-Agent: I'd like to send this to Marco (+39 333 1234567):
+Agent: I'd like to send this to Marco (+49 151 5551234):
        "Hey Marco! Are you free for dinner Saturday?"
        [Approve] [Edit] [Deny]
 
@@ -1622,23 +1622,23 @@ To add any new capability:
 ## 18. Example Interactions
 
 **Morning briefing (proactive, scheduled):**
-> 🤖 Good morning Matteo! Here's your Tuesday briefing:
-> 📅 3 events today: standup at 9:00, 1:1 with Anna at 14:00, dentist at 17:30
-> 📧 12 unread emails — 1 flagged urgent from IKEA Supply AG RE: contract terms
-> 🌤️ Zurich: 4°C, partly cloudy
+> 🤖 Good morning Alex! Here's your Tuesday briefing:
+> 📅 3 events today: standup at 9:00, 1:1 with Dana at 14:00, dentist at 17:30
+> 📧 12 unread emails — 1 flagged urgent from Nordic Furnishings AG RE: contract terms
+> 🌤️ Berlin: 4°C, partly cloudy
 
 **Email management:**
-> You: "Check my work email for anything from Barry Callebaut"
-> Agent: *(runs: `himalaya -a work envelope list -o json -- "from:barrycallebaut"`)*
-> Found 2 emails from Barry Callebaut:
-> 1. "Q1 Budget Review" (Jan 15) — finance@barrycallebaut.com
-> 2. "Office Move Update" (Jan 12) — facilities@barrycallebaut.com
+> You: "Check my work email for anything from Meridian Foods"
+> Agent: *(runs: `himalaya -a work envelope list -o json -- "from:meridianfoods"`)*
+> Found 2 emails from Meridian Foods:
+> 1. "Q1 Budget Review" (Jan 15) — finance@meridianfoods.com
+> 2. "Office Move Update" (Jan 12) — facilities@meridianfoods.com
 > Want me to read either of them?
 
 **Contact-aware messaging:**
-> You: "Text Simge that I'll be home late tonight"
-> Agent: *(runs: `python3 /app/tools/contacts.py search --provider <NAME> --query Simge --output json` → resolves number)*
-> I'll send this WhatsApp message to Simge (+41 78 ...):
+> You: "Text Elena that I'll be home late tonight"
+> Agent: *(runs: `python3 /app/tools/contacts.py search --provider <NAME> --query Elena --output json` → resolves number)*
+> I'll send this WhatsApp message to Elena (+49 170 ...):
 > "Hey, I'll be home a bit late tonight"
 > [Approve] [Edit] [Deny]
 
@@ -1646,24 +1646,24 @@ To add any new capability:
 > You: "Email my accountant asking for the 2025 tax filing deadline"
 > Agent: *(runs: `python3 /app/tools/contacts.py search --provider <NAME> --query accountant --output json` → resolves email)*
 > I'll send this from your personal email:
-> **To:** accountant@example.ch
+> **To:** accountant@example.de
 > **Subject:** Question re: 2025 tax filing deadline
 > **Body:** Dear [name], I wanted to check — what is the filing deadline for...
 > [Approve] [Edit] [Deny]
 
 **Memory — learning and recalling:**
 > You: "By the way, I'm lactose intolerant. Keep that in mind for restaurant suggestions."
-> Agent: *(runs: `sqlite3 -json /app/data/memory.db "SELECT * FROM long_term WHERE subject='matteo' AND content LIKE '%lactose%';"` → no existing memory)*
-> *(runs: `sqlite3 /app/data/memory.db "INSERT INTO long_term (category, subject, content, source) VALUES ('health', 'matteo', 'Lactose intolerant — avoid dairy in restaurant suggestions', 'conversation');"` )*
+> Agent: *(runs: `sqlite3 -json /app/data/memory.db "SELECT * FROM long_term WHERE subject='alex' AND content LIKE '%lactose%';"` → no existing memory)*
+> *(runs: `sqlite3 /app/data/memory.db "INSERT INTO long_term (category, subject, content, source) VALUES ('health', 'alex', 'Lactose intolerant — avoid dairy in restaurant suggestions', 'conversation');"` )*
 > Got it, I'll remember that.
 
 > *(Later...)*
-> You: "Find me a good restaurant for dinner tonight near Bahnhofstrasse"
+> You: "Find me a good restaurant for dinner tonight near Market Street"
 > Agent: *(checks memory, finds lactose intolerance fact)*
 > *(searches for restaurants)*
-> Here are 3 options near Bahnhofstrasse with good dairy-free choices: ...
+> Here are 3 options near Market Street with good dairy-free choices: ...
 
 **Memory — short-term context:**
-> You: "I'm at the airport, flight to Rome boards at 15:40"
-> Agent: *(runs: `sqlite3 /app/data/memory.db "INSERT INTO short_term (content, context, expires_at) VALUES ('At Zurich airport, flight to Rome boards at 15:40', 'telegram message', datetime('now', '+12 hours'));"` )*
-> Safe travels! I'll keep that in mind. Want me to check your Rome calendar for tomorrow?
+> You: "I'm at the airport, flight to Vienna boards at 15:40"
+> Agent: *(runs: `sqlite3 /app/data/memory.db "INSERT INTO short_term (content, context, expires_at) VALUES ('At Berlin airport, flight to Vienna boards at 15:40', 'telegram message', datetime('now', '+12 hours'));"` )*
+> Safe travels! I'll keep that in mind. Want me to check your Vienna calendar for tomorrow?
