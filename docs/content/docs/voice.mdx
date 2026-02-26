@@ -1,0 +1,88 @@
+---
+title: Voice
+description: Speech-to-text and text-to-speech pipeline for voice interactions.
+---
+
+# Voice
+
+MPA includes a voice pipeline for receiving and sending voice messages through messaging channels. It uses local, offline-capable models — no cloud speech APIs needed.
+
+## Components
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| **Speech-to-Text** | [faster-whisper](https://github.com/guillaumekln/faster-whisper) | Transcribe incoming voice messages |
+| **Text-to-Speech** | [edge-tts](https://github.com/rany2/edge-tts) | Synthesize voice responses |
+
+## How it works
+
+### Receiving voice messages
+
+1. User sends a voice message on Telegram
+2. The audio is downloaded and passed to faster-whisper
+3. The transcript is prefixed with `[voice]` and processed as a regular text message
+4. The agent sees: `[voice] Hey, what's on my calendar today?`
+
+### Sending voice responses
+
+The agent adds `[respond_with_voice]` at the end of its response to trigger TTS:
+
+```
+Here are your 3 events for today: standup at 9,
+1:1 with Anna at 2, and dentist at 5:30. [respond_with_voice]
+```
+
+The tag is stripped, the text is synthesized, and the voice message is sent back.
+
+### When to use voice
+
+The agent follows these conventions (defined in `skills/voice.md`):
+
+**Use voice when:**
+- The user sent a voice message (mirror the medium)
+- The user explicitly asks for a voice reply
+- The response is short and conversational (< 3 sentences)
+
+**Don't use voice when:**
+- The response contains code, links, or structured data
+- The response is long or complex
+
+## Configuration
+
+```yaml
+voice:
+  stt_model: "base"           # Whisper model size
+  tts_voice: "en-US-GuyNeural"  # edge-tts voice name
+  tts_enabled: true
+```
+
+### Whisper model sizes
+
+| Model | Size | Speed | Accuracy |
+|-------|------|-------|----------|
+| `tiny` | ~75 MB | Fastest | Lower |
+| `base` | ~150 MB | Fast | Good (default) |
+| `small` | ~500 MB | Medium | Better |
+| `medium` | ~1.5 GB | Slower | High |
+| `large` | ~3 GB | Slowest | Highest |
+
+The `base` model provides a good balance of speed and accuracy for most voice messages. Models are downloaded automatically on first use and cached in `data/whisper-models/`.
+
+### TTS voices
+
+edge-tts provides a wide selection of voices. Some popular options:
+
+| Voice | Language | Gender |
+|-------|----------|--------|
+| `en-US-GuyNeural` | English (US) | Male |
+| `en-US-JennyNeural` | English (US) | Female |
+| `en-GB-RyanNeural` | English (UK) | Male |
+| `it-IT-DiegoNeural` | Italian | Male |
+| `de-DE-ConradNeural` | German | Male |
+
+## Resource requirements
+
+| Component | RAM | CPU |
+|-----------|-----|-----|
+| faster-whisper (`base`) | ~300 MB | 1 core during transcription |
+| edge-tts | Minimal | Minimal (streams from Microsoft) |

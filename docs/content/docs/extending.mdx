@@ -1,0 +1,194 @@
+---
+title: Extending MPA
+description: Add new capabilities to MPA by writing markdown skill files.
+---
+
+# Extending MPA
+
+One of MPA's core principles is that adding new capabilities should not require writing Python code. The system is designed to be extended through markdown skill files and configuration changes.
+
+## Adding a new tool in 4 steps
+
+### 1. Install the CLI tool
+
+Add the tool to the Dockerfile:
+
+```dockerfile
+RUN apt-get install -y my-tool
+# or download a binary
+RUN curl -sSL https://example.com/my-tool | sh
+```
+
+### 2. Whitelist the command prefix
+
+In `core/executor.py`, add the tool's prefix to `ALLOWED_PREFIXES`:
+
+```python
+ALLOWED_PREFIXES = [
+    "himalaya",
+    "python3 /app/tools/",
+    "sqlite3",
+    "my-tool",          # ← add this
+]
+```
+
+### 3. Write a skill file
+
+Create `skills/my-tool.md`:
+
+```markdown
+# My Tool
+
+Description of what this tool does and when to use it.
+
+## Basic usage
+
+\`\`\`bash
+my-tool list --format json
+\`\`\`
+
+## Output format
+
+\`\`\`json
+[{"id": 1, "name": "example"}]
+\`\`\`
+
+## Important notes
+- Always use `--format json` for parseable output
+- Requires authentication via environment variable
+```
+
+### 4. (Optional) Add permission rules
+
+For write operations, add rules to the permission engine:
+
+```python
+"run_command:my-tool*create*": "ASK"
+"run_command:my-tool*delete*": "ASK"
+"run_command:my-tool*list*": "ALWAYS"
+```
+
+Done. The agent can now use the new tool immediately.
+
+## Example: Adding GitHub CLI
+
+```dockerfile
+# Dockerfile
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+RUN apt-get update && apt-get install -y gh
+```
+
+```python
+# core/executor.py
+ALLOWED_PREFIXES = [..., "gh"]
+```
+
+```markdown
+# skills/github.md
+# GitHub CLI (gh)
+
+## Check notifications
+\`\`\`bash
+gh api notifications --jq '.[].subject.title'
+\`\`\`
+
+## List issues
+\`\`\`bash
+gh issue list --repo owner/repo --json number,title,state
+\`\`\`
+
+## Create an issue
+\`\`\`bash
+gh issue create --repo owner/repo --title "Bug" --body "Description"
+\`\`\`
+```
+
+The agent can now manage GitHub — create issues, check notifications, review PRs — with zero Python code changes.
+
+## Writing effective skill files
+
+### Be specific about syntax
+
+Show exact commands with all required flags:
+
+```markdown
+## Good
+\`\`\`bash
+himalaya -a personal envelope list -s 10 -o json
+\`\`\`
+
+## Bad
+Use himalaya to list emails.
+```
+
+### Show output format
+
+Include JSON examples so the LLM can parse responses:
+
+```markdown
+## Output format
+\`\`\`json
+[{"id": "123", "subject": "Meeting", "from": {"name": "Alice"}}]
+\`\`\`
+```
+
+### Document accounts and providers
+
+Tell the LLM what's available:
+
+```markdown
+## Available accounts
+- `personal` — personal Gmail
+- `work` — work Fastmail
+```
+
+### Include edge cases
+
+Note gotchas the LLM should know about:
+
+```markdown
+## Important notes
+- Email IDs are relative to the current folder
+- Always specify `--folder` when not using INBOX
+- Use `-o json` for programmatic parsing
+```
+
+## Writing Python helper scripts
+
+For tools that don't have a CLI, write a Python helper script in `tools/`:
+
+```python
+# tools/my_tool.py
+import argparse, json
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=["list", "get", "create"])
+    parser.add_argument("--output", choices=["json", "text"], default="json")
+    args = parser.parse_args()
+
+    if args.action == "list":
+        result = [...]  # your logic
+        if args.output == "json":
+            print(json.dumps(result))
+        else:
+            for item in result:
+                print(item)
+
+if __name__ == "__main__":
+    main()
+```
+
+Then whitelist `"python3 /app/tools/my_tool.py"` and write a skill file for it.
+
+## Dynamic skill creation
+
+The agent itself can create new skills via the skill creator skill (`skills/skill-creator.md`) or the admin UI's skill editor. This means the agent can learn new tools and teach itself how to use them through conversation:
+
+```
+You: "I installed the 'task' CLI for task management. Here's how it works: ..."
+Agent: I'll create a skill file for the task CLI.
+       (creates skill via admin API)
+       Done! I can now manage tasks for you.
+```

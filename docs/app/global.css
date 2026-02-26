@@ -1,0 +1,143 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+:root {
+  --color-fd-background: 210 18% 95%;
+  --color-fd-foreground: 210 16% 22%;
+  --color-fd-muted: 210 16% 90%;
+  --color-fd-muted-foreground: 210 6% 44%;
+  --color-fd-card: 0 0% 100%;
+  --color-fd-card-foreground: 210 16% 22%;
+  --color-fd-border: 210 10% 92%;
+  --color-fd-primary: 152 55% 28%;
+  --color-fd-primary-foreground: 0 0% 98%;
+  --color-fd-accent: 210 20% 94%;
+  --color-fd-accent-foreground: 210 16% 22%;
+  --color-fd-ring: 152 55% 28%;
+  --color-fd-popover: 0 0% 100%;
+  --color-fd-popover-foreground: 210 16% 22%;
+  --color-fd-secondary: 210 20% 94%;
+  --color-fd-secondary-foreground: 210 16% 22%;
+  --fd-background: 210 18% 95%;
+  --fd-foreground: 210 16% 22%;
+  --fd-muted: 210 16% 90%;
+  --fd-muted-foreground: 210 6% 44%;
+  --fd-card: 0 0% 100%;
+  --fd-card-foreground: 210 16% 22%;
+  --fd-border: 210 10% 92%;
+  --fd-primary: 152 55% 28%;
+  --fd-primary-foreground: 0 0% 98%;
+  --fd-accent: 210 20% 94%;
+  --fd-accent-foreground: 210 16% 22%;
+  --fd-ring: 152 55% 28%;
+  --fd-popover: 0 0% 100%;
+  --fd-popover-foreground: 210 16% 22%;
+  --fd-secondary: 210 20% 94%;
+  --fd-secondary-foreground: 210 16% 22%;
+  --mpa-code-bg: 210 25% 96%;
+  --mpa-code-border: 210 15% 82%;
+}
+
+.dark {
+  --color-fd-background: 0 0% 13%;
+  --color-fd-foreground: 210 14% 82%;
+  --color-fd-muted: 0 0% 22%;
+  --color-fd-muted-foreground: 0 0% 58%;
+  --color-fd-card: 0 0% 10%;
+  --color-fd-card-foreground: 210 14% 82%;
+  --color-fd-border: 0 0% 24%;
+  --color-fd-primary: 152 55% 58%;
+  --color-fd-primary-foreground: 0 0% 8%;
+  --color-fd-accent: 0 0% 14%;
+  --color-fd-accent-foreground: 210 14% 82%;
+  --color-fd-ring: 152 55% 58%;
+  --color-fd-popover: 0 0% 10%;
+  --color-fd-popover-foreground: 210 14% 82%;
+  --color-fd-secondary: 0 0% 18%;
+  --color-fd-secondary-foreground: 210 14% 82%;
+  --fd-background: 0 0% 13%;
+  --fd-foreground: 210 14% 82%;
+  --fd-muted: 0 0% 22%;
+  --fd-muted-foreground: 0 0% 58%;
+  --fd-card: 0 0% 10%;
+  --fd-card-foreground: 210 14% 82%;
+  --fd-border: 0 0% 24%;
+  --fd-primary: 152 55% 58%;
+  --fd-primary-foreground: 0 0% 8%;
+  --fd-accent: 0 0% 14%;
+  --fd-accent-foreground: 210 14% 82%;
+  --fd-ring: 152 55% 58%;
+  --fd-popover: 0 0% 10%;
+  --fd-popover-foreground: 210 14% 82%;
+  --fd-secondary: 0 0% 18%;
+  --fd-secondary-foreground: 210 14% 82%;
+  --mpa-code-bg: 0 0% 9%;
+  --mpa-code-border: 0 0% 24%;
+}
+
+body {
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+:where(.prose) {
+  color: hsl(var(--fd-foreground));
+}
+
+:where(.prose :is(h1, h2, h3, h4, h5, h6)) {
+  color: hsl(var(--fd-foreground));
+}
+
+:where(.prose :is(strong, b)) {
+  color: hsl(var(--fd-foreground));
+}
+
+:where(.border, .border-b, .border-t, .border-s, .border-e, .border-x, .border-y) {
+  border-color: hsl(var(--fd-border) / 0.35) !important;
+}
+
+#nd-sidebar,
+#nd-sidebar .border,
+#nd-sidebar .border-b,
+#nd-sidebar .border-t,
+#nd-sidebar .border-s,
+#nd-sidebar .border-e,
+#nd-sidebar .border-x,
+#nd-sidebar .border-y {
+  border-color: transparent !important;
+  border-width: 0 !important;
+}
+
+:where([class*="bg-fd-card"]) {
+  border-color: hsl(var(--fd-border) / 0.18) !important;
+}
+
+/* Code blocks styling to match MPA terminal aesthetic */
+pre {
+  border: none !important;
+  background: hsl(var(--mpa-code-bg)) !important;
+}
+
+pre code {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", "JetBrains Mono",
+    ui-monospace, monospace;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--fd-background));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--fd-muted));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--fd-muted-foreground));
+}

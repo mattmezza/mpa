@@ -1,0 +1,121 @@
+---
+title: Development
+description: Set up a local development environment for MPA.
+---
+
+# Development
+
+## Prerequisites
+
+- Python 3.14+
+- [uv](https://docs.astral.sh/uv/) — Rust-based Python package manager
+- Node.js 18+ (only for wacli WhatsApp CLI)
+
+## Setup
+
+```bash
+git clone https://github.com/mattmezza/mpa.git
+cd mpa
+make setup       # creates venv, installs deps, copies example configs
+```
+
+Edit `.env` and `config.yml` with your secrets.
+
+## Running in dev mode
+
+MPA requires multiple services. Run each in its own terminal:
+
+### 1. Agent with auto-reload
+
+```bash
+make dev-agent
+```
+
+This starts the agent via uvicorn with `--reload`, watching for changes in `api/`, `core/`, `channels/`, `schema/`, `skills/`, `tools/`, and `voice/`.
+
+### 2. Tailwind CSS watcher
+
+```bash
+make dev-css
+```
+
+Watches `api/static/input.css` and rebuilds `api/static/style.css` on changes.
+
+### 3. WhatsApp CLI (optional)
+
+```bash
+make dev-wa
+```
+
+Builds the vendored wacli Go binary if not already built.
+
+## Testing
+
+```bash
+make test              # run all tests
+uv run pytest          # same thing
+uv run pytest -n auto  # run in parallel
+```
+
+The test suite uses:
+- **pytest** — test runner
+- **pytest-asyncio** — async test support (auto mode)
+- **pytest-xdist** — parallel execution
+
+## Linting and formatting
+
+```bash
+make lint     # lint with ruff
+make format   # format with ruff
+```
+
+Ruff is configured in `pyproject.toml`:
+- Target: Python 3.14
+- Line length: 100
+- Rules: `E` (pycodestyle), `F` (pyflakes), `I` (isort), `UP` (pyupgrade)
+
+## Make targets
+
+| Command | Description |
+|---------|-------------|
+| `make setup` | First-time setup: venv, deps, copy configs |
+| `make install` | Install production dependencies |
+| `make install-dev` | Install all deps including dev tools |
+| `make sync` | Re-sync venv with lockfile |
+| `make lock` | Update lockfile after pyproject.toml changes |
+| `make lint` | Lint with ruff |
+| `make format` | Format with ruff |
+| `make test` | Run tests |
+| `make run` | Start the agent (production) |
+| `make dev` | Print dev mode instructions |
+| `make dev-agent` | Agent with auto-reload |
+| `make dev-css` | Tailwind CSS watcher |
+| `make dev-wa` | Build wacli |
+| `make clean` | Remove venv and caches |
+| `make release` | Create a GitHub release |
+| `make css` | Build minified CSS |
+
+## Project layout
+
+```
+core/           Core agent modules
+channels/       Communication channels
+api/            Admin web interface
+voice/          Voice pipeline
+tools/          CLI helper scripts
+skills/         Markdown skill files
+schema/         Database schemas
+tests/          Test suite
+data/           Runtime SQLite databases (gitignored)
+docs/           Documentation (Fumadocs/Next.js)
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run `make lint` and `make test`
+5. Open a pull request
+
+The CI pipeline runs `pytest -n auto` on every push and pull request.

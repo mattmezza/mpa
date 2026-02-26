@@ -1,0 +1,52 @@
+---
+title: Introduction
+description: MPA is a self-hosted personal AI agent that runs in a single Docker container.
+---
+
+# MPA — My Personal Agent
+
+MPA is a self-hosted personal AI agent that runs in a single Docker container. It acts as a unified interface across messaging channels, email, calendars, and contacts — capable of autonomous action, scheduled tasks, voice interaction, and persistent memory.
+
+## Why MPA?
+
+Most AI assistants are cloud-hosted black boxes with limited integrations. MPA takes a different approach:
+
+- **Self-hosted** — runs on your own server, your data stays with you
+- **Single container** — one `docker compose up` and you're running
+- **Extensible without code** — teach the agent new capabilities by writing markdown files
+- **Multi-channel** — Telegram, WhatsApp, email, calendar, all through one agent
+- **Persistent memory** — the agent remembers facts about you and your contacts
+- **Proactive** — scheduled tasks for morning briefings, email monitoring, and more
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Messaging** | Telegram and WhatsApp with text and voice messages |
+| **Email** | Read, compose, and manage emails via [Himalaya](https://github.com/pimalaya/himalaya) CLI |
+| **Calendar** | CalDAV integration (Google Calendar, iCloud, etc.) |
+| **Contacts** | CardDAV providers via the built-in contacts CLI |
+| **Memory** | Two-tier system: permanent long-term facts and expiring short-term context |
+| **Scheduled tasks** | Cron-based jobs for briefings, email checks, and custom tasks |
+| **Voice** | Speech-to-text (faster-whisper) and text-to-speech (edge-tts) |
+| **Web search** | Tavily integration for real-time information |
+| **Permissions** | Glob-pattern rules with interactive Telegram approval |
+| **Admin UI** | Web dashboard for configuration, skills editing, memory, and more |
+| **Skills** | Markdown-based capability system — no code required |
+| **Setup wizard** | Step-by-step first-boot configuration via the admin UI |
+
+## How it works
+
+MPA follows a **Python orchestrator + CLI tools** design. Python glues everything together, while battle-tested CLI tools handle protocol complexity:
+
+| Concern | Tool |
+|---------|------|
+| LLM | Anthropic Claude, OpenAI, Grok (xAI), Google, DeepSeek |
+| Email | Himalaya CLI (Rust) |
+| Contacts | Built-in contacts CLI |
+| Calendar | python-caldav |
+| Storage | SQLite (multiple databases) |
+| Voice | faster-whisper (STT) + edge-tts (TTS) |
+| Admin UI | FastAPI + HTMX + Tailwind CSS |
+
+Instead of hardcoded integrations, the agent learns to use CLI tools via markdown "skill" files. Adding a new capability means writing a markdown file and adding the tool's command prefix to the executor whitelist.

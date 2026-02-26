@@ -1,0 +1,130 @@
+---
+title: Deployment
+description: Deploy MPA with Docker on any VPS.
+---
+
+# Deployment
+
+MPA is designed to run as a single Docker container on any VPS. It runs comfortably on a small server.
+
+## Resource requirements
+
+| Component | RAM | CPU | Disk |
+|-----------|-----|-----|------|
+| Python agent + FastAPI | ~100 MB | Minimal | — |
+| Himalaya binary | ~20 MB | Per-call | ~50 MB |
+| Whisper `base` model | ~300 MB | 1 core during STT | 150 MB |
+| WhatsApp (wacli) | ~60 MB | Minimal | — |
+| SQLite databases | ~10 MB | Minimal | Grows |
+| **Total** | **~530 MB** | **2 cores** | **~500 MB** |
+
+**Recommendation:** 2 vCPU / 2 GB RAM VPS ($5-10/month on Hetzner, Contabo, etc.)
+
+## Docker Compose deployment
+
+### 1. Clone and configure
+
+```bash
+git clone https://github.com/mattmezza/mpa.git
+cd mpa
+cp .env.example .env
+cp config.yml.example config.yml
+cp character.md.example character.md
+cp personalia.md.example personalia.md
+```
+
+### 2. Edit configuration
+
+Fill in `.env` with your API keys and secrets. Customize `config.yml` for your needs.
+
+### 3. Start
+
+```bash
+docker compose up -d
+```
+
+### 4. View logs
+
+```bash
+docker compose logs -f
+```
+
+## Docker image
+
+MPA publishes Docker images to GitHub Container Registry on every release:
+
+```bash
+docker pull ghcr.io/mattmezza/mpa:latest
+```
+
+### Available tags
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest stable release |
+| `0.1.0` | Specific version |
+| `0.1` | Latest patch for minor version |
+| `0` | Latest minor for major version |
+
+## Volumes and persistence
+
+The Docker Compose file mounts these paths:
+
+| Host path | Container path | Purpose |
+|-----------|---------------|---------|
+| `./data` | `/app/data` | SQLite databases, Whisper models, sessions |
+| `./config.yml` | `/app/config.yml` | Agent configuration (read-only) |
+| `./character.md` | `/app/character.md` | Agent personality |
+| `./personalia.md` | `/app/personalia.md` | Agent identity |
+| `./skills` | `/app/skills` | Skill files (read-only) |
+| `./cli-configs/himalaya.toml` | `/root/.config/himalaya/config.toml` | Himalaya config |
+
+The `data/` directory is the only stateful volume. Back it up regularly.
+
+## Security considerations
+
+### Network
+- Telegram/WhatsApp connections are **outbound-only**
+- Admin API is protected by Bearer token
+- Consider putting the admin UI behind a reverse proxy with HTTPS
+
+### Secrets
+- All secrets live in `.env`, never in code or config files
+- The `.env` file should be readable only by root/docker
+
+### Authentication
+- **Telegram:** user ID whitelist (immutable, spoofing-proof)
+- **WhatsApp:** phone number whitelist
+- **Admin API:** Bearer token
+- **Email:** app-specific passwords
+
+### Data
+- SQLite databases should be on an encrypted volume
+- Conversation history can be auto-pruned
+- No data leaves your server except to the LLM API and configured providers
+
+## Updating
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Or pin a specific version:
+
+```yaml
+# docker-compose.yml
+services:
+  agent:
+    image: ghcr.io/mattmezza/mpa:0.1.0
+```
+
+## Releasing
+
+Create a release with:
+
+```bash
+make release name=v0.2
+```
+
+This creates a GitHub release with auto-generated notes. The CI pipeline builds and pushes the Docker image to GHCR.

@@ -1,0 +1,92 @@
+---
+title: Channels
+description: Configure Telegram and WhatsApp messaging channels.
+---
+
+# Channels
+
+MPA supports multiple messaging channels. Each channel runs independently and connects to the same agent core.
+
+## Telegram
+
+The primary channel. Telegram bots are free, have excellent API support, and handle text, voice, files, and inline keyboards natively.
+
+### Setup
+
+1. Create a bot via [BotFather](https://core.telegram.org/bots#botfather)
+2. Copy the bot token
+3. Get your Telegram user ID (message [@userinfobot](https://t.me/userinfobot))
+4. Add to your configuration:
+
+```yaml
+channels:
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
+```
+
+### Features
+
+- **Text messages** — standard chat with the agent
+- **Voice messages** — automatically transcribed via Whisper, agent can respond with synthesized voice
+- **Inline keyboards** — used for permission approval flow (Approve / Edit / Deny)
+- **User ID whitelist** — only allowed users can interact with the bot
+
+### Permission approvals
+
+When the agent wants to perform a write action (send email, create event, etc.), it sends a message with inline buttons:
+
+```
+I'd like to send this email:
+To: alice@example.com
+Subject: Meeting tomorrow
+
+[Approve] [Edit] [Deny]
+```
+
+## WhatsApp
+
+MPA uses [wacli](https://github.com/nickelc/wacli) — a local WhatsApp CLI written in Go — for WhatsApp integration. No cloud APIs or business verification needed.
+
+### Setup
+
+1. Enable WhatsApp in config:
+
+```yaml
+channels:
+  whatsapp:
+    enabled: true
+    bridge_url: "local-wacli"
+    allowed_numbers: "${WHATSAPP_ALLOWED_NUMBERS}"
+```
+
+2. Start the agent and go to the admin UI
+3. Navigate to Channels > WhatsApp
+4. Scan the QR code with your WhatsApp mobile app
+5. Wait for sync to complete
+
+### How it works
+
+- wacli runs as a subprocess managed by MPA
+- Authentication is done via QR code through the admin UI
+- Messages are received via a webhook from wacli to the agent
+- Outgoing messages are sent via wacli CLI commands
+
+### Limitations
+
+- Uses WhatsApp Web protocol (unofficial)
+- Session may need re-authentication periodically
+- WhatsApp may restrict accounts using unofficial clients
+
+## Channel architecture
+
+Both channels implement the same interface:
+
+```python
+class Channel:
+    async def on_message(self, text, user_id, ...)
+    async def send(self, to, text, voice=None)
+```
+
+Messages from any channel are routed to `agent.process()`, which returns a response that's sent back through the originating channel. The agent is channel-aware and can send proactive messages to specific channels (e.g., morning briefing to Telegram).

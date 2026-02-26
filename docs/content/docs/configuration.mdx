@@ -1,0 +1,198 @@
+---
+title: Configuration
+description: Complete reference for MPA's dual-layer configuration system.
+---
+
+# Configuration
+
+MPA uses a dual-layer configuration system:
+
+1. **File-based** (`config.yml` + `.env`) — seed config loaded on first boot, supports `${ENV_VAR}` interpolation
+2. **SQLite config store** (`data/config.db`) — becomes the source of truth after setup, managed through the admin UI
+
+## Environment variables (`.env`)
+
+Secrets and API keys live in `.env`. Copy the example to get started:
+
+```bash
+cp .env.example .env
+```
+
+Key variables:
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Anthropic Claude API key |
+| `OPENAI_API_KEY` | OpenAI API key (optional) |
+| `GROK_API_KEY` | xAI Grok API key (optional) |
+| `GOOGLE_API_KEY` | Google Gemini API key (optional) |
+| `DEEPSEEK_API_KEY` | DeepSeek API key (optional) |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token from BotFather |
+| `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated Telegram user IDs |
+| `ADMIN_API_KEY` | API key for the admin UI |
+| `TAVILY_API_KEY` | Tavily web search API key |
+| `GOOGLE_EMAIL` | Google account for calendar |
+| `GOOGLE_APP_PASSWORD` | Google app-specific password |
+
+## Agent config (`config.yml`)
+
+The main configuration file. Supports `${ENV_VAR}` interpolation for secrets.
+
+### Full example
+
+```yaml
+agent:
+  name: "Clio"
+  owner_name: "Matteo"
+  llm_provider: "anthropic"
+  anthropic_api_key: "${ANTHROPIC_API_KEY}"
+  openai_api_key: "${OPENAI_API_KEY}"
+  openai_base_url: "${OPENAI_BASE_URL}"
+  google_api_key: "${GOOGLE_API_KEY}"
+  grok_api_key: "${GROK_API_KEY}"
+  deepseek_api_key: "${DEEPSEEK_API_KEY}"
+  model: "claude-sonnet-4-5-20250514"
+  timezone: "Europe/Zurich"
+  skills_dir: "skills/"
+
+channels:
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
+  whatsapp:
+    enabled: false
+    bridge_url: "local-wacli"
+    allowed_numbers: "${WHATSAPP_ALLOWED_NUMBERS}"
+
+calendar:
+  providers:
+    - name: "google"
+      url: "https://apidata.googleusercontent.com/caldav/v2/${GOOGLE_EMAIL}/events"
+      username: "${GOOGLE_EMAIL}"
+      password: "${GOOGLE_APP_PASSWORD}"
+
+voice:
+  stt_model: "base"
+  tts_voice: "en-US-GuyNeural"
+  tts_enabled: true
+
+scheduler:
+  jobs:
+    - id: "morning_briefing"
+      cron: "0 7 * * *"
+      task: "Give me a morning briefing: weather, calendar, emails"
+      channel: "telegram"
+    - id: "email_check"
+      cron: "*/15 * * * *"
+      task: "Check for urgent unread emails and notify me"
+      channel: "telegram"
+    - id: "memory_cleanup"
+      cron: "0 */8 * * *"
+      task: "sqlite3 /app/data/memory.db \"DELETE FROM short_term WHERE expires_at < datetime('now');\""
+      type: "system"
+
+admin:
+  enabled: true
+  port: 8000
+  api_key: "${ADMIN_API_KEY}"
+
+search:
+  enabled: true
+  provider: "tavily"
+  api_key: "${TAVILY_API_KEY}"
+  max_results: 5
+
+history:
+  db_path: "data/agent.db"
+  max_turns: 10
+
+memory:
+  db_path: "data/memory.db"
+  long_term_limit: 50
+  extraction_model: "claude-haiku-4-5"
+```
+
+### Config sections
+
+#### `agent`
+
+Core agent settings including name, owner, LLM provider, model, and timezone. The `skills_dir` points to the directory containing markdown skill files.
+
+#### `channels`
+
+Messaging channel configuration. Each channel can be independently enabled/disabled. See [Channels](/docs/channels) for details.
+
+#### `calendar`
+
+CalDAV provider configuration. Multiple providers supported (Google Calendar, iCloud, Nextcloud, etc.). Each provider needs a URL, username, and password.
+
+#### `voice`
+
+Voice pipeline settings. `stt_model` controls Whisper model size (`tiny`, `base`, `small`, `medium`, `large`). `tts_voice` selects the edge-tts voice.
+
+#### `scheduler`
+
+Scheduled jobs with cron expressions. Three job types:
+- **agent** (default) — natural language task processed by the agent
+- **system** — raw CLI command executed directly
+- **memory_consolidation** — LLM-driven memory review and cleanup
+
+See [Scheduler](/docs/scheduler) for details.
+
+#### `admin`
+
+Admin UI settings. The API key is required for authentication.
+
+#### `search`
+
+Web search configuration via Tavily.
+
+#### `history`
+
+Conversation history settings. `max_turns` controls how many user-assistant pairs are kept in context.
+
+#### `memory`
+
+Memory system settings. `extraction_model` is the cheap/fast model used for post-turn memory extraction. See [Memory](/docs/memory) for details.
+
+## Character and identity files
+
+### `character.md`
+
+Defines the agent's personality, communication style, and behavioral rules. This file is **freely editable** — modify it anytime to tune the agent's behavior.
+
+```markdown
+## Personality
+- Be concise in chat. Messages should be short and direct.
+- Match the owner's communication style when acting on their behalf.
+- When unsure about an action, ask. When confident and pre-approved, just do it.
+
+## Language
+- Default to English
+- Switch languages when appropriate for the contact
+```
+
+### `personalia.md`
+
+Specifies fixed identity attributes — name, owner, capabilities, strengths. This file is **append-only**: add to it as the agent's capabilities grow, but don't rewrite existing entries.
+
+```markdown
+## Identity
+- Name: Clio
+- Owner: Matteo
+- Role: Personal AI assistant
+
+## Capabilities
+- Can read, search, and send emails via Himalaya CLI
+- Can look up contacts via contacts CLI
+- Can read and create calendar events via CalDAV
+```
+
+### How they differ
+
+| | `character.md` | `personalia.md` | Skills |
+|---|---|---|---|
+| **Purpose** | Personality and behavior | Fixed identity attributes | Tool usage instructions |
+| **Mutability** | Freely editable | Append-only | Replaced when tool changes |
+| **Example** | "Be concise in chat" | "Name: Clio" | "Run `himalaya -a personal`..." |

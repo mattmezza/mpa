@@ -1,0 +1,155 @@
+---
+title: Memory
+description: MPA's two-tier persistent memory system for long-term facts and short-term context.
+---
+
+# Memory
+
+MPA has a two-tier memory system that lets the agent remember facts about you and your world. Memories are stored in SQLite and accessed via the `sqlite3` CLI — following the same "skills over code" philosophy as the rest of the system.
+
+## Memory tiers
+
+| Tier | Purpose | Lifetime | Examples |
+|------|---------|----------|----------|
+| **Long-term** | Facts worth keeping forever | Permanent | "Matteo is lactose intolerant", "Accountant is Dr. Weber" |
+| **Short-term** | Transient context | Configurable TTL (default 24h) | "Working from home today", "Flight boards at 15:40" |
+
+**Rule of thumb:** if it would still be useful next month, it's long-term. If it's situational context that will be stale in a day or two, it's short-term.
+
+## Schema
+
+The memory database lives at `data/memory.db`:
+
+```sql
+CREATE TABLE long_term (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,        -- "preference", "relationship", "fact", etc.
+    subject TEXT NOT NULL,         -- who/what this is about
+    content TEXT NOT NULL,         -- the actual memory
+    source TEXT,                   -- "conversation", "email", "inferred"
+    confidence TEXT DEFAULT 'stated',
+    created_at DATETIME DEFAULT (datetime('now')),
+    updated_at DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE TABLE short_term (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    context TEXT,                  -- why this was stored
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT (datetime('now'))
+);
+```
+
+### Long-term categories
+
+- `preference` — likes, dislikes, habits
+- `relationship` — connections between people
+- `fact` — biographical or factual information
+- `routine` — regular patterns and schedules
+- `work` — professional context
+- `health` — health-related information
+- `travel` — travel preferences and history
+
+## How memory works
+
+### Automatic extraction
+
+After each conversation turn, a lightweight LLM call (using a cheap model like `claude-haiku-4-5`) analyzes the exchange and extracts facts worth remembering:
+
+```
+User: "By the way, I'm lactose intolerant"
+Agent: "Got it, I'll remember that."
+
+→ Extracted: {tier: "LONG_TERM", category: "health", subject: "matteo",
+              content: "Lactose intolerant", source: "conversation"}
+```
+
+### Manual storage via CLI
+
+The agent can also store memories explicitly using the sqlite3 CLI, guided by the `skills/memory.md` skill file:
+
+```bash
+# Store a long-term memory
+sqlite3 /app/data/memory.db \
+  "INSERT INTO long_term (category, subject, content, source)
+   VALUES ('preference', 'matteo', 'Prefers oat milk', 'conversation');"
+
+# Store a short-term fact (expires in 24h)
+sqlite3 /app/data/memory.db \
+  "INSERT INTO short_term (content, context, expires_at)
+   VALUES ('At the airport', 'telegram message', datetime('now', '+24 hours'));"
+```
+
+### Memory in the system prompt
+
+On each conversation turn, both memory tiers are queried and injected into the system prompt:
+
+```
+<memories>
+## Long-term memories
+- [health] matteo: Lactose intolerant
+- [preference] matteo: Prefers oat milk in coffee
+- [relationship] simge: Matteo's wife
+
+## Current context (short-term)
+- Working from home today (morning chat)
+- Has a dentist appointment at 17:30
+</memories>
+```
+
+## Memory consolidation
+
+A scheduled job reviews short-term memories periodically (default: every 8 hours) and does two things:
+
+1. **Promotion** — reviews active short-term memories via an LLM call, promotes durable facts to long-term memory (compacting aggressively, deduplicating against existing memories)
+2. **Cleanup** — deletes all expired short-term memories
+
+Configure in `config.yml`:
+
+```yaml
+scheduler:
+  jobs:
+    - id: "memory_consolidation"
+      cron: "0 */8 * * *"
+      task: "memory_consolidation"
+      type: "memory_consolidation"
+
+memory:
+  consolidation_model: "claude-haiku-4-5"
+```
+
+You can also trigger consolidation manually via the admin API: `POST /memory/consolidate`.
+
+## Example interactions
+
+**Learning a preference:**
+```
+You: "By the way, I'm lactose intolerant."
+Agent: Got it, I'll remember that.
+
+(Later...)
+You: "Find me a restaurant near Bahnhofstrasse"
+Agent: (checks memory, finds lactose intolerance)
+       Here are 3 options with good dairy-free choices: ...
+```
+
+**Short-term context:**
+```
+You: "I'm at the airport, flight to Rome boards at 15:40"
+Agent: Safe travels! Want me to check your Rome calendar?
+
+(2 hours later)
+You: "What time does my flight board?"
+Agent: (checks short-term memory)
+       Your flight to Rome boards at 15:40.
+```
+
+## Configuration
+
+```yaml
+memory:
+  db_path: "data/memory.db"
+  long_term_limit: 50            # max memories injected into prompt
+  extraction_model: "claude-haiku-4-5"  # model for post-turn extraction
+```

@@ -1,0 +1,22 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "getting-started",
+    "---",
+    "architecture",
+    "configuration",
+    "---",
+    "channels",
+    "skills",
+    "memory",
+    "permissions",
+    "scheduler",
+    "voice",
+    "admin-ui",
+    "---",
+    "development",
+    "deployment",
+    "extending"
+  ]
+}

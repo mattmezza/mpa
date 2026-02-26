@@ -1,0 +1,108 @@
+---
+title: Admin UI
+description: Web dashboard for configuration, monitoring, and agent management.
+---
+
+# Admin UI
+
+MPA includes a web-based admin interface built with FastAPI, HTMX, Alpine.js, and Tailwind CSS. It provides a dark, terminal-aesthetic dashboard for managing every aspect of your agent.
+
+## Access
+
+The admin UI runs on the configured port (default 8000):
+
+```
+http://localhost:8000
+```
+
+Authentication uses a Bearer token (the `ADMIN_API_KEY` from your config).
+
+## Sections
+
+### Dashboard
+
+Overview of agent status, active channels, and quick stats.
+
+### Configuration
+
+Edit agent settings without touching config files:
+
+- **Identity** — agent name and owner name
+- **LLM** — provider, model, and API key configuration
+- **Channels** — enable/disable Telegram and WhatsApp
+- **Calendar** — manage CalDAV providers
+- **Contacts** — manage contact providers
+- **Email** — Himalaya configuration
+- **Search** — Tavily API configuration
+- **Voice** — STT/TTS settings
+
+### Skills
+
+Built-in skill editor for creating, editing, and deleting skill files. Changes take effect immediately — no restart needed.
+
+### Memory
+
+Inspect and manage the agent's memories:
+
+- View all long-term memories by category
+- View active short-term context
+- Delete individual memories
+- Trigger manual memory consolidation
+
+### Permissions
+
+View, add, edit, and delete permission rules. See current glob patterns and their levels (ALWAYS / ASK / NEVER).
+
+### Jobs
+
+Manage scheduled tasks:
+
+- View all registered jobs with their cron expressions
+- Create new jobs
+- Pause/resume jobs
+- Delete jobs
+- View job execution history
+
+### History
+
+Browse conversation history across channels. View individual conversation turns with tool call details.
+
+### Logs
+
+Real-time log viewer for debugging and monitoring agent behavior.
+
+## Setup wizard
+
+On first boot, the admin UI presents a step-by-step setup wizard:
+
+1. **Welcome** — overview
+2. **Identity** — name the agent and set the owner
+3. **LLM** — choose provider and enter API key
+4. **Telegram** — configure bot token and allowed users
+5. **WhatsApp** — optional WhatsApp setup
+6. **Email** — configure email accounts
+7. **Calendar** — set up CalDAV providers
+8. **Search** — configure web search
+9. **Admin** — set admin API key
+10. **Done** — save and start
+
+The wizard writes to the SQLite config store, which becomes the source of truth after setup.
+
+## Tech stack
+
+The admin UI is built with a pragmatic, server-rendered approach:
+
+- **FastAPI** — Python web framework with async support
+- **Jinja2** — server-side HTML templating
+- **HTMX** — dynamic updates without writing JavaScript
+- **Alpine.js** — lightweight reactive UI where needed
+- **Tailwind CSS v4** — utility-first dark-themed styling
+
+## Configuration
+
+```yaml
+admin:
+  enabled: true
+  port: 8000
+  api_key: "${ADMIN_API_KEY}"
+```

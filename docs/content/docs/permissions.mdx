@@ -1,0 +1,121 @@
+---
+title: Permissions
+description: MPA's glob-pattern permission system with interactive approval flow.
+---
+
+# Permissions
+
+MPA has an explicit permission system — nothing happens without your approval (or a pre-approved rule). The permission engine uses glob patterns to match actions and commands, with three permission levels.
+
+## Permission levels
+
+| Level | Behavior |
+|-------|----------|
+| **ALWAYS** | Pre-approved, no confirmation needed |
+| **ASK** | Agent must ask before executing, waits for approval |
+| **NEVER** | Blocked entirely, agent cannot perform the action |
+
+## Default rules
+
+MPA ships with sensible defaults:
+
+### Always allowed (read operations)
+
+```python
+"run_command:himalaya*list*"                         # List emails
+"run_command:himalaya*read*"                         # Read emails
+"run_command:himalaya*envelope*"                     # Email envelopes
+"run_command:himalaya*folder*"                       # Email folders
+"run_command:python3 /app/tools/contacts.py*"        # Contact lookups
+"run_command:python3 /app/tools/calendar_read.py*"   # Calendar reads
+"run_command:sqlite3*/app/data/memory.db*SELECT*"    # Memory reads
+"run_command:sqlite3*/app/data/memory.db*INSERT*"    # Memory writes
+"run_command:sqlite3*/app/data/memory.db*UPDATE*"    # Memory updates
+"run_command:sqlite3*/app/data/memory.db*DELETE*"    # Memory deletes
+"web_search"                                          # Web searches
+```
+
+### Ask first (write operations)
+
+```python
+"send_email"                         # Sending emails
+"send_message"                       # Sending messages
+"create_calendar_event"              # Creating calendar events
+"run_command:himalaya*send*"         # Sending emails via CLI
+"run_command:himalaya*delete*"       # Deleting emails
+"run_command:himalaya*move*"         # Moving emails
+"schedule_task"                      # Scheduling tasks
+```
+
+### Never allowed (dangerous operations)
+
+```python
+"run_command:sqlite3*DROP*"          # Dropping tables
+"run_command:sqlite3*ALTER*"         # Altering schema
+```
+
+## Glob pattern matching
+
+Permission rules use glob patterns (with `*` wildcards) to match against action strings. The format is:
+
+```
+action_name:command_details
+```
+
+For `run_command` actions, the full CLI command is included after the colon. This allows fine-grained control:
+
+```python
+# Allow reading emails from any account
+"run_command:himalaya*read*": "ALWAYS"
+
+# Ask before sending from work account specifically
+"run_command:himalaya -a work*send*": "ASK"
+
+# Always allow memory reads but ask before memory writes
+"run_command:sqlite3*/app/data/memory.db*SELECT*": "ALWAYS"
+```
+
+## Approval flow
+
+When the agent wants to perform an action with `ASK` permission, it sends a message through the originating channel (typically Telegram) with inline keyboard buttons:
+
+```
+I'd like to send this WhatsApp message to Simge (+41 78 ...):
+"Hey, I'll be home a bit late tonight"
+
+[Approve] [Edit] [Deny]
+```
+
+- **Approve** — execute the action as-is
+- **Edit** — modify the action before executing (agent will ask for changes)
+- **Deny** — cancel the action
+
+## Managing rules
+
+### Via chat
+
+You can manage rules conversationally:
+
+```
+You: "Always allow sending emails to simge@example.com"
+Agent: Added rule: send_email to simge@example.com → ALWAYS
+```
+
+### Via admin UI
+
+Navigate to Permissions in the admin UI to view, add, edit, and delete rules.
+
+### Via config
+
+Rules are persisted in the SQLite config store (`data/config.db`) and can be managed through any of the above methods.
+
+## Security model
+
+The permission system works alongside other security layers:
+
+- **Command whitelist** — only commands matching `ALLOWED_PREFIXES` can run
+- **User ID whitelist** — only allowed users can interact with the bot
+- **Permission patterns** — glob-based rules control what the agent can do
+- **Approval flow** — interactive confirmation for write operations
+- **Audit trail** — every `run_command` includes a `purpose` field for logging
+- **Timeout** — commands have a default 30-second timeout

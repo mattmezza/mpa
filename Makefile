@@ -1,4 +1,4 @@
-.PHONY: setup install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css
+.PHONY: setup install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css docs docs-dev
 
 PYTHON := uv run python
 UV := uv
@@ -60,6 +60,9 @@ dev:
 		echo "     make dev-wa"; \
 		echo ""; \
 	fi
+	@echo "  Docs (optional):"
+	@echo "     make docs-dev"
+	@echo ""
 
 # Dev: admin API with auto-reload on code changes (agent managed via UI)
 dev-agent:
@@ -92,3 +95,11 @@ release:
 # Build minified CSS (production)
 css:
 	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --minify
+
+# Build documentation (static export)
+docs:
+	cd docs && npm ci && npm run build
+
+# Dev: documentation with hot reload
+docs-dev:
+	cd docs && npm run dev

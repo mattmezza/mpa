@@ -1,0 +1,193 @@
+---
+title: Architecture
+description: Deep dive into MPA's Python orchestrator + CLI tools design.
+---
+
+# Architecture
+
+MPA is built around a simple but powerful principle: **Python orchestrator + CLI tools**. Python handles async orchestration, the LLM conversation loop, and the web UI. Battle-tested CLI tools handle protocol complexity (IMAP, CalDAV, CardDAV).
+
+## High-level overview
+
+```
+┌──────────────────────────────────────────────────────┐
+│                   Docker Container                    │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐ │
+│  │                  Agent Core                      │ │
+│  │                                                  │ │
+│  │  ┌────────┐  ┌────────┐  ┌──────────────────┐  │ │
+│  │  │ Brain  │  │ Memory │  │ Permission Engine│  │ │
+│  │  │ (LLM)  │  │(SQLite)│  │                  │  │ │
+│  │  └───┬────┘  └───┬────┘  └────────┬─────────┘  │ │
+│  │      │           │               │              │ │
+│  │  ┌───┴───────────┴───────────────┴──────────┐   │ │
+│  │  │            Skills Engine                  │   │ │
+│  │  │  Loads markdown skill files into context  │   │ │
+│  │  └──────────────────┬───────────────────────┘   │ │
+│  │                     │                            │ │
+│  │          ┌──────────┴──────────┐                 │ │
+│  │          │   Tool Executor     │                 │ │
+│  │          │  (subprocess.run)   │                 │ │
+│  │          └──────────┬──────────┘                 │ │
+│  └─────────────────────┼───────────────────────────┘ │
+│                        │                              │
+│    ┌─────────┬─────────┼─────────┬───────────┐       │
+│    ▼         ▼         ▼         ▼           ▼       │
+│  ┌────┐  ┌─────┐  ┌───────┐  ┌──────┐  ┌────────┐  │
+│  │ TG │  │ WA  │  │Himalaya│ │CalDAV│  │Scheduler│ │
+│  │Bot │  │CLI  │  │ (CLI) │  │ (py) │  │ (APS)  │  │
+│  └────┘  └─────┘  └───────┘  └──────┘  └────────┘  │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐ │
+│  │              Voice Pipeline                      │ │
+│  │     STT (Whisper)  ◄──►  Agent  ◄──►  TTS      │ │
+│  └─────────────────────────────────────────────────┘ │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐ │
+│  │          Admin API (FastAPI + HTMX)             │ │
+│  └─────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────┘
+```
+
+## Why CLI tools over Python libraries?
+
+| Concern | Python Library | CLI Tool |
+|---------|---------------|----------|
+| Protocol complexity | You own it (IMAP quirks, OAuth, connection pooling) | The tool owns it |
+| Auth management | Implement per-provider | Himalaya + contacts CLI handle it |
+| Configuration | Scattered across Python code | One config file per tool |
+| Debugging | Step through Python code | Run the CLI command in your terminal |
+| Teaching the LLM | Hardcoded tool schemas | Markdown skill files the LLM reads |
+| Adding a new tool | Write a Python integration class | Write a markdown skill file |
+
+The agent becomes a **thin orchestrator**: it reads skill files, passes them to the LLM as context, and executes the CLI commands the LLM constructs.
+
+## Core modules
+
+### Agent Core (`core/agent.py`)
+
+The brain of MPA. Implements the LLM tool-use loop:
+
+1. Load conversation history
+2. Build system prompt (skills, character, personalia, memories)
+3. Call the LLM
+4. Handle tool calls with permission checks
+5. Save conversation turn and extract memories
+
+The agent uses a single `run_command` meta-tool that executes any whitelisted CLI command, plus structured tools for safety-critical write operations (`send_email`, `send_message`, `create_calendar_event`).
+
+### LLM Provider (`core/llm.py`)
+
+Abstraction layer supporting multiple LLM backends:
+
+- **Anthropic** — Claude models (default)
+- **OpenAI** — GPT models
+- **Grok** — xAI models (via OpenAI-compatible API)
+- **Google** — Gemini models
+- **DeepSeek** — DeepSeek models (via OpenAI-compatible API)
+
+### Tool Executor (`core/executor.py`)
+
+Executes CLI commands via `subprocess.run` with a **prefix whitelist** for security. Only commands matching `ALLOWED_PREFIXES` are permitted:
+
+```python
+ALLOWED_PREFIXES = [
+    "himalaya",
+    "python3 /app/tools/contacts.py",
+    "sqlite3",
+    "python3 /app/tools/",
+]
+```
+
+### Config System (`core/config.py`, `core/config_store.py`)
+
+Dual-layer configuration:
+
+1. **File-based** (`config.yml` + `.env`) — seed config loaded on first boot, supports `${ENV_VAR}` interpolation
+2. **SQLite-backed** (`data/config.db`) — becomes the source of truth after setup, managed via admin UI
+
+### History (`core/history.py`)
+
+Persists conversation turns in SQLite. Configurable sliding window (default 10 turns per user per channel).
+
+## Data flow
+
+```
+User message (Telegram/WhatsApp)
+    │
+    ▼
+Channel handler (telegram.py / whatsapp.py)
+    │
+    ▼
+Agent Core (agent.py)
+    ├── Load history from SQLite
+    ├── Build system prompt (skills + character + personalia + memories)
+    ├── Call LLM with tools
+    │     │
+    │     ▼
+    │   Tool call? ──► Permission check ──► Execute via subprocess
+    │     │                                       │
+    │     ◄───────────── Tool result ◄────────────┘
+    │     │
+    │   (loop until LLM returns text)
+    │
+    ├── Save conversation turn
+    ├── Extract memories (async, cheap model)
+    └── Return response
+```
+
+## Project structure
+
+```
+mpa/
+├── core/                 Core agent modules
+│   ├── agent.py            LLM tool-use loop
+│   ├── llm.py              LLM provider abstraction
+│   ├── config.py           Pydantic config models, YAML loader
+│   ├── config_store.py     SQLite-backed config store + setup wizard
+│   ├── executor.py         CLI command executor with prefix whitelist
+│   ├── history.py          Conversation history persistence
+│   ├── main.py             Entry point, lifecycle management
+│   ├── memory.py           Two-tier memory system
+│   ├── permissions.py      Permission engine with approval flow
+│   ├── scheduler.py        APScheduler wrapper
+│   ├── skills.py           Skills store + lazy loading
+│   └── models.py           Shared data models
+├── channels/             Communication channels
+│   ├── telegram.py         Telegram bot (text, voice, approvals)
+│   └── whatsapp.py         WhatsApp channel via wacli
+├── api/                  Admin web interface
+│   ├── admin.py            FastAPI routes + HTMX partials
+│   ├── templates/          Jinja2 templates
+│   └── static/             CSS (Tailwind)
+├── voice/                Voice pipeline
+│   └── pipeline.py         Whisper STT + edge-tts TTS
+├── tools/                CLI helper scripts
+│   ├── calendar_read.py    CalDAV event reader
+│   ├── calendar_write.py   CalDAV event creator
+│   ├── contacts.py         Contacts CLI
+│   └── wacli/              WhatsApp CLI (Go, vendored)
+├── skills/               Markdown skill files
+├── schema/               Database schemas
+├── tests/                Test suite
+└── data/                 Runtime SQLite databases
+```
+
+## Tech stack
+
+| Component | Technology |
+|-----------|-----------|
+| Language | Python 3.14 with uv |
+| LLM | Anthropic Claude, OpenAI, Grok, Google, DeepSeek |
+| Messaging | python-telegram-bot, wacli (Go) |
+| Email | Himalaya CLI (Rust) |
+| Calendar | python-caldav |
+| Storage | SQLite via aiosqlite |
+| Voice | faster-whisper (STT) + edge-tts (TTS) |
+| Web UI | FastAPI + Jinja2 + HTMX + Alpine.js + Tailwind CSS v4 |
+| Scheduler | APScheduler |
+| Search | Tavily |
+| Testing | pytest + pytest-asyncio + pytest-xdist |
+| Linting | ruff |
+| Deployment | Docker |

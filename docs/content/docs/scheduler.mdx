@@ -1,0 +1,144 @@
+---
+title: Scheduler
+description: Cron-based task scheduling for proactive agent actions.
+---
+
+# Scheduler
+
+MPA includes a built-in scheduler powered by [APScheduler](https://apscheduler.readthedocs.io/) for running recurring and one-shot tasks. This enables proactive behaviors like morning briefings, email monitoring, and memory consolidation.
+
+## Job types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| **agent** | Natural language task processed by the agent | "Give me a morning briefing" |
+| **system** | Raw CLI command executed directly | `sqlite3 ... DELETE FROM short_term ...` |
+| **memory_consolidation** | LLM-driven memory review and promotion | Review short-term memories |
+
+### Agent jobs
+
+The most common type. The scheduler passes a natural language task to `agent.process()`, and the agent uses its skills to figure out what to do:
+
+```yaml
+- id: "morning_briefing"
+  cron: "0 7 * * *"
+  task: "Give me a morning briefing: weather in Zurich, today's calendar, unread emails summary"
+  channel: "telegram"
+```
+
+The agent reads its skills and decides to run calendar queries, email checks, weather lookups — then composes the briefing and sends it to Telegram.
+
+### System jobs
+
+For direct command execution without going through the LLM:
+
+```yaml
+- id: "memory_cleanup"
+  cron: "0 */8 * * *"
+  task: "sqlite3 /app/data/memory.db \"DELETE FROM short_term WHERE expires_at < datetime('now');\""
+  type: "system"
+```
+
+### Memory consolidation jobs
+
+Special job type that triggers the memory consolidation pipeline:
+
+```yaml
+- id: "memory_consolidation"
+  cron: "0 */8 * * *"
+  task: "memory_consolidation"
+  type: "memory_consolidation"
+```
+
+See [Memory](/docs/memory) for details on how consolidation works.
+
+## Cron syntax
+
+Jobs use standard 5-field cron expressions:
+
+```
+┌───────── minute (0-59)
+│ ┌─────── hour (0-23)
+│ │ ┌───── day of month (1-31)
+│ │ │ ┌─── month (1-12)
+│ │ │ │ ┌─ day of week (0-6, Sun=0)
+│ │ │ │ │
+* * * * *
+```
+
+**Examples:**
+
+| Expression | Meaning |
+|-----------|---------|
+| `0 7 * * *` | Every day at 7:00 AM |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 */8 * * *` | Every 8 hours |
+| `0 9 * * 1-5` | Weekdays at 9:00 AM |
+| `30 18 * * 5` | Fridays at 6:30 PM |
+
+## One-shot tasks
+
+The agent can schedule one-time future tasks via the `schedule_task` tool:
+
+```
+You: "Remind me to call the dentist tomorrow at 10am"
+Agent: Scheduled a reminder for tomorrow at 10:00.
+```
+
+This creates a one-shot APScheduler job that fires once and sends the reminder through the specified channel.
+
+## Configuration
+
+All scheduled jobs are defined in `config.yml`:
+
+```yaml
+scheduler:
+  jobs:
+    - id: "morning_briefing"
+      cron: "0 7 * * *"
+      task: "Give me a morning briefing"
+      channel: "telegram"
+
+    - id: "email_check"
+      cron: "*/15 * * * *"
+      task: "Check for urgent unread emails and notify me"
+      channel: "telegram"
+
+    - id: "memory_cleanup"
+      cron: "0 */8 * * *"
+      task: "sqlite3 /app/data/memory.db \"DELETE ...\""
+      type: "system"
+```
+
+### Job fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes | Unique job identifier |
+| `cron` | Yes | Cron expression for schedule |
+| `task` | Yes | Natural language task or CLI command |
+| `channel` | No | Delivery channel for agent jobs (default: telegram) |
+| `type` | No | Job type: `agent` (default), `system`, or `memory_consolidation` |
+
+## Job persistence
+
+APScheduler uses a SQLAlchemy-backed SQLite job store, so scheduled jobs survive restarts. The job store is part of the main config database.
+
+## Managing jobs
+
+### Via config
+
+Edit `config.yml` and restart the agent.
+
+### Via admin UI
+
+Navigate to Jobs in the admin UI to view, create, edit, pause, and delete scheduled jobs.
+
+### Via chat
+
+Ask the agent to schedule tasks:
+
+```
+You: "Check my work email every hour and notify me about anything from Alice"
+Agent: I'll set up an hourly email check for messages from Alice.
+```

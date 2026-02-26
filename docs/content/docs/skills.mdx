@@ -1,0 +1,163 @@
+---
+title: Skills
+description: The markdown-based capability system at the heart of MPA.
+---
+
+# Skills
+
+Skills are the central design idea of MPA. Instead of hardcoding how each integration works, the agent loads **skill documents** — markdown files that teach the LLM how to use CLI tools.
+
+## How it works
+
+1. Skill files are markdown documents stored in SQLite (seeded from `skills/` at startup)
+2. On each conversation turn, relevant skills are injected into the LLM's system prompt
+3. The LLM reads the skill documentation and constructs the correct CLI commands
+4. Commands are executed via the tool executor with permission checks
+
+This means adding a new capability is as simple as writing a markdown file. No Python code changes needed.
+
+## Built-in skills
+
+MPA ships with these skills:
+
+| Skill | File | Purpose |
+|-------|------|---------|
+| Email | `himalaya-email.md` | Read, search, send, and manage emails via Himalaya CLI |
+| Contacts | `contacts.md` | Look up contacts across providers (Google, CardDAV) |
+| Calendar | `caldav-calendar.md` | Read and create calendar events via CalDAV |
+| Memory | `memory.md` | Store and recall memories via sqlite3 CLI |
+| Voice | `voice.md` | Voice interaction conventions |
+| Weather | `weather.md` | Weather lookups |
+| jq | `jq.md` | JSON processing |
+| Scheduling | `scheduling.md` | Task scheduling |
+| Skill Creator | `skill-creator.md` | Creating new skills dynamically |
+| WhatsApp | `wacli-whatsapp.md` | WhatsApp via wacli CLI |
+
+## Skill file anatomy
+
+A skill file is a self-contained markdown document that teaches the LLM everything it needs to know about a tool. Here's the structure:
+
+```markdown
+# Tool Name
+
+Brief description of what this tool does and when to use it.
+
+## Configuration
+
+What accounts/providers are available, how they're set up.
+
+## Reading / Querying
+
+Commands for read operations with examples.
+
+## Writing / Creating
+
+Commands for write operations with examples.
+
+## Output format
+
+What the JSON output looks like, so the LLM can parse it.
+
+## Important notes
+
+Gotchas, best practices, and edge cases.
+```
+
+### Example: Email skill
+
+```markdown
+# Himalaya Email CLI
+
+You have access to the `himalaya` CLI to manage emails.
+
+## Reading Emails
+
+### List recent emails
+\`\`\`bash
+himalaya -a personal envelope list -s 10 -o json
+\`\`\`
+
+### Search emails
+\`\`\`bash
+himalaya -a work envelope list -o json -- "from:alice subject:invoice"
+\`\`\`
+
+## Sending Emails
+\`\`\`bash
+echo 'From: matteo@example.com
+To: recipient@example.com
+Subject: Hello
+
+Body text here.' | himalaya -a personal message send
+\`\`\`
+
+## Important Notes
+- Always use `-o json` when parsing results programmatically
+- Email IDs are relative to the current folder
+```
+
+## Creating new skills
+
+There are three ways to add skills:
+
+### 1. Add a markdown file to `skills/`
+
+Create a new `.md` file in the `skills/` directory. It will be loaded into the database on next startup.
+
+### 2. Use the admin UI
+
+The admin UI includes a skill editor where you can create, edit, and delete skills directly.
+
+### 3. Use the skills CLI
+
+```bash
+python3 /app/tools/skills.py upsert --name my-skill --stdin
+```
+
+## How skills are loaded
+
+```python
+class SkillsEngine:
+    def get_all_skills(self) -> str:
+        sections = []
+        for name, content in self.skills.items():
+            sections.append(f'<skill name="{name}">\n{content}\n</skill>')
+        return "\n\n".join(sections)
+```
+
+Skills are wrapped in `<skill>` XML tags and injected into the `<available_skills>` block of the system prompt. The LLM uses these to construct correct CLI commands.
+
+## System prompt integration
+
+The system prompt combines skills with identity and memory:
+
+```
+You are {agent_name}, a personal AI assistant for {owner_name}.
+
+<personalia>
+{personalia.md content}
+</personalia>
+
+<character>
+{character.md content}
+</character>
+
+<memories>
+{formatted memory context}
+</memories>
+
+<available_skills>
+<skill name="himalaya-email">
+{skill content}
+</skill>
+...
+</available_skills>
+```
+
+## Tips for writing good skills
+
+- **Be specific** — include exact command syntax with flags
+- **Show output format** — include JSON examples so the LLM can parse responses
+- **Note account names** — tell the LLM which accounts/providers exist
+- **Include edge cases** — mention gotchas and common mistakes
+- **Keep it concise** — the LLM has limited context; don't repeat obvious things
