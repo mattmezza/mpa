@@ -29,6 +29,7 @@ RUN groupadd --gid 10001 mpa && \
 # Copy application code
 COPY core/ core/
 COPY channels/ channels/
+COPY schema/ schema/
 COPY skills/ skills/
 COPY tools/ tools/
 COPY voice/ voice/
