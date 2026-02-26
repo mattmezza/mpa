@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from os import environ
 
 import uvicorn
 from fastapi import Depends, Request
@@ -291,8 +292,8 @@ _attach_lifecycle_routes(app, _config_store, _agent_state, _auth)
 if __name__ == "__main__":
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8000,
+        host=environ.get("HOST", "0.0.0.0"),
+        port=int(environ.get("PORT", "8000")),
         log_level="info",
         log_config=None,
     )
