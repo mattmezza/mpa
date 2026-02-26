@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -e
+
+# Get staged Python files (excluding deleted files)
+STAGED=$(git diff --cached --name-only --diff-filter=d -- '*.py')
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+# Fix lint issues and format staged files
+uv run ruff check --fix $STAGED
+uv run ruff format $STAGED
+
+# Re-stage any files that were modified by ruff
+git add $STAGED

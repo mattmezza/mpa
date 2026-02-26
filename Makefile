@@ -1,4 +1,4 @@
-.PHONY: help setup install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css docs docs-dev
+.PHONY: help setup setup-hooks install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css docs docs-dev
 
 PYTHON := uv run python
 UV := uv
@@ -12,7 +12,8 @@ help:
 	@echo "MPA — My Personal Agent"
 	@echo ""
 	@echo "  Setup & Dependencies:"
-	@echo "    make setup        First-time setup (install, copy example configs)"
+	@echo "    make setup        First-time setup (install, hooks, copy example configs)"
+	@echo "    make setup-hooks  Install git pre-commit hooks (lint + format)"
 	@echo "    make install      Install production dependencies"
 	@echo "    make install-dev  Install all dependencies (including dev tools)"
 	@echo "    make sync         Re-sync venv with lockfile"
@@ -41,10 +42,14 @@ help:
 	@echo ""
 
 # First-time setup: create venv, install deps, copy example configs
-setup: install-dev
+setup: install-dev setup-hooks
 	@test -f .env || cp .env.example .env
 	@test -f config.yml || cp config.yml.example config.yml
 	@echo "Done. Edit .env and config.yml with your secrets, then run: make run"
+
+# Install git hooks (lint + format on commit)
+setup-hooks:
+	git config core.hooksPath .githooks
 
 # Install production dependencies
 install:
