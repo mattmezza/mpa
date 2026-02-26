@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 _APPROVE_ACTIONS = {"approve", "approved", "yes"}
 _DENY_ACTIONS = {"deny", "denied", "no"}
 _ALWAYS_ACTIONS = {"always", "allow"}
+_SKIP_ACTIONS = {"skip", "skipped"}
 
 
 def _normalize_number(value: str) -> str:
@@ -135,7 +136,7 @@ class WhatsAppChannel:
             return False
 
         action = tokens[0]
-        if action not in _APPROVE_ACTIONS | _DENY_ACTIONS | _ALWAYS_ACTIONS:
+        if action not in _APPROVE_ACTIONS | _DENY_ACTIONS | _ALWAYS_ACTIONS | _SKIP_ACTIONS:
             return False
 
         request_id = tokens[1] if len(tokens) > 1 else ""
@@ -146,13 +147,16 @@ class WhatsAppChannel:
             await self.send(sender, "Missing approval ID. Reply with: approve <id>.")
             return True
 
+        skipped = action in _SKIP_ACTIONS
         always_allow = action in _ALWAYS_ACTIONS
         approved = action in _APPROVE_ACTIONS or always_allow
         resolved = self.agent.permissions.resolve_approval(
-            request_id, approved, always_allow=always_allow
+            request_id, approved, always_allow=always_allow, skipped=skipped
         )
         if resolved:
-            if always_allow:
+            if skipped:
+                label = "Skipped"
+            elif always_allow:
                 label = "Always allowed"
             elif approved:
                 label = "Approved"

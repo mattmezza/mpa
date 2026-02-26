@@ -250,11 +250,12 @@ class PermissionEngine:
 
     def create_approval_request(
         self, tool_name: str | None = None, params: dict | None = None
-    ) -> tuple[str, asyncio.Future[bool]]:
+    ) -> tuple[str, asyncio.Future[str]]:
         """Create a pending approval request. Returns (request_id, future).
 
         The caller awaits the future. When the user approves/denies via
-        Telegram callback, resolve_approval() completes the future.
+        a channel callback, resolve_approval() completes the future with
+        one of ``"approved"``, ``"denied"``, or ``"skipped"``.
         """
         request_id = uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
@@ -277,8 +278,14 @@ class PermissionEngine:
         request_id: str,
         approved: bool,
         always_allow: bool = False,
+        *,
+        skipped: bool = False,
     ) -> bool:
-        """Resolve a pending approval request. Returns False if not found."""
+        """Resolve a pending approval request. Returns False if not found.
+
+        The future is resolved with a string: ``"approved"``, ``"denied"``,
+        or ``"skipped"`` so callers can distinguish all three outcomes.
+        """
         entry = self._pending.pop(request_id, None)
         if not entry:
             return False
@@ -289,12 +296,17 @@ class PermissionEngine:
             match_key = entry.get("match_key")
             if isinstance(match_key, str) and match_key not in self.rules:
                 self.add_rule(match_key, PermissionLevel.ALWAYS)
-        future.set_result(approved)
+        if skipped:
+            future.set_result("skipped")
+        elif approved:
+            future.set_result("approved")
+        else:
+            future.set_result("denied")
         return True
 
 
 class PendingApproval(TypedDict):
-    future: asyncio.Future[bool]
+    future: asyncio.Future[str]
     match_key: str
 
 
