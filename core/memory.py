@@ -203,7 +203,7 @@ class MemoryStore:
         self.db_path = db_path
         self.long_term_limit = long_term_limit
         self._ready = False
-        self._last_extraction: float = 0.0  # monotonic timestamp of last extraction
+        self._last_extraction: float | None = None  # monotonic timestamp of last extraction
 
     async def _ensure_schema(self) -> None:
         if self._ready:
@@ -282,7 +282,11 @@ class MemoryStore:
         Returns the number of memories stored.
         """
         now = time.monotonic()
-        if now - self._last_extraction < cooldown_seconds:
+        if (
+            cooldown_seconds > 0
+            and self._last_extraction is not None
+            and now - self._last_extraction < cooldown_seconds
+        ):
             log.debug(
                 "Skipping memory extraction (cooldown: %.0fs remaining)",
                 cooldown_seconds - (now - self._last_extraction),
