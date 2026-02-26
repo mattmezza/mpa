@@ -24,8 +24,7 @@ from pathlib import Path
 # Ensure project root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.job_store import JobStore, VALID_TYPES, VALID_SCHEDULES, VALID_STATUSES  # noqa: E402
-
+from core.job_store import VALID_STATUSES, VALID_TYPES, JobStore  # noqa: E402
 
 DB_PATH = "data/jobs.db"
 # Also check the Docker path

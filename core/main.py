@@ -14,7 +14,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -44,7 +43,6 @@ async def _start_agent(config_store: ConfigStore):
     from channels.telegram import TelegramChannel
     from channels.whatsapp import WhatsAppChannel
     from core.agent import AgentCore
-    from core.job_store import JobStore
     from voice.pipeline import VoicePipeline
 
     config = await config_store.export_to_config()

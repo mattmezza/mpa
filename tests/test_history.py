@@ -316,7 +316,7 @@ async def test_session_preserves_complex_messages(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_new_command_clears_injection_history(tmp_path) -> None:
     """/new clears windowed history in injection mode."""
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from core.agent import AgentCore
 
@@ -348,7 +348,7 @@ async def test_new_command_clears_injection_history(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_new_command_clears_session(tmp_path) -> None:
     """/new clears the sticky session in session mode."""
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from core.agent import AgentCore
 

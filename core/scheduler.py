@@ -22,7 +22,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 if TYPE_CHECKING:
     from core.agent import AgentCore
-    from core.config import SchedulerConfig
     from core.job_store import JobStore
 
 log = logging.getLogger(__name__)

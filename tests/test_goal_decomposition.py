@@ -128,7 +128,12 @@ async def test_decompose_goal_returns_plan() -> None:
 
 @pytest.mark.asyncio
 async def test_decompose_goal_handles_code_fence() -> None:
-    response = '```json\n{"goal": "Setup", "steps": [{"id": 1, "title": "Install", "description": "Install deps", "depends_on": []}]}\n```'
+    response = (
+        "```json\n"
+        '{"goal": "Setup", "steps": [{"id": 1, "title": "Install",'
+        ' "description": "Install deps", "depends_on": []}]}\n'
+        "```"
+    )
     llm = _LLMStub(response)
     result = await decompose_goal(llm, "test-model", "Set up my new laptop")
 
@@ -141,7 +146,8 @@ async def test_decompose_goal_handles_code_fence() -> None:
 async def test_decompose_goal_handles_preamble_text() -> None:
     response = (
         "Here is the decomposition:\n"
-        '{"goal": "Prepare", "steps": [{"id": 1, "title": "Research", "description": "Look up info", "depends_on": []}]}\n'
+        '{"goal": "Prepare", "steps": [{"id": 1, "title": "Research",'
+        ' "description": "Look up info", "depends_on": []}]}\n'
         "Hope that helps!"
     )
     llm = _LLMStub(response)

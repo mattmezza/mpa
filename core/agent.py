@@ -187,7 +187,9 @@ TOOLS = [
                 "action": {
                     "type": "string",
                     "enum": ["create", "list", "cancel"],
-                    "description": "What to do: create a new job, list existing jobs, or cancel a job",
+                    "description": (
+                        "What to do: create a new job, list existing jobs, or cancel a job"
+                    ),
                 },
                 "job_id": {
                     "type": "string",
@@ -198,7 +200,9 @@ TOOLS = [
                 },
                 "task": {
                     "type": "string",
-                    "description": "What the agent should do when the job runs (natural language instruction)",
+                    "description": (
+                        "What the agent should do when the job runs (natural language instruction)"
+                    ),
                 },
                 "run_at": {
                     "type": "string",
@@ -211,7 +215,8 @@ TOOLS = [
                 "cron": {
                     "type": "string",
                     "description": (
-                        "For recurring jobs: 5-field cron expression (minute hour day month weekday). "
+                        "For recurring jobs: 5-field cron expression "
+                        "(minute hour day month weekday). "
                         "Example: '30 7 * * 1-5' = weekdays at 07:30"
                     ),
                 },
@@ -829,7 +834,7 @@ class AgentCore:
                 except ValueError as exc:
                     return {"error": str(exc)}
 
-                job = await self.job_store.upsert_job(
+                await self.job_store.upsert_job(
                     job_id=job_id,
                     type="agent",
                     schedule="cron",
@@ -862,7 +867,7 @@ class AgentCore:
                     tz = ZoneInfo(self.config.agent.timezone)
                     run_at = run_at.replace(tzinfo=tz)
 
-                job = await self.job_store.upsert_job(
+                await self.job_store.upsert_job(
                     job_id=job_id,
                     type="agent",
                     schedule="once",
@@ -1080,9 +1085,12 @@ class AgentCore:
         tz = ZoneInfo(cfg.timezone)
         now = datetime.now(tz)
 
+        date_str = now.strftime("%A, %B %d, %Y")
+        time_str = now.strftime("%H:%M")
+
         prompt = f"""You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.
 
-Today is {now.strftime("%A, %B %d, %Y")}. Current time: {now.strftime("%H:%M")}. Timezone: {cfg.timezone}.
+Today is {date_str}. Current time: {time_str}. Timezone: {cfg.timezone}.
 
 <personalia>
 {personalia}

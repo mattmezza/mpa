@@ -192,7 +192,7 @@ class ReflectionStore:
                         for issue in issues:
                             if isinstance(issue, dict) and issue.get("suggestion"):
                                 lines.append(f"  -> {issue['tool']}: {issue['suggestion']}")
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     pass
 
         return "## Lessons from past tasks\n" + "\n".join(lines) if lines else ""

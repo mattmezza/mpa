@@ -18,6 +18,7 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import caldav
 import yaml
 from dotenv import load_dotenv
 

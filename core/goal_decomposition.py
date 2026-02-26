@@ -100,7 +100,9 @@ class DecomposedGoal:
         for step in self.steps:
             deps = ""
             if step.depends_on:
-                deps = f" (after step{'s' if len(step.depends_on) > 1 else ''} {', '.join(str(d) for d in step.depends_on)})"
+                plural = "s" if len(step.depends_on) > 1 else ""
+                ids = ", ".join(str(d) for d in step.depends_on)
+                deps = f" (after step{plural} {ids})"
             lines.append(f"  {step.id}. {step.title}{deps}")
             lines.append(f"     {step.description}")
         return "\n".join(lines)

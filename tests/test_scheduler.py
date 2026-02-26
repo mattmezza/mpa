@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from core.scheduler import (
-    AgentScheduler,
     _parse_cron,
     run_agent_task,
     run_memory_consolidation,

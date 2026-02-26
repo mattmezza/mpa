@@ -54,7 +54,7 @@ class WacliManager:
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return {"success": False, "error": "wacli timed out"}
@@ -66,7 +66,7 @@ class WacliManager:
                 err_json = json.loads(err_text)
                 if isinstance(err_json, dict):
                     return err_json
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError, ValueError:
                 pass
             return {"success": False, "error": err_text}
         try:
