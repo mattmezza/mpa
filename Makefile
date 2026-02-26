@@ -1,10 +1,44 @@
-.PHONY: setup install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css docs docs-dev
+.PHONY: help setup install install-dev sync lock lint format test run dev dev-agent dev-css dev-wa clean release css docs docs-dev
 
 PYTHON := uv run python
 UV := uv
 TAILWIND := ./tailwindcss
 CSS_IN := api/static/input.css
 CSS_OUT := api/static/style.css
+
+# Show available targets
+help:
+	@echo ""
+	@echo "MPA — My Personal Agent"
+	@echo ""
+	@echo "  Setup & Dependencies:"
+	@echo "    make setup        First-time setup (install, copy example configs)"
+	@echo "    make install      Install production dependencies"
+	@echo "    make install-dev  Install all dependencies (including dev tools)"
+	@echo "    make sync         Re-sync venv with lockfile"
+	@echo "    make lock         Update lockfile after changing pyproject.toml"
+	@echo ""
+	@echo "  Development:"
+	@echo "    make dev          Show instructions for running dev services"
+	@echo "    make dev-agent    Run agent with auto-reload"
+	@echo "    make dev-css      Run Tailwind CSS watcher"
+	@echo "    make dev-wa       Build WhatsApp CLI (wacli)"
+	@echo "    make docs-dev     Run docs site with hot reload"
+	@echo ""
+	@echo "  Quality:"
+	@echo "    make lint         Lint with ruff"
+	@echo "    make format       Format with ruff"
+	@echo "    make test         Run tests"
+	@echo ""
+	@echo "  Build & Deploy:"
+	@echo "    make run          Run the agent (production)"
+	@echo "    make css          Build minified CSS"
+	@echo "    make docs         Build documentation (static export)"
+	@echo "    make clean        Remove venv and caches"
+	@echo ""
+	@echo "  Release:"
+	@echo "    make release name=v0.1  Push and create a GitHub release"
+	@echo ""
 
 # First-time setup: create venv, install deps, copy example configs
 setup: install-dev
@@ -90,7 +124,8 @@ clean:
 # Create a GitHub release and tag
 release:
 	@test -n "$(name)" || (echo "Usage: make release name=v0.x" && exit 1)
-	@gh release create "$(name)" --generate-notes --latest
+	git push
+	gh release create "$(name)" --generate-notes --latest
 
 # Build minified CSS (production)
 css:
