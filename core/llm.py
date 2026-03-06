@@ -15,6 +15,10 @@ _DEFAULT_BASE_URLS = {
     "deepseek": "https://api.deepseek.com",
 }
 
+_ANTHROPIC_MODEL_ALIASES = {
+    "claude-4-5-haiku": "claude-haiku-4-5",
+}
+
 
 @dataclass
 class LLMToolCall:
@@ -49,6 +53,13 @@ def _openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _normalize_provider(provider: str) -> str:
     value = (provider or "").strip().lower()
     return value or "anthropic"
+
+
+def _normalize_model(provider: str, model: str) -> str:
+    value = (model or "").strip()
+    if provider == "anthropic":
+        return _ANTHROPIC_MODEL_ALIASES.get(value, value)
+    return value
 
 
 class LLMClient:
@@ -110,11 +121,12 @@ class LLMClient:
         tools: list[dict[str, Any]],
         max_tokens: int = 4096,
     ) -> LLMResponse:
+        resolved_model = _normalize_model(self.provider, model)
         if self.provider == "anthropic":
             client_any = cast(Any, self._client)
             messages_client = cast(Any, getattr(client_any, "messages"))  # type: ignore[attr-defined]
             response = await messages_client.create(
-                model=model,
+                model=resolved_model,
                 max_tokens=max_tokens,
                 system=system,
                 messages=cast(Any, messages),
@@ -144,7 +156,7 @@ class LLMClient:
         client_any = cast(Any, self._client)
         full_messages = [{"role": "system", "content": system}, *messages]
         response = await client_any.chat.completions.create(
-            model=model,
+            model=resolved_model,
             max_tokens=max_tokens,
             messages=cast(Any, full_messages),
             tools=cast(Any, openai_tools),
@@ -196,11 +208,12 @@ class LLMClient:
         ]
 
     async def generate_text(self, *, model: str, prompt: str, max_tokens: int = 1024) -> str:
+        resolved_model = _normalize_model(self.provider, model)
         if self.provider == "anthropic":
             client_any = cast(Any, self._client)
             messages_client = cast(Any, getattr(client_any, "messages"))  # type: ignore[attr-defined]
             response = await messages_client.create(
-                model=model,
+                model=resolved_model,
                 max_tokens=max_tokens,
                 messages=cast(Any, [{"role": "user", "content": prompt}]),
             )
@@ -212,7 +225,7 @@ class LLMClient:
 
         client_any = cast(Any, self._client)
         response = await client_any.chat.completions.create(
-            model=model,
+            model=resolved_model,
             max_tokens=max_tokens,
             messages=cast(Any, [{"role": "user", "content": prompt}]),
         )

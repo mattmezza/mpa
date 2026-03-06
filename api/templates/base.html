@@ -64,15 +64,15 @@
         deepseekKey: deepseekKey || '',
         deepseekBaseUrl: deepseekBaseUrl || '',
         extractionProvider: extractionProvider || 'anthropic',
-        extractionModel: extractionModel || 'claude-4-5-haiku',
+        extractionModel: extractionModel || 'claude-haiku-4-5',
         consolidationProvider: consolidationProvider || 'anthropic',
-        consolidationModel: consolidationModel || 'claude-4-5-haiku',
+        consolidationModel: consolidationModel || 'claude-haiku-4-5',
         gdEnabled: gdEnabled === 'true' || gdEnabled === true,
         gdProvider: gdProvider || 'anthropic',
-        gdModel: gdModel || 'claude-4-5-haiku',
+        gdModel: gdModel || 'claude-haiku-4-5',
         trEnabled: trEnabled === 'true' || trEnabled === true,
         trProvider: trProvider || 'anthropic',
-        trModel: trModel || 'claude-4-5-haiku',
+        trModel: trModel || 'claude-haiku-4-5',
         memoryResult: '',
         memoryResultOk: false,
         gdResult: '',
@@ -106,7 +106,7 @@
           anthropic: [
             {value: 'claude-4-6-opus', label: 'claude-4-6-opus'},
             {value: 'claude-4-6-sonnet', label: 'claude-4-6-sonnet'},
-            {value: 'claude-4-5-haiku', label: 'claude-4-5-haiku'}
+            {value: 'claude-haiku-4-5', label: 'claude-haiku-4-5'}
           ],
           openai: [
             {value: 'gpt-5.2-thinking', label: 'gpt-5.2-thinking'},

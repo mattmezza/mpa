@@ -134,22 +134,22 @@ class MemoryConfig(BaseModel):
     db_path: str = "data/memory.db"
     long_term_limit: int = 50
     extraction_provider: str = "anthropic"
-    extraction_model: str = "claude-4-5-haiku"
+    extraction_model: str = "claude-haiku-4-5"
     consolidation_provider: str = "anthropic"
-    consolidation_model: str = "claude-4-5-haiku"
+    consolidation_model: str = "claude-haiku-4-5"
     extraction_cooldown_seconds: int = 120  # minimum seconds between extractions
 
 
 class GoalDecompositionConfig(BaseModel):
     enabled: bool = True
     provider: str = "anthropic"
-    model: str = "claude-4-5-haiku"
+    model: str = "claude-haiku-4-5"
 
 
 class TaskReflectionConfig(BaseModel):
     enabled: bool = True
     provider: str = "anthropic"
-    model: str = "claude-4-5-haiku"
+    model: str = "claude-haiku-4-5"
     db_path: str = "data/reflections.db"
     max_reflections: int = 50  # max reflections to keep for prompt injection
 

@@ -12,15 +12,15 @@
   {{ deepseek_api_key|default('', true)|tojson|forceescape }},
   {{ deepseek_base_url|default('', true)|tojson|forceescape }},
   {{ extraction_provider|default('anthropic', true)|tojson|forceescape }},
-  {{ extraction_model|default('claude-4-5-haiku', true)|tojson|forceescape }},
+  {{ extraction_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
   {{ consolidation_provider|default('anthropic', true)|tojson|forceescape }},
-  {{ consolidation_model|default('claude-4-5-haiku', true)|tojson|forceescape }},
+  {{ consolidation_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
   {{ gd_enabled|default('true', true)|tojson|forceescape }},
   {{ gd_provider|default('anthropic', true)|tojson|forceescape }},
-  {{ gd_model|default('claude-4-5-haiku', true)|tojson|forceescape }},
+  {{ gd_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
   {{ tr_enabled|default('true', true)|tojson|forceescape }},
   {{ tr_provider|default('anthropic', true)|tojson|forceescape }},
-  {{ tr_model|default('claude-4-5-haiku', true)|tojson|forceescape }}
+  {{ tr_model|default('claude-haiku-4-5', true)|tojson|forceescape }}
 )">
   <div class="card">
     <h2 class="text-base mb-1">Active Inference Provider</h2>

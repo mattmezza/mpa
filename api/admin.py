@@ -29,6 +29,7 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
 from core.config_store import ConfigStore
+from core.llm import LLMClient
 from core.wacli import WacliManager
 
 if TYPE_CHECKING:
@@ -758,21 +759,21 @@ def create_admin_app(
         deepseek_base_url = await config_store.get("agent.deepseek_base_url") or ""
         model = await config_store.get("agent.model") or "claude-4-6-sonnet"
         extraction_provider = await config_store.get("memory.extraction_provider") or "anthropic"
-        extraction_model = await config_store.get("memory.extraction_model") or "claude-4-5-haiku"
+        extraction_model = await config_store.get("memory.extraction_model") or "claude-haiku-4-5"
         consolidation_provider = (
             await config_store.get("memory.consolidation_provider") or "anthropic"
         )
         consolidation_model = (
-            await config_store.get("memory.consolidation_model") or "claude-4-5-haiku"
+            await config_store.get("memory.consolidation_model") or "claude-haiku-4-5"
         )
         gd_enabled = await config_store.get("goal_decomposition.enabled")
         gd_enabled = gd_enabled if gd_enabled is not None else "true"
         gd_provider = await config_store.get("goal_decomposition.provider") or "anthropic"
-        gd_model = await config_store.get("goal_decomposition.model") or "claude-4-5-haiku"
+        gd_model = await config_store.get("goal_decomposition.model") or "claude-haiku-4-5"
         tr_enabled = await config_store.get("task_reflection.enabled")
         tr_enabled = tr_enabled if tr_enabled is not None else "true"
         tr_provider = await config_store.get("task_reflection.provider") or "anthropic"
-        tr_model = await config_store.get("task_reflection.model") or "claude-4-5-haiku"
+        tr_model = await config_store.get("task_reflection.model") or "claude-haiku-4-5"
         return _render_partial(
             "partials/llm.html",
             provider=provider,
@@ -1129,6 +1130,23 @@ def create_admin_app(
     @app.patch("/config", dependencies=[Depends(auth)])
     async def patch_config(body: ConfigPatchIn) -> dict:
         await config_store.set_many(body.values)
+        agent = agent_state.agent
+        if agent:
+            try:
+                new_config = await config_store.export_to_config()
+                agent.config = new_config
+                agent.llm = LLMClient.from_agent_config(new_config.agent)
+                agent.history_mode = new_config.history.mode
+                agent.memory.long_term_limit = new_config.memory.long_term_limit
+                agent.reflections.max_reflections = new_config.task_reflection.max_reflections
+                if new_config.search.enabled and new_config.search.api_key:
+                    from tavily import TavilyClient
+
+                    agent.search_client = TavilyClient(api_key=new_config.search.api_key)
+                else:
+                    agent.search_client = None
+            except Exception:
+                log.exception("Failed to apply updated config to running agent")
         return {"updated": list(body.values.keys())}
 
     @app.post("/admin/password", dependencies=[Depends(auth)])
