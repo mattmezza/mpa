@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
-from api.admin import AgentState, create_admin_app
+from api.admin import AgentState, _should_capture_log_record, create_admin_app
 from core.config_store import ConfigStore
 
 # ---------------------------------------------------------------------------
@@ -557,6 +558,17 @@ class TestPermissionsAPI:
 
 
 class TestLogsAPI:
+    def test_log_filter_only_includes_agent_related_loggers(self):
+        assert _should_capture_log_record(
+            logging.LogRecord("core.agent", logging.INFO, "", 1, "msg", (), None)
+        )
+        assert _should_capture_log_record(
+            logging.LogRecord("channels.telegram", logging.INFO, "", 1, "msg", (), None)
+        )
+        assert not _should_capture_log_record(
+            logging.LogRecord("uvicorn.access", logging.INFO, "", 1, "msg", (), None)
+        )
+
     def test_get_logs_json(self):
         client = _client(setup_complete=True)
         resp = client.get("/logs", headers=AUTH)

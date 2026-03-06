@@ -351,12 +351,25 @@ class AgentState:
 
 _LOG_BUFFER: collections.deque[str] = collections.deque(maxlen=500)
 
+_LOG_INCLUDE_PREFIXES = ("core.", "channels.", "voice.", "tools.")
+_LOG_INCLUDE_NAMES = {"core", "channels", "voice", "tools"}
+
+
+def _should_capture_log_record(record: logging.LogRecord) -> bool:
+    """Return True when a record should be visible in the admin log viewer."""
+    name = record.name
+    if name in _LOG_INCLUDE_NAMES:
+        return True
+    return name.startswith(_LOG_INCLUDE_PREFIXES)
+
 
 class _BufferHandler(logging.Handler):
     """Logging handler that appends formatted records to an in-memory deque."""
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
+            if not _should_capture_log_record(record):
+                return
             _LOG_BUFFER.append(self.format(record))
         except Exception:
             pass
