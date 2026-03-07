@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import shlex
 import uuid
+from collections import deque
 from datetime import datetime
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -22,6 +24,7 @@ from core.llm import LLMClient, LLMToolCall
 from core.memory import MemoryStore
 from core.models import AgentResponse, Attachment
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
+from core.prompt_builder import build_prompt_sections
 from core.scheduler import AgentScheduler
 from core.skills import SkillsEngine
 from core.task_reflection import ReflectionStore
@@ -263,6 +266,7 @@ class AgentCore:
         self.scheduler = AgentScheduler(self, self.job_store)
         config_db = "data/config.db"
         self.permissions = PermissionEngine(db_path=config_db)
+        self.prompt_capture: deque[dict[str, str]] = deque(maxlen=20)
 
         # Web search (Tavily)
         if config.search.enabled and config.search.api_key:
@@ -310,6 +314,13 @@ class AgentCore:
             decomposed_goal = await self._maybe_decompose(message)
 
         system = await self._build_system_prompt(decomposed_goal=decomposed_goal)
+        if self.config.admin.capture_prompts:
+            self._record_system_prompt(
+                channel=channel,
+                user_id=user_id,
+                chat_id=chat_id,
+                prompt=system,
+            )
 
         if self.history_mode == "session":
             return await self._process_session(
@@ -1064,14 +1075,7 @@ class AgentCore:
             log.exception("Background task reflection failed")
 
     async def _build_system_prompt(self, decomposed_goal: DecomposedGoal | None = None) -> str:
-        cfg = self.config.agent
         skills_index = await self.skills.get_index_block()
-        character = cfg.character
-        personalia = cfg.personalia
-        you_personalia = self.config.you.personalia
-        about_user_block = (
-            f"<about_user>\n{you_personalia}\n</about_user>\n\n" if you_personalia.strip() else ""
-        )
         memories = await self.memory.format_for_prompt()
 
         # Task reflections — lessons learned from past tasks
@@ -1082,94 +1086,35 @@ class AgentCore:
             except Exception:
                 log.exception("Failed to load task reflections for prompt")
 
-        tz = ZoneInfo(cfg.timezone)
-        now = datetime.now(tz)
+        sections = build_prompt_sections(
+            config=self.config,
+            history_mode=self.history_mode,
+            skills_index=skills_index,
+            memories=memories,
+            reflections=reflections,
+            decomposed_goal=decomposed_goal,
+        )
+        return sections.full_prompt
 
-        date_str = now.strftime("%A, %B %d, %Y")
-        time_str = now.strftime("%H:%M")
+    def _record_system_prompt(
+        self, *, channel: str, user_id: str, chat_id: str, prompt: str
+    ) -> None:
+        """Record generated prompts in a ring buffer for admin debugging."""
+        user_hash = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:12]
+        chat_hash = hashlib.sha256(chat_id.encode("utf-8")).hexdigest()[:12] if chat_id else ""
+        self.prompt_capture.appendleft(
+            {
+                "captured_at": datetime.now(ZoneInfo(self.config.agent.timezone)).isoformat(),
+                "channel": channel,
+                "user_hash": user_hash,
+                "chat_hash": chat_hash,
+                "prompt": prompt,
+            }
+        )
 
-        prompt = f"""You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.
-
-Today is {date_str}. Current time: {time_str}. Timezone: {cfg.timezone}.
-
-<personalia>
-{personalia}
-</personalia>
-
-<character>
-{character}
-</character>
-
-{about_user_block}<tool_usage>
-For write actions (sending emails, replying to emails, sending messages, creating calendar events,
-scheduling tasks), ALWAYS use the dedicated structured tools: `send_email`, `reply_email`,
-`send_message`, `create_calendar_event`, `manage_jobs`. NEVER use `run_command` for these — the
-structured tools handle quoting, piping, and permissions correctly.
-
-For scheduling, use the `manage_jobs` tool to create, list, and cancel jobs. For more advanced
-operations (editing jobs, pausing, viewing details), use the `jobs.py` CLI via `run_command`
-after loading the `scheduling` skill.
-
-Use `run_command` only for read/query operations (listing emails, reading messages, searching,
-managing flags/folders, contacts, memory, etc.).
-Always use the skill documentation to construct the correct command.
-If you don't have the skill content in context, call `load_skill` with the skill name to load it.
-Parse JSON output when available (himalaya supports -o json, sqlite3 supports -json).
-If a command fails, read the error and try to fix it.
-Never guess at command syntax — always refer to the skill file.
-
-You may create or update skills using the `skills.py` CLI after loading the `skill-creator` skill.
-</tool_usage>
-
-You can store and recall memories using the sqlite3 CLI (see the memory skill).
-Proactively remember important facts about the user and their contacts.
-Before inserting a new long-term memory, check if it already exists to avoid duplicates."""
-
-        # Only include history_handling instructions in injection mode;
-        # in session mode the conversation is natively threaded.
-        if self.history_mode != "session":
-            prompt += """
-
-<history_handling>
-Previous messages in this conversation have already been handled.
-Always focus exclusively on the latest user message as the current, active request.
-Use earlier messages only to understand context, resolve references (e.g. "that", "it",
-"the one I mentioned"), and maintain conversational continuity.
-</history_handling>"""
-
-        if memories:
-            prompt += f"""
-
-<memories>
-{memories}
-</memories>"""
-
-        if skills_index:
-            prompt += f"""
-
-<available_skills>
-{skills_index}
-</available_skills>"""
-
-        if reflections:
-            prompt += f"""
-
-<task_reflections>
-{reflections}
-</task_reflections>"""
-
-        if decomposed_goal:
-            prompt += f"""
-
-<execution_plan>
-The user's request has been analysed and broken into the following sub-goals.
-Follow this plan step-by-step, completing each sub-goal in order (respecting
-dependencies). Report progress as you go.
-
-{decomposed_goal.format_for_prompt()}
-</execution_plan>"""
-
-        return prompt
+    def get_recent_system_prompts(self) -> list[dict[str, str]]:
+        """Return recent captured system prompts for admin debug endpoints."""
+        return list(self.prompt_capture)
 
     def _extract_text(self, response) -> str:
         """Deprecated: retained for backward compatibility."""
