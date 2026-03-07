@@ -16,7 +16,7 @@ import secrets
 import urllib.parse
 from base64 import urlsafe_b64encode
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -29,7 +29,13 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
 from core.config_store import ConfigStore
+from core.goal_decomposition import classify_complexity, decompose_goal
 from core.llm import LLMClient
+from core.prompt_builder import (
+    DEFAULT_HISTORY_HANDLING_BLOCK,
+    DEFAULT_TOOL_USAGE_BLOCK,
+    build_prompt_sections,
+)
 from core.wacli import WacliManager
 
 if TYPE_CHECKING:
@@ -432,6 +438,12 @@ class EmailProvidersIn(BaseModel):
     providers: list[dict[str, str]]
 
 
+class PromptPreviewIn(BaseModel):
+    message: str = ""
+    include_memories: bool = True
+    include_reflections: bool = True
+
+
 # ---------------------------------------------------------------------------
 # Auth dependency
 # ---------------------------------------------------------------------------
@@ -532,6 +544,7 @@ def create_admin_app(
     _VOICE_PREFIX = "voice."
     _HISTORY_PREFIX = "history."
     _EMAIL_PREFIX = "email."
+    _PROMPT_PREFIX = "prompt."
 
     def _is_managed_key(key: str) -> bool:
         """Return True if this key is managed by a dedicated tab (not Config)."""
@@ -548,6 +561,7 @@ def create_admin_app(
             _VOICE_PREFIX,
             _HISTORY_PREFIX,
             _EMAIL_PREFIX,
+            _PROMPT_PREFIX,
         ):
             if key.startswith(prefix):
                 return True
@@ -787,6 +801,12 @@ def create_admin_app(
         tr_enabled = tr_enabled if tr_enabled is not None else "true"
         tr_provider = await config_store.get("task_reflection.provider") or "anthropic"
         tr_model = await config_store.get("task_reflection.model") or "claude-haiku-4-5"
+        prompt_tool_usage_override = await config_store.get("prompt.tool_usage_override") or ""
+        prompt_history_override = await config_store.get("prompt.history_handling_override") or ""
+        prompt_capture_enabled = await config_store.get("admin.capture_prompts")
+        prompt_capture_enabled = False
+        if prompt_capture_enabled is not None:
+            prompt_capture_enabled = str(prompt_capture_enabled).lower() == "true"
         return _render_partial(
             "partials/llm.html",
             provider=provider,
@@ -810,6 +830,11 @@ def create_admin_app(
             tr_enabled=tr_enabled,
             tr_provider=tr_provider,
             tr_model=tr_model,
+            prompt_tool_usage_override=prompt_tool_usage_override,
+            prompt_history_override=prompt_history_override,
+            default_tool_usage=DEFAULT_TOOL_USAGE_BLOCK,
+            default_history_handling=DEFAULT_HISTORY_HANDLING_BLOCK,
+            prompt_capture_enabled=prompt_capture_enabled,
         )
 
     @app.get("/partials/search", dependencies=[Depends(auth)])
@@ -1161,6 +1186,116 @@ def create_admin_app(
             except Exception:
                 log.exception("Failed to apply updated config to running agent")
         return {"updated": list(body.values.keys())}
+
+    @app.post("/debug/system-prompt/preview", dependencies=[Depends(auth)])
+    async def system_prompt_preview(body: PromptPreviewIn) -> dict:
+        message = body.message.strip()
+        config = await config_store.export_to_config()
+
+        skills_store = await _skills_store_from_config(config_store)
+        await skills_store.ensure_seeded()
+        skills = await skills_store.list_skills()
+        skill_lines = []
+        for skill in skills:
+            summary = str(skill.get("summary", "")).strip()
+            name = str(skill.get("name", "")).strip()
+            if not name:
+                continue
+            if summary:
+                skill_lines.append(f"- {name}: {summary}")
+            else:
+                skill_lines.append(f"- {name}")
+        skills_index = "\n".join(skill_lines)
+
+        memories = ""
+        if body.include_memories:
+            if agent_state.agent:
+                memories = await agent_state.agent.memory.format_for_prompt()
+            else:
+                from core.memory import MemoryStore
+
+                memories = await MemoryStore(
+                    db_path=config.memory.db_path,
+                    long_term_limit=config.memory.long_term_limit,
+                ).format_for_prompt()
+
+        reflections = ""
+        if body.include_reflections and config.task_reflection.enabled:
+            if agent_state.agent:
+                reflections = await agent_state.agent.reflections.format_for_prompt()
+            else:
+                from core.task_reflection import ReflectionStore
+
+                reflections = await ReflectionStore(
+                    db_path=config.task_reflection.db_path,
+                    max_reflections=config.task_reflection.max_reflections,
+                ).format_for_prompt()
+
+        decomposed_goal = None
+        if message and config.goal_decomposition.enabled:
+            try:
+                if agent_state.agent and hasattr(agent_state.agent, "_background_llm"):
+                    llm = agent_state.agent._background_llm(config.goal_decomposition.provider)
+                else:
+                    provider = config.goal_decomposition.provider
+                    llm = LLMClient(
+                        provider=provider,
+                        api_key=getattr(config.agent, f"{provider}_api_key", ""),
+                        base_url=getattr(
+                            config.agent,
+                            f"{provider}_base_url",
+                            None,
+                        ),
+                    )
+                gd_model = config.goal_decomposition.model
+                is_complex = await classify_complexity(llm, gd_model, message)
+                if is_complex:
+                    decomposed_goal = await decompose_goal(llm, gd_model, message)
+            except Exception:
+                log.exception("Prompt preview decomposition failed")
+
+        history_mode = config.history.mode
+        if agent_state.agent and hasattr(agent_state.agent, "history_mode"):
+            history_mode = cast(str, agent_state.agent.history_mode)
+
+        sections = build_prompt_sections(
+            config=config,
+            history_mode=history_mode,
+            skills_index=skills_index,
+            memories=memories,
+            reflections=reflections,
+            decomposed_goal=decomposed_goal,
+            include_memories=body.include_memories,
+            include_reflections=body.include_reflections,
+        )
+        full_prompt = sections.full_prompt
+        section_map = sections.as_dict()
+        token_estimate = max(1, len(full_prompt) // 4) if full_prompt else 0
+        return {
+            "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "history_mode": history_mode,
+            "token_estimate": token_estimate,
+            "full_prompt": full_prompt,
+            "sections": section_map,
+            "lengths": {k: len(v or "") for k, v in section_map.items()},
+            "flags": {
+                "include_memories": body.include_memories,
+                "include_reflections": body.include_reflections,
+                "decomposition_applied": decomposed_goal is not None,
+            },
+        }
+
+    @app.get("/debug/system-prompt/recent", dependencies=[Depends(auth)])
+    async def system_prompt_recent() -> dict:
+        agent = agent_state.agent
+        if not agent:
+            return {"enabled": False, "items": []}
+        agent_cfg = getattr(agent, "config", None)
+        admin_cfg = getattr(agent_cfg, "admin", None)
+        capture_cfg = bool(getattr(admin_cfg, "capture_prompts", False))
+        enabled = capture_cfg and hasattr(agent, "get_recent_system_prompts")
+        items = agent.get_recent_system_prompts() if enabled else []
+        return {"enabled": enabled, "items": items}
 
     @app.post("/admin/password", dependencies=[Depends(auth)])
     async def change_admin_password(body: PasswordChangeIn) -> dict:

@@ -9,6 +9,7 @@ from typing import Any, cast
 from fastapi.testclient import TestClient
 
 from api.admin import AgentState, _should_capture_log_record, create_admin_app
+from core.config import Config
 from core.config_store import ConfigStore
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,35 @@ class _ConfigStoreStub:
     async def set_many(self, values: dict) -> None:
         self._last_set = values
         self._data.update(values)
+
+    async def export_to_config(self) -> Config:
+        cfg = Config()
+        for key, value in self._data.items():
+            if key == "agent.name":
+                cfg.agent.name = value
+            elif key == "agent.owner_name":
+                cfg.agent.owner_name = value
+            elif key == "agent.llm_provider":
+                cfg.agent.llm_provider = value
+            elif key == "agent.model":
+                cfg.agent.model = value
+            elif key == "agent.timezone":
+                cfg.agent.timezone = value
+            elif key == "agent.character":
+                cfg.agent.character = value
+            elif key == "agent.personalia":
+                cfg.agent.personalia = value
+            elif key == "you.personalia":
+                cfg.you.personalia = value
+            elif key == "history.mode":
+                cfg.history.mode = value
+            elif key == "prompt.tool_usage_override":
+                cfg.prompt.tool_usage_override = value
+            elif key == "prompt.history_handling_override":
+                cfg.prompt.history_handling_override = value
+            elif key == "admin.capture_prompts":
+                cfg.admin.capture_prompts = str(value).lower() == "true"
+        return cfg
 
     async def verify_admin_password(self, password: str) -> bool:
         return password == "secret"
@@ -266,6 +296,7 @@ class TestPartialRoutes:
             "/partials/status",
             "/partials/identity",
             "/partials/you",
+            "/partials/llm",
             "/partials/calendars",
             "/partials/history",
             "/partials/permissions",
@@ -471,6 +502,44 @@ class TestConfigAPI:
         assert resp.status_code == 200
         assert resp.json()["updated"] == "you.personalia"
         assert store._data.get("you.personalia") == "Loves hiking and coffee"
+
+    def test_preview_system_prompt(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        store._data["agent.name"] = "Clio"
+        store._data["agent.owner_name"] = "Matteo"
+        store._data["agent.character"] = "# Character"
+        store._data["agent.personalia"] = "# Personalia"
+        store._data["you.personalia"] = "Likes espresso"
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
+        client = TestClient(app, follow_redirects=False)
+
+        resp = client.post(
+            "/debug/system-prompt/preview",
+            json={
+                "message": "Plan my week",
+                "include_memories": False,
+                "include_reflections": False,
+            },
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "full_prompt" in data
+        assert "sections" in data
+        assert "tool_usage" in data["sections"]
+        assert "You are" in data["full_prompt"]
+
+    def test_recent_system_prompts_when_no_agent(self):
+        store = _ConfigStoreStub(setup_complete=True)
+        agent_state = AgentState(agent=None)
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
+        client = TestClient(app, follow_redirects=False)
+        resp = client.get("/debug/system-prompt/recent", headers=AUTH)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["enabled"] is False
+        assert data["items"] == []
 
     def test_save_calendar_providers(self):
         store = _ConfigStoreStub(setup_complete=True)
