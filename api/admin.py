@@ -2207,6 +2207,23 @@ def create_admin_app(
             return await _test_tavily(payload.get("api_key", ""))
         return {"ok": False, "error": f"Unknown service: {service}"}
 
+    @app.post("/setup/list-models")
+    async def list_models(request: Request) -> dict:
+        payload = await request.json()
+        service = payload.get("service", "")
+        api_key = payload.get("api_key", "")
+        base_url = payload.get("base_url")
+
+        if service == "anthropic":
+            return await _list_models_anthropic(api_key)
+        if service == "openai":
+            return await _list_models_openai(api_key, base_url)
+        if service == "google":
+            return await _list_models_openai(api_key, base_url, strip_prefix="models/")
+        if service in ("grok", "deepseek"):
+            return await _list_models_openai(api_key, base_url)
+        return {"ok": False, "error": f"Unknown service: {service}"}
+
     return app, auth
 
 
@@ -2261,6 +2278,48 @@ async def _test_openai(api_key: str, base_url: str | None, model: str = "gpt-4o-
         )
         text = response.choices[0].message.content or ""
         return {"ok": True, "response": text}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _list_models_anthropic(api_key: str) -> dict:
+    if not api_key:
+        return {"ok": False, "error": "API key is empty"}
+    try:
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(api_key=api_key)
+        ids: list[str] = []
+        async for model in client.models.list(limit=1000):
+            mid = getattr(model, "id", "")
+            if mid:
+                ids.append(mid)
+        return {"ok": True, "models": ids}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _list_models_openai(
+    api_key: str, base_url: str | None, strip_prefix: str | None = None
+) -> dict:
+    if not api_key:
+        return {"ok": False, "error": "API key is empty"}
+    try:
+        import importlib
+
+        module = importlib.import_module("openai")
+        client_class = cast(Any, getattr(module, "AsyncOpenAI"))
+        client = cast(Any, client_class)(api_key=api_key, base_url=base_url or None)
+        resp = await client.models.list()
+        ids = []
+        for model in resp.data:
+            mid = getattr(model, "id", "")
+            if strip_prefix and mid.startswith(strip_prefix):
+                mid = mid[len(strip_prefix) :]
+            if mid:
+                ids.append(mid)
+        ids.sort()
+        return {"ok": True, "models": ids}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 

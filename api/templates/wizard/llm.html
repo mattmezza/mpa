@@ -31,13 +31,49 @@
       {value: 'deepseek-reasoner', label: 'deepseek-reasoner'}
     ]
   },
+  fetchedModels: {anthropic: [], openai: [], google: [], grok: [], deepseek: []},
+  fetchingModels: {anthropic: false, openai: false, google: false, grok: false, deepseek: false},
+  fetchModelsResult: {anthropic: '', openai: '', google: '', grok: '', deepseek: ''},
   init() {
     const savedModel = this.model;
     this.$nextTick(() => { this.model = savedModel; });
   },
+  modelOptions(prov) {
+    const fetched = this.fetchedModels[prov];
+    if (fetched && fetched.length) { return fetched.map(id => ({value: id, label: id})); }
+    return this.models[prov] || [];
+  },
   resetModel() {
-    const list = this.models[this.provider] || [];
+    if (this.model) return;
+    const list = this.modelOptions(this.provider);
     if (list.length) { this.model = list[0].value; }
+  },
+  fetchModels(service, apiKey, baseUrl) {
+    if (!apiKey) { this.fetchModelsResult[service] = 'Enter an API key first'; return; }
+    this.fetchingModels[service] = true;
+    this.fetchModelsResult[service] = '';
+    fetch('/setup/list-models', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({service: service, api_key: apiKey, base_url: baseUrl || undefined})
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok && Array.isArray(d.models)) {
+          this.fetchedModels[service] = d.models;
+          this.fetchModelsResult[service] = 'Loaded ' + d.models.length + ' models';
+        } else {
+          this.fetchModelsResult[service] = 'Failed: ' + (d.error || 'unknown');
+        }
+      })
+      .catch(e => { this.fetchModelsResult[service] = 'Error: ' + e.message; })
+      .finally(() => { this.fetchingModels[service] = false; });
+  },
+  copyModels(service) {
+    const fetched = this.fetchedModels[service];
+    const list = (fetched && fetched.length) ? fetched : (this.models[service] || []).map(m => m.value);
+    if (!list.length) { return; }
+    navigator.clipboard.writeText(list.join('\n'));
   }
 }">
   <h2 class="text-base mb-3">LLM Provider</h2>
@@ -56,11 +92,14 @@
     </select>
 
   <label class="label mt-3" for="w-model">Model</label>
-  <select class="select" id="w-model" name="model" x-model="model">
-    <template x-for="item in (models[provider] || [])" :key="item.value">
-      <option :value="item.value" x-text="item.label"></option>
+  <input type="text" class="input" id="w-model" name="model" x-model="model"
+         list="dl-w-model" placeholder="Type or pick a model">
+  <datalist id="dl-w-model">
+    <template x-for="item in modelOptions(provider)" :key="item.value">
+      <option :value="item.value"></option>
     </template>
-  </select>
+  </datalist>
+  <p class="hint">Type any model id, or pick from the list. Use “Fetch models” in the provider section below to load the live list.</p>
 
   </div>
 
@@ -96,9 +135,18 @@
         <span x-show="testing" class="spinner mr-1"></span>
         Test connection
       </button>
+      <button class="btn ml-2" type="button" :disabled="fetchingModels.anthropic"
+              @click="fetchModels('anthropic', document.getElementById('w-anthropic-key').value, null)">
+        <span x-show="!fetchingModels.anthropic">Fetch models</span>
+        <span x-show="fetchingModels.anthropic">Fetching...</span>
+      </button>
+      <button class="btn ml-2" type="button" @click="copyModels('anthropic')">Copy list</button>
     </div>
     <template x-if="testResults.anthropic">
       <div :class="tests.anthropic ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.anthropic"></div>
+    </template>
+    <template x-if="fetchModelsResult.anthropic">
+      <div class="hint mt-1" x-text="fetchModelsResult.anthropic"></div>
     </template>
   </div>
 
@@ -138,9 +186,18 @@
         <span x-show="testing" class="spinner mr-1"></span>
         Test connection
       </button>
+      <button class="btn ml-2" type="button" :disabled="fetchingModels.openai"
+              @click="fetchModels('openai', document.getElementById('w-openai-key').value, document.getElementById('w-openai-base-url').value)">
+        <span x-show="!fetchingModels.openai">Fetch models</span>
+        <span x-show="fetchingModels.openai">Fetching...</span>
+      </button>
+      <button class="btn ml-2" type="button" @click="copyModels('openai')">Copy list</button>
     </div>
     <template x-if="testResults.openai">
       <div :class="tests.openai ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.openai"></div>
+    </template>
+    <template x-if="fetchModelsResult.openai">
+      <div class="hint mt-1" x-text="fetchModelsResult.openai"></div>
     </template>
   </div>
 
@@ -180,9 +237,18 @@
         <span x-show="testing" class="spinner mr-1"></span>
         Test connection
       </button>
+      <button class="btn ml-2" type="button" :disabled="fetchingModels.google"
+              @click="fetchModels('google', document.getElementById('w-google-key').value, document.getElementById('w-google-base-url').value || 'https://generativelanguage.googleapis.com/v1beta/openai')">
+        <span x-show="!fetchingModels.google">Fetch models</span>
+        <span x-show="fetchingModels.google">Fetching...</span>
+      </button>
+      <button class="btn ml-2" type="button" @click="copyModels('google')">Copy list</button>
     </div>
     <template x-if="testResults.google">
       <div :class="tests.google ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.google"></div>
+    </template>
+    <template x-if="fetchModelsResult.google">
+      <div class="hint mt-1" x-text="fetchModelsResult.google"></div>
     </template>
   </div>
 
@@ -222,9 +288,18 @@
         <span x-show="testing" class="spinner mr-1"></span>
         Test connection
       </button>
+      <button class="btn ml-2" type="button" :disabled="fetchingModels.grok"
+              @click="fetchModels('grok', document.getElementById('w-grok-key').value, document.getElementById('w-grok-base-url').value || 'https://api.x.ai/v1')">
+        <span x-show="!fetchingModels.grok">Fetch models</span>
+        <span x-show="fetchingModels.grok">Fetching...</span>
+      </button>
+      <button class="btn ml-2" type="button" @click="copyModels('grok')">Copy list</button>
     </div>
     <template x-if="testResults.grok">
       <div :class="tests.grok ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.grok"></div>
+    </template>
+    <template x-if="fetchModelsResult.grok">
+      <div class="hint mt-1" x-text="fetchModelsResult.grok"></div>
     </template>
   </div>
 
@@ -264,9 +339,18 @@
         <span x-show="testing" class="spinner mr-1"></span>
         Test connection
       </button>
+      <button class="btn ml-2" type="button" :disabled="fetchingModels.deepseek"
+              @click="fetchModels('deepseek', document.getElementById('w-deepseek-key').value, document.getElementById('w-deepseek-base-url').value || 'https://api.deepseek.com')">
+        <span x-show="!fetchingModels.deepseek">Fetch models</span>
+        <span x-show="fetchingModels.deepseek">Fetching...</span>
+      </button>
+      <button class="btn ml-2" type="button" @click="copyModels('deepseek')">Copy list</button>
     </div>
     <template x-if="testResults.deepseek">
       <div :class="tests.deepseek ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.deepseek"></div>
+    </template>
+    <template x-if="fetchModelsResult.deepseek">
+      <div class="hint mt-1" x-text="fetchModelsResult.deepseek"></div>
     </template>
   </div>
 

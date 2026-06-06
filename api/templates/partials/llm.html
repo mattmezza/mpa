@@ -164,12 +164,14 @@
 
       <div>
         <label class="label">Model</label>
-        <select class="input-sm" style="max-width:500px" x-model="model">
-          <template x-for="item in (models[provider] || [])" :key="item.value">
-            <option :value="item.value" :selected="item.value === model" x-text="item.label"></option>
+        <input type="text" class="input-sm" style="max-width:500px" x-model="model"
+               list="dl-model-main" placeholder="Type or pick a model">
+        <datalist id="dl-model-main">
+          <template x-for="item in modelOptions(provider)" :key="'main-' + item.value">
+            <option :value="item.value"></option>
           </template>
-        </select>
-        <p class="text-muted text-xs mt-1">Pick a model that matches your provider.</p>
+        </datalist>
+        <p class="text-muted text-xs mt-1">Type any model id, or pick from the list. Use “Fetch models” in the provider card below to load the live list from the API.</p>
       </div>
     </form>
 
@@ -227,11 +229,13 @@
       </div>
       <div>
         <label class="label">Extraction model</label>
-        <select class="input-sm" style="max-width:500px" x-model="extractionModel">
-          <template x-for="item in (models[extractionProvider] || [])" :key="'ext-' + item.value">
-            <option :value="item.value" :selected="item.value === extractionModel" x-text="item.label"></option>
+        <input type="text" class="input-sm" style="max-width:500px" x-model="extractionModel"
+               list="dl-model-ext" placeholder="Type or pick a model">
+        <datalist id="dl-model-ext">
+          <template x-for="item in modelOptions(extractionProvider)" :key="'ext-' + item.value">
+            <option :value="item.value"></option>
           </template>
-        </select>
+        </datalist>
         <p class="text-muted text-xs mt-1">Model used to extract memories from conversations.</p>
       </div>
 
@@ -247,11 +251,13 @@
       </div>
       <div>
         <label class="label">Consolidation model</label>
-        <select class="input-sm" style="max-width:500px" x-model="consolidationModel">
-          <template x-for="item in (models[consolidationProvider] || [])" :key="'con-' + item.value">
-            <option :value="item.value" :selected="item.value === consolidationModel" x-text="item.label"></option>
+        <input type="text" class="input-sm" style="max-width:500px" x-model="consolidationModel"
+               list="dl-model-con" placeholder="Type or pick a model">
+        <datalist id="dl-model-con">
+          <template x-for="item in modelOptions(consolidationProvider)" :key="'con-' + item.value">
+            <option :value="item.value"></option>
           </template>
-        </select>
+        </datalist>
         <p class="text-muted text-xs mt-1">Model used to consolidate and merge duplicate memories.</p>
       </div>
     </form>
@@ -307,11 +313,13 @@
       </div>
       <div>
         <label class="label">Model</label>
-        <select class="input-sm" style="max-width:500px" x-model="gdModel" :disabled="!gdEnabled">
-          <template x-for="item in (models[gdProvider] || [])" :key="'gd-m-' + item.value">
-            <option :value="item.value" :selected="item.value === gdModel" x-text="item.label"></option>
+        <input type="text" class="input-sm" style="max-width:500px" x-model="gdModel" :disabled="!gdEnabled"
+               list="dl-model-gd" placeholder="Type or pick a model">
+        <datalist id="dl-model-gd">
+          <template x-for="item in modelOptions(gdProvider)" :key="'gd-m-' + item.value">
+            <option :value="item.value"></option>
           </template>
-        </select>
+        </datalist>
         <p class="text-muted text-xs mt-1">Model used to classify message complexity and decompose goals.</p>
       </div>
     </form>
@@ -366,11 +374,13 @@
       </div>
       <div>
         <label class="label">Model</label>
-        <select class="input-sm" style="max-width:500px" x-model="trModel" :disabled="!trEnabled">
-          <template x-for="item in (models[trProvider] || [])" :key="'tr-m-' + item.value">
-            <option :value="item.value" :selected="item.value === trModel" x-text="item.label"></option>
+        <input type="text" class="input-sm" style="max-width:500px" x-model="trModel" :disabled="!trEnabled"
+               list="dl-model-tr" placeholder="Type or pick a model">
+        <datalist id="dl-model-tr">
+          <template x-for="item in modelOptions(trProvider)" :key="'tr-m-' + item.value">
+            <option :value="item.value"></option>
           </template>
-        </select>
+        </datalist>
         <p class="text-muted text-xs mt-1">Model used to reflect on completed tasks and extract lessons.</p>
       </div>
     </form>
@@ -423,9 +433,18 @@
             <span x-show="!testing.anthropic">Test connection</span>
             <span x-show="testing.anthropic">Testing...</span>
           </button>
+          <button class="btn btn-sm" type="button" :disabled="fetchingModels.anthropic || !apiKey"
+                  @click="fetchModels('anthropic')">
+            <span x-show="!fetchingModels.anthropic">Fetch models</span>
+            <span x-show="fetchingModels.anthropic">Fetching...</span>
+          </button>
+          <button class="btn btn-sm" type="button" @click="copyModels('anthropic')">Copy list</button>
         </div>
         <template x-if="testResults.anthropic">
           <div :class="tests.anthropic ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.anthropic"></div>
+        </template>
+        <template x-if="fetchModelsResult.anthropic">
+          <div class="text-muted text-xs mt-1" x-text="fetchModelsResult.anthropic"></div>
         </template>
       </div>
     </form>
@@ -475,9 +494,18 @@
             <span x-show="!testing.openai">Test connection</span>
             <span x-show="testing.openai">Testing...</span>
           </button>
+          <button class="btn btn-sm" type="button" :disabled="fetchingModels.openai || !openaiKey"
+                  @click="fetchModels('openai')">
+            <span x-show="!fetchingModels.openai">Fetch models</span>
+            <span x-show="fetchingModels.openai">Fetching...</span>
+          </button>
+          <button class="btn btn-sm" type="button" @click="copyModels('openai')">Copy list</button>
         </div>
         <template x-if="testResults.openai">
           <div :class="tests.openai ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.openai"></div>
+        </template>
+        <template x-if="fetchModelsResult.openai">
+          <div class="text-muted text-xs mt-1" x-text="fetchModelsResult.openai"></div>
         </template>
       </div>
     </form>
@@ -528,9 +556,18 @@
             <span x-show="!testing.google">Test connection</span>
             <span x-show="testing.google">Testing...</span>
           </button>
+          <button class="btn btn-sm" type="button" :disabled="fetchingModels.google || !googleKey"
+                  @click="fetchModels('google')">
+            <span x-show="!fetchingModels.google">Fetch models</span>
+            <span x-show="fetchingModels.google">Fetching...</span>
+          </button>
+          <button class="btn btn-sm" type="button" @click="copyModels('google')">Copy list</button>
         </div>
         <template x-if="testResults.google">
           <div :class="tests.google ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.google"></div>
+        </template>
+        <template x-if="fetchModelsResult.google">
+          <div class="text-muted text-xs mt-1" x-text="fetchModelsResult.google"></div>
         </template>
       </div>
     </form>
@@ -581,9 +618,18 @@
             <span x-show="!testing.grok">Test connection</span>
             <span x-show="testing.grok">Testing...</span>
           </button>
+          <button class="btn btn-sm" type="button" :disabled="fetchingModels.grok || !grokKey"
+                  @click="fetchModels('grok')">
+            <span x-show="!fetchingModels.grok">Fetch models</span>
+            <span x-show="fetchingModels.grok">Fetching...</span>
+          </button>
+          <button class="btn btn-sm" type="button" @click="copyModels('grok')">Copy list</button>
         </div>
         <template x-if="testResults.grok">
           <div :class="tests.grok ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.grok"></div>
+        </template>
+        <template x-if="fetchModelsResult.grok">
+          <div class="text-muted text-xs mt-1" x-text="fetchModelsResult.grok"></div>
         </template>
       </div>
     </form>
@@ -634,9 +680,18 @@
             <span x-show="!testing.deepseek">Test connection</span>
             <span x-show="testing.deepseek">Testing...</span>
           </button>
+          <button class="btn btn-sm" type="button" :disabled="fetchingModels.deepseek || !deepseekKey"
+                  @click="fetchModels('deepseek')">
+            <span x-show="!fetchingModels.deepseek">Fetch models</span>
+            <span x-show="fetchingModels.deepseek">Fetching...</span>
+          </button>
+          <button class="btn btn-sm" type="button" @click="copyModels('deepseek')">Copy list</button>
         </div>
         <template x-if="testResults.deepseek">
           <div :class="tests.deepseek ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.deepseek"></div>
+        </template>
+        <template x-if="fetchModelsResult.deepseek">
+          <div class="text-muted text-xs mt-1" x-text="fetchModelsResult.deepseek"></div>
         </template>
       </div>
     </form>
