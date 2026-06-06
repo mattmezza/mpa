@@ -126,9 +126,14 @@ clean:
 	rm -rf .venv __pycache__ .pytest_cache .ruff_cache
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-# Create a GitHub release and tag
+# Create a GitHub release and tag (bumps pyproject.toml version to match)
 release:
 	@test -n "$(name)" || (echo "Usage: make release name=v0.x" && exit 1)
+	@ver=$$(echo "$(name)" | sed 's/^v//'); \
+	case "$$ver" in *.*.*) ;; *.*) ver="$$ver.0" ;; *) ver="$$ver.0.0" ;; esac; \
+	sed -i.bak -E "s/^version = \".*\"/version = \"$$ver\"/" pyproject.toml && rm -f pyproject.toml.bak; \
+	echo "Set pyproject.toml version to $$ver"
+	@git diff --quiet pyproject.toml || (git add pyproject.toml && git commit -m "chore: bump version to $(name)")
 	git push
 	gh release create "$(name)" --generate-notes --latest
 

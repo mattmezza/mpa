@@ -28,7 +28,7 @@ Overview of agent status, active channels, and quick stats.
 Edit agent settings without touching config files:
 
 - **Identity** — agent name and owner name
-- **LLM** — provider, model, and API key configuration
+- **LLM** — provider, model, and API key configuration. The model field is free-text (enter any model id the provider supports); a **Fetch models** button on each provider card loads the live model list from the provider API into the field's autocomplete, and **Copy list** copies all available ids
 - **Channels** — enable/disable Telegram and WhatsApp
 - **Calendar** — manage CalDAV providers
 - **Contacts** — manage contact providers
@@ -77,7 +77,7 @@ On first boot, the admin UI presents a step-by-step setup wizard:
 
 1. **Welcome** — overview
 2. **Identity** — name the agent and set the owner
-3. **LLM** — choose provider and enter API key
+3. **LLM** — choose provider, enter API key, and pick a model (type any model id or use **Fetch models** to load the live list)
 4. **Telegram** — configure bot token and allowed users
 5. **WhatsApp** — optional WhatsApp setup
 6. **Email** — configure email accounts
