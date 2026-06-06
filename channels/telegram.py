@@ -13,6 +13,8 @@ from telegram.constants import ChatAction
 from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
+from channels.markdown_tg import to_telegram_html
+
 if TYPE_CHECKING:
     from core.agent import AgentCore
     from core.config import TelegramConfig
@@ -200,12 +202,16 @@ class TelegramChannel:
 
     async def send(self, chat_id: int | str, text: str) -> None:
         """Send a message to a specific chat (used by scheduler, send_message tool, etc.)."""
-        parse_mode = "HTML" if _HTML_TAG_RE.search(text) else None
+        # Agent output is Markdown; render to Telegram HTML unless it already carries HTML tags.
+        if _HTML_TAG_RE.search(text):
+            html = text
+        else:
+            html = to_telegram_html(text)
         try:
-            await self.app.bot.send_message(chat_id, text, parse_mode=parse_mode)
+            await self.app.bot.send_message(chat_id, html, parse_mode="HTML")
         except BadRequest as exc:
-            if parse_mode and "parse entities" in str(exc).lower():
-                log.warning("Telegram HTML parse failed; sending without formatting: %s", exc)
+            if "parse entities" in str(exc).lower():
+                log.warning("Telegram HTML parse failed; sending as plain text: %s", exc)
                 await self.app.bot.send_message(chat_id, text)
                 return
             raise
