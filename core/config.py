@@ -122,6 +122,7 @@ class SchedulerConfig(BaseModel):
 class AdminConfig(BaseModel):
     port: int = 8000
     api_key: str = ""
+    capture_prompts: bool = False
 
 
 class HistoryConfig(BaseModel):
@@ -165,6 +166,11 @@ class YouConfig(BaseModel):
     personalia: str = ""
 
 
+class PromptConfig(BaseModel):
+    tool_usage_override: str = ""
+    history_handling_override: str = ""
+
+
 class Config(BaseModel):
     agent: AgentConfig = AgentConfig()
     channels: ChannelsConfig = ChannelsConfig()
@@ -178,6 +184,7 @@ class Config(BaseModel):
     task_reflection: TaskReflectionConfig = TaskReflectionConfig()
     search: SearchConfig = SearchConfig()
     you: YouConfig = YouConfig()
+    prompt: PromptConfig = PromptConfig()
 
 
 def load_config(path: str | Path = "config.yml") -> Config:
