@@ -34,7 +34,14 @@ Edit agent settings without touching config files:
 - **Contacts** — manage contact providers
 - **Email** — Himalaya configuration
 - **Search** — Tavily API configuration
+- **Tools** — enable optional external CLI tools the agent can use
 - **Voice** — STT/TTS settings
+
+### Tools
+
+Enable optional external CLI tools. When a tool is enabled it is authenticated and advertised to the assistant in its system prompt; when disabled it stays hidden, keeping the prompt lean.
+
+- **GitHub CLI (`gh`)** — let the agent query and act on GitHub (issues, PRs, repos, `gh api`, search). Provide a [Personal Access Token](https://github.com/settings/tokens); it is injected as `GH_TOKEN` so `gh` is authenticated non-interactively. Read operations (`list`/`view`/`status`/`api`/`search`) run without asking; creating issues, PRs, or releases ask for confirmation first. Use **Test token** to verify the token against the GitHub API. In session history mode, a newly enabled tool is advertised starting from the next `/new` conversation.
 
 ### Skills
 
