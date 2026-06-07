@@ -1098,7 +1098,14 @@ You can also trigger consolidation manually via the admin API: `POST /memory/con
 
 #### Semantic retrieval & relevance-ranked injection (Tier 2)
 
-Embeddings are **optional and off by default** — the pipeline runs on Tier-1 lexical retrieval with no extra dependency or network call. When `memory.embedding.enabled` is set, each long-term memory gets a vector from an OpenAI-compatible `/embeddings` endpoint, stored as a packed float32 blob in the `embedding` column. Similarity is brute-force cosine in Python (no native SQLite extension, so it behaves identically locally and in the container; trivial at <1k rows).
+Each long-term memory gets a vector embedding, stored as a packed float32 blob in the `embedding` column. Similarity is brute-force cosine in Python (no native SQLite extension, so it behaves identically locally and in the container; trivial at <1k rows).
+
+**Backends** (`memory.embedding.provider`):
+
+- `local` (default) — runs a small on-device model via `fastembed` (`BAAI/bge-small-en-v1.5`, 384-dim, ~130MB ONNX/CPU). Private (memory never leaves the box), no API key, free. The model is **prefetched at Docker build** into `/app/models` (outside the data volume) so the first call has no download latency and the container works offline. The model loads lazily on first use, in a worker thread. A "Download model" button in the admin Memory tab (and `python -m core.embeddings prefetch`) fetches it on demand.
+- `openai` / `google` (or any OpenAI-compatible `/embeddings` endpoint via `base_url`) — calls a remote API. Needs a key (falls back to the matching agent provider key); a few cents/year at typical volume, but memory text is sent to the provider. Note: DeepSeek has no embeddings endpoint.
+
+Set `memory.embedding.enabled: false` to fall back to Tier-1 lexical (word-overlap) retrieval — still works, no model needed. All of this is configurable from the **admin Memory tab** (enable toggle, backend, model, top-k, download/test buttons) and applies live to the running agent.
 
 With embeddings on:
 
@@ -1118,9 +1125,10 @@ These behaviours are configured in the `memory` section (see `config.yml.example
 ```yaml
 memory:
   embedding:
-    enabled: false
-    provider: "openai"
-    model: "text-embedding-3-small"
+    enabled: true
+    provider: "local"                # "local" | "openai" | "google"
+    model: "BAAI/bge-small-en-v1.5"  # local model; API e.g. text-embedding-3-small
+    cache_dir: "models"              # local model store (bundled in the image)
     injection_top_k: 12
   default_importance: 5.0
   archive_after_days: 90

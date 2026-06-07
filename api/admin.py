@@ -906,25 +906,47 @@ def create_admin_app(
             max_results=max_results,
         )
 
-    @app.get("/partials/memory", dependencies=[Depends(auth)])
-    async def partial_memory() -> HTMLResponse:
-        """Memory tab partial."""
-        # Memory config
-        memory_long_term_limit = await config_store.get("memory.long_term_limit") or "50"
+    async def _render_memory_partial() -> HTMLResponse:
+        """Build the Memory tab partial (config + stored memories).
 
-        # Memory data — read directly from DB (works even when agent is stopped)
+        Shared by the tab load and the post-delete refresh so both render the
+        full embedding/lifecycle config, not just the memory tables.
+        """
         import aiosqlite
 
+        async def _cfg(key: str, default: str) -> str:
+            val = await config_store.get(key)
+            return default if val is None or val == "" else str(val)
+
+        async def _bool(key: str, default: str) -> str:
+            val = await config_store.get(key)
+            return default if val is None else str(val).lower()
+
+        ctx: dict[str, object] = {
+            "memory_long_term_limit": await _cfg("memory.long_term_limit", "50"),
+            "emb_enabled": await _bool("memory.embedding.enabled", "true"),
+            "emb_provider": await _cfg("memory.embedding.provider", "local"),
+            "emb_model": await _cfg("memory.embedding.model", "BAAI/bge-small-en-v1.5"),
+            "emb_base_url": await _cfg("memory.embedding.base_url", ""),
+            "emb_top_k": await _cfg("memory.embedding.injection_top_k", "12"),
+            "hygiene_enabled": await _bool("memory.hygiene_enabled", "true"),
+            "default_importance": await _cfg("memory.default_importance", "5.0"),
+            "archive_after_days": await _cfg("memory.archive_after_days", "90"),
+            "archive_max_importance": await _cfg("memory.archive_max_importance", "4.0"),
+            "archive_min_idle_days": await _cfg("memory.archive_min_idle_days", "45"),
+            "hygiene_threshold": await _cfg("memory.hygiene_similarity_threshold", "0.45"),
+        }
+
+        # Memory data — read directly from DB (works even when agent is stopped)
         memory_db = await config_store.get("memory.db_path") or "data/memory.db"
-        long_term = []
-        short_term = []
+        long_term: list[dict] = []
+        short_term: list[dict] = []
         if Path(memory_db).exists():
             cols = "id, category, subject, content, source, confidence, created_at, updated_at"
             async with aiosqlite.connect(memory_db) as db:
                 db.row_factory = aiosqlite.Row
                 cursor = await db.execute(f"SELECT {cols} FROM long_term ORDER BY updated_at DESC")
                 long_term = [dict(row) for row in await cursor.fetchall()]
-
                 cursor = await db.execute(
                     "SELECT id, content, context, expires_at, created_at "
                     "FROM short_term WHERE expires_at > datetime('now') "
@@ -933,11 +955,13 @@ def create_admin_app(
                 short_term = [dict(row) for row in await cursor.fetchall()]
 
         return _render_partial(
-            "partials/memory.html",
-            long_term=long_term,
-            short_term=short_term,
-            memory_long_term_limit=memory_long_term_limit,
+            "partials/memory.html", long_term=long_term, short_term=short_term, **ctx
         )
+
+    @app.get("/partials/memory", dependencies=[Depends(auth)])
+    async def partial_memory() -> HTMLResponse:
+        """Memory tab partial."""
+        return await _render_memory_partial()
 
     @app.get("/partials/history", dependencies=[Depends(auth)])
     async def partial_history() -> HTMLResponse:
@@ -1243,7 +1267,18 @@ def create_admin_app(
                 agent.llm = LLMClient.from_agent_config(new_config.agent)
                 agent.executor.tool_env = tool_env(new_config)
                 agent.history_mode = new_config.history.mode
-                agent.memory.long_term_limit = new_config.memory.long_term_limit
+                mem_cfg = new_config.memory
+                agent.memory.long_term_limit = mem_cfg.long_term_limit
+                # Rebuild the embedder (lazy — no model load here) and refresh the
+                # Tier 3/4 lifecycle knobs so memory config changes apply live.
+                agent.memory.embedder = agent._build_embedder()
+                agent.memory.injection_top_k = mem_cfg.embedding.injection_top_k
+                agent.memory.default_importance = mem_cfg.default_importance
+                agent.memory.archive_after_days = mem_cfg.archive_after_days
+                agent.memory.archive_max_importance = mem_cfg.archive_max_importance
+                agent.memory.archive_min_idle_days = mem_cfg.archive_min_idle_days
+                agent.memory.hygiene_enabled = mem_cfg.hygiene_enabled
+                agent.memory.hygiene_similarity_threshold = mem_cfg.hygiene_similarity_threshold
                 agent.reflections.max_reflections = new_config.task_reflection.max_reflections
                 if new_config.search.enabled and new_config.search.api_key:
                     from tavily import TavilyClient
@@ -1965,27 +2000,90 @@ def create_admin_app(
             if cursor.rowcount == 0:
                 raise HTTPException(404, f"Memory {memory_id} not found in {tier}")
 
-        # Return refreshed memory partial
-        memory_long_term_limit = await config_store.get("memory.long_term_limit") or "50"
-        long_term = []
-        short_term = []
-        cols = "id, category, subject, content, source, confidence, created_at, updated_at"
-        async with aiosqlite.connect(agent.memory.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(f"SELECT {cols} FROM long_term ORDER BY updated_at DESC")
-            long_term = [dict(row) for row in await cursor.fetchall()]
-            cursor = await db.execute(
-                "SELECT id, content, context, expires_at, created_at "
-                "FROM short_term WHERE expires_at > datetime('now') "
-                "ORDER BY created_at DESC"
-            )
-            short_term = [dict(row) for row in await cursor.fetchall()]
-        return _render_partial(
-            "partials/memory.html",
-            long_term=long_term,
-            short_term=short_term,
-            memory_long_term_limit=memory_long_term_limit,
+        # Return refreshed memory partial (full config + tables)
+        return await _render_memory_partial()
+
+    @app.get("/memory/embedding/status", dependencies=[Depends(auth)])
+    async def embedding_status() -> dict:
+        """Report embedding config + whether a local model is already on disk."""
+        from core.embeddings import LOCAL_PROVIDERS
+
+        config = await config_store.export_to_config()
+        emb = config.memory.embedding
+        is_local = emb.provider in LOCAL_PROVIDERS
+        model_ready: bool | None = None
+        if is_local:
+            cache = Path(emb.cache_dir)
+            model_ready = cache.exists() and any(cache.rglob("*.onnx"))
+        return {
+            "enabled": emb.enabled,
+            "provider": emb.provider,
+            "model": emb.model,
+            "local": is_local,
+            "model_ready": model_ready,
+            "cache_dir": emb.cache_dir,
+        }
+
+    @app.post("/memory/embedding/prefetch", dependencies=[Depends(auth)])
+    async def embedding_prefetch() -> dict:
+        """Download the local embedding model now (also done at Docker build)."""
+        from core.embeddings import LOCAL_PROVIDERS, prefetch_local_model
+
+        config = await config_store.export_to_config()
+        emb = config.memory.embedding
+        if emb.provider not in LOCAL_PROVIDERS:
+            raise HTTPException(400, "Prefetch only applies to the local embedding provider")
+        try:
+            dim = await asyncio.to_thread(prefetch_local_model, emb.model, emb.cache_dir)
+        except Exception as exc:
+            log.exception("Embedding model prefetch failed")
+            raise HTTPException(500, f"Prefetch failed: {exc}") from exc
+        return {"ok": True, "model": emb.model, "dimensions": dim, "cache_dir": emb.cache_dir}
+
+    @app.post("/memory/embedding/test", dependencies=[Depends(auth)])
+    async def embedding_test() -> dict:
+        """Embed a few probe sentences and report dimension + a sanity cosine."""
+        from core.embeddings import (
+            LOCAL_PROVIDERS,
+            EmbeddingClient,
+            LocalEmbeddingClient,
+            cosine_similarity,
         )
+
+        config = await config_store.export_to_config()
+        emb = config.memory.embedding
+        try:
+            if emb.provider in LOCAL_PROVIDERS:
+                client: object = LocalEmbeddingClient(model=emb.model, cache_dir=emb.cache_dir)
+            else:
+                cfg = config.agent
+                api_key = emb.api_key or getattr(cfg, f"{emb.provider}_api_key", "")
+                base_url = emb.base_url or getattr(cfg, f"{emb.provider}_base_url", "") or None
+                if not api_key:
+                    raise HTTPException(400, f"No API key configured for provider {emb.provider}")
+                client = EmbeddingClient(
+                    provider=emb.provider,
+                    api_key=api_key,
+                    model=emb.model,
+                    base_url=base_url,
+                    dimensions=emb.dimensions,
+                )
+            probes = ["allergic to shellfish", "cannot eat prawns", "the weather is sunny today"]
+            vecs = await client.embed(probes)  # type: ignore[attr-defined]
+            if len(vecs) < 3 or not vecs[0]:
+                raise HTTPException(500, "Embedding returned no vectors")
+            return {
+                "ok": True,
+                "model": emb.model,
+                "dimensions": len(vecs[0]),
+                "similar_pair": round(cosine_similarity(vecs[0], vecs[1]), 3),
+                "unrelated_pair": round(cosine_similarity(vecs[0], vecs[2]), 3),
+            }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.exception("Embedding test failed")
+            raise HTTPException(500, f"Test failed: {exc}") from exc
 
     @app.post("/memory/consolidate", dependencies=[Depends(auth)])
     async def trigger_consolidation() -> HTMLResponse:

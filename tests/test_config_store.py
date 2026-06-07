@@ -31,6 +31,30 @@ def test_parse_value_handles_int_bool_json() -> None:
 
 
 @pytest.mark.asyncio
+async def test_embedding_config_roundtrips_to_nested_model(tmp_path) -> None:
+    """UI-saved flat memory.embedding.* keys reconstruct EmbeddingConfig."""
+    store = ConfigStore(db_path=str(tmp_path / "config.db"))
+    await store.set_many(
+        {
+            "memory.embedding.enabled": "false",
+            "memory.embedding.provider": "openai",
+            "memory.embedding.model": "text-embedding-3-small",
+            "memory.embedding.injection_top_k": "20",
+            "memory.hygiene_enabled": "false",
+            "memory.default_importance": "7.5",
+        }
+    )
+    config = await store.export_to_config()
+    emb = config.memory.embedding
+    assert emb.enabled is False
+    assert emb.provider == "openai"
+    assert emb.model == "text-embedding-3-small"
+    assert emb.injection_top_k == 20
+    assert config.memory.hygiene_enabled is False
+    assert config.memory.default_importance == 7.5
+
+
+@pytest.mark.asyncio
 async def test_set_get_delete(tmp_path) -> None:
     store = ConfigStore(db_path=str(tmp_path / "config.db"))
 
