@@ -155,6 +155,23 @@ class TaskReflectionConfig(BaseModel):
     max_reflections: int = 50  # max reflections to keep for prompt injection
 
 
+class CompactionConfig(BaseModel):
+    """Conversation compaction — summarise old turns when the context grows.
+
+    Only applies in session history mode. The threshold is evaluated against
+    the real token usage reported by the provider after each turn.
+    """
+
+    enabled: bool = True
+    provider: str = "anthropic"
+    model: str = "claude-haiku-4-5"
+    threshold_type: str = "percent"  # "percent" (of context window) or "tokens" (absolute)
+    threshold_percent: int = 80  # trigger at this % of the model's context window
+    threshold_tokens: int = 150000  # absolute trigger when threshold_type == "tokens"
+    context_window: int = 200000  # fallback window for % mode when the model is unknown
+    keep_recent_turns: int = 4  # most-recent user turns kept verbatim after compaction
+
+
 class SearchConfig(BaseModel):
     enabled: bool = False
     provider: str = "tavily"
@@ -171,6 +188,19 @@ class PromptConfig(BaseModel):
     history_handling_override: str = ""
 
 
+class GhToolConfig(BaseModel):
+    """GitHub CLI (`gh`) tool — auth via a Personal Access Token."""
+
+    enabled: bool = False
+    token: str = ""  # GitHub PAT, injected as GH_TOKEN when running `gh`
+
+
+class ToolsConfig(BaseModel):
+    """Optional external CLI tools the agent can use (see core/tools.py)."""
+
+    gh: GhToolConfig = GhToolConfig()
+
+
 class Config(BaseModel):
     agent: AgentConfig = AgentConfig()
     channels: ChannelsConfig = ChannelsConfig()
@@ -182,9 +212,11 @@ class Config(BaseModel):
     memory: MemoryConfig = MemoryConfig()
     goal_decomposition: GoalDecompositionConfig = GoalDecompositionConfig()
     task_reflection: TaskReflectionConfig = TaskReflectionConfig()
+    compaction: CompactionConfig = CompactionConfig()
     search: SearchConfig = SearchConfig()
     you: YouConfig = YouConfig()
     prompt: PromptConfig = PromptConfig()
+    tools: ToolsConfig = ToolsConfig()
 
 
 def load_config(path: str | Path = "config.yml") -> Config:

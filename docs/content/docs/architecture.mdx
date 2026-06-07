@@ -70,12 +70,14 @@ The agent becomes a **thin orchestrator**: it reads skill files, passes them to 
 The brain of MPA. Implements the LLM tool-use loop:
 
 1. Load conversation history
-2. Build system prompt (skills, character, personalia, memories)
-3. Call the LLM
-4. Handle tool calls with permission checks
-5. Save conversation turn and extract memories
+2. Build the static system prompt (skills, character, personalia, memories, active tools). In session mode this is snapshotted once per conversation (rebuilt after `/new`) and reused every turn, so the cacheable prefix stays stable; on Anthropic it is sent with a `cache_control` breakpoint so the tools + system prefix is not reprocessed each turn
+3. Inject the live date/time (and any per-request execution plan) at the start of the current user message — so the agent always knows "now" without mutating the cached prefix
+4. Call the LLM
+5. Handle tool calls with permission checks
+6. Save conversation turn and extract memories
+7. In session mode, if the provider-reported context size crosses the configured threshold, compact: summarize the oldest turns with a small model, keep recent turns verbatim, and notify the user with a system message (see `core/compaction.py`)
 
-The agent uses a single `run_command` meta-tool that executes any whitelisted CLI command, plus structured tools for safety-critical write operations (`send_email`, `send_message`, `create_calendar_event`).
+The agent uses a single `run_command` meta-tool that executes any whitelisted CLI command, plus structured tools for safety-critical write operations (`send_email`, `send_message`, `create_calendar_event`). Optional external tools (e.g. the GitHub `gh` CLI, configured under the **Tools** tab) are authenticated and advertised to the model only when enabled — see `core/tools.py`.
 
 ### LLM Provider (`core/llm.py`)
 

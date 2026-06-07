@@ -28,13 +28,20 @@ Overview of agent status, active channels, and quick stats.
 Edit agent settings without touching config files:
 
 - **Identity** — agent name and owner name
-- **LLM** — provider, model, and API key configuration. The model field is free-text (enter any model id the provider supports); a **Fetch models** button on each provider card loads the live model list from the provider API into the field's autocomplete, and **Copy list** copies all available ids
+- **LLM** — provider, model, and API key configuration. The model field is free-text (enter any model id the provider supports); a **Fetch models** button on each provider card loads the live model list from the provider API into the field's autocomplete, and **Copy list** copies all available ids. Also configures the background models for memory, goal decomposition, task reflection, and **history compaction** (the model used to summarize old conversation turns — see the History tab for the trigger threshold)
 - **Channels** — enable/disable Telegram and WhatsApp
 - **Calendar** — manage CalDAV providers
 - **Contacts** — manage contact providers
 - **Email** — Himalaya configuration
 - **Search** — Tavily API configuration
+- **Tools** — enable optional external CLI tools the agent can use
 - **Voice** — STT/TTS settings
+
+### Tools
+
+Enable optional external CLI tools. When a tool is enabled it is authenticated and advertised to the assistant in its system prompt; when disabled it stays hidden, keeping the prompt lean.
+
+- **GitHub CLI (`gh`)** — let the agent query and act on GitHub (issues, PRs, repos, `gh api`, search). Provide a [Personal Access Token](https://github.com/settings/tokens); it is injected as `GH_TOKEN` so `gh` is authenticated non-interactively. Read operations (`list`/`view`/`status`/`api`/`search`) run without asking; creating issues, PRs, or releases ask for confirmation first. Use **Test token** to verify the token against the GitHub API. In session history mode, a newly enabled tool is advertised starting from the next `/new` conversation.
 
 ### Skills
 
@@ -65,7 +72,10 @@ Manage scheduled tasks:
 
 ### History
 
-Browse conversation history across channels. View individual conversation turns with tool call details.
+Configure conversation history and browse stored turns:
+
+- **Mode** — `injection` (replay the last N user/assistant pairs each request) or `session` (sticky per-chat session, full context, cache-friendly). Reset a conversation any time by sending `/new` (or its alias `/clear`).
+- **Context compaction** (session mode) — when the conversation nears the model's context window, the oldest turns are summarized by a small model while recent turns are kept verbatim, and the user gets a system message saying it happened. Set the trigger threshold here as either a **percent of the context window** or an **absolute token count** (e.g. 200k), plus how many recent turns to keep. The compaction model is configured in the **LLM** tab (under *History Compaction*). Has no effect in injection mode (which is already windowed).
 
 ### Logs
 

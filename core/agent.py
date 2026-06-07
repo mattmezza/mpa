@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from tavily import TavilyClient
 
+from core.compaction import compact_messages, should_compact
 from core.config import Config
 from core.executor import ToolExecutor
 from core.goal_decomposition import DecomposedGoal, classify_complexity, decompose_goal
@@ -28,6 +29,7 @@ from core.prompt_builder import build_prompt_sections
 from core.scheduler import AgentScheduler
 from core.skills import SkillsEngine
 from core.task_reflection import ReflectionStore
+from core.tools import tool_env
 from voice.pipeline import VoicePipeline
 
 log = logging.getLogger(__name__)
@@ -246,7 +248,7 @@ class AgentCore:
             db_path=config.agent.skills_db_path,
             seed_dir=config.agent.skills_dir,
         )
-        self.executor = ToolExecutor()
+        self.executor = ToolExecutor(tool_env=tool_env(config))
         self.history = ConversationHistory(
             db_path=config.history.db_path,
             max_turns=config.history.max_turns,
@@ -294,8 +296,8 @@ class AgentCore:
         preventing context leakage across chats.
         """
 
-        # Handle /new command — clear conversational context.
-        if message.strip().lower() == "/new":
+        # Handle /new (alias /clear) command — clear conversational context.
+        if message.strip().lower() in ("/new", "/clear"):
             if self.history_mode == "session":
                 await self.history.clear_session(channel, user_id, chat_id)
             else:
@@ -308,12 +310,25 @@ class AgentCore:
             )
             return AgentResponse(text="Conversation cleared.")
 
-        # Goal decomposition — classify and (if complex) decompose the request
+        # Goal decomposition — classify and (if complex) decompose the request.
+        # The resulting plan is request-specific, so it is injected per turn
+        # (in the user-message preamble), not baked into the static prompt.
         decomposed_goal: DecomposedGoal | None = None
         if self.config.goal_decomposition.enabled and channel != "system":
             decomposed_goal = await self._maybe_decompose(message)
 
-        system = await self._build_system_prompt(decomposed_goal=decomposed_goal)
+        # Per-turn preamble: live date/time + (optional) execution plan.
+        preamble = self._turn_preamble(decomposed_goal)
+
+        # Static system prompt. In session mode it is snapshotted once at the
+        # start of the session and reused for every turn (so the static content
+        # is only built once, not rebuilt and re-sent each turn). In injection
+        # mode the prompt is windowed/stateless, so it is rebuilt per call.
+        if self.history_mode == "session":
+            system = await self._session_system_prompt(channel, user_id, chat_id)
+        else:
+            system = await self._build_system_prompt()
+
         if self.config.admin.capture_prompts:
             self._record_system_prompt(
                 channel=channel,
@@ -324,34 +339,116 @@ class AgentCore:
 
         if self.history_mode == "session":
             return await self._process_session(
-                system, message, channel, user_id, attachments, chat_id
+                system, preamble, message, channel, user_id, attachments, chat_id
             )
         return await self._process_injection(
-            system, message, channel, user_id, attachments, chat_id
+            system, preamble, message, channel, user_id, attachments, chat_id
+        )
+
+    def _turn_preamble(self, decomposed_goal: DecomposedGoal | None) -> str:
+        """Build the per-turn preamble prepended to the current user message.
+
+        Always carries the live date/time (so the agent knows 'now' every turn);
+        also carries the execution plan when the request was decomposed.
+        """
+        now = datetime.now(ZoneInfo(self.config.agent.timezone))
+        stamp = now.strftime("%A, %B %d, %Y %H:%M %Z")
+        preamble = f"[Current date & time: {stamp}]"
+        if decomposed_goal:
+            preamble += (
+                "\n\n<execution_plan>\n"
+                "Your request has been analysed and broken into the following sub-goals.\n"
+                "Follow this plan step-by-step, completing each sub-goal in order "
+                "(respecting dependencies). Report progress as you go.\n\n"
+                f"{decomposed_goal.format_for_prompt()}\n"
+                "</execution_plan>"
+            )
+        return preamble
+
+    async def _session_system_prompt(self, channel: str, user_id: str, chat_id: str) -> str:
+        """Return the session's static system prompt, building it once if needed.
+
+        Built fresh after a ``/new`` (when no snapshot exists), then reused for
+        the lifetime of the session so the static content is sent only once.
+        """
+        cached = await self.history.get_session_system(channel, user_id, chat_id)
+        if cached is not None:
+            return cached
+        system = await self._build_system_prompt()
+        await self.history.set_session_system(channel, user_id, system, chat_id)
+        return system
+
+    async def _maybe_compact(
+        self, channel: str, user_id: str, chat_id: str, response: Any
+    ) -> str | None:
+        """Compact the session if the context exceeds the configured threshold.
+
+        Returns a user-facing notice when compaction happened, else ``None``.
+        Failures are logged and swallowed — compaction must never break a turn.
+        """
+        cfg = self.config.compaction
+        if self.history_mode != "session" or not cfg.enabled:
+            return None
+        usage = getattr(response, "usage", None) or {}
+        context_tokens = int(usage.get("context_tokens") or 0)
+        if not should_compact(cfg, context_tokens, self.config.agent.model):
+            return None
+
+        session = await self.history.get_session(channel, user_id, chat_id)
+        try:
+            llm = self._background_llm(cfg.provider)
+            result = await compact_messages(llm, cfg.model, session, cfg.keep_recent_turns)
+        except Exception:
+            log.exception("Conversation compaction failed")
+            return None
+        if not result:
+            return None
+
+        new_messages, _summary = result
+        await self.history.replace_session(channel, user_id, new_messages, chat_id)
+        log.info(
+            "Compacted session %s/%s/%s: %d → %d messages (~%d ctx tokens)",
+            channel,
+            user_id,
+            chat_id,
+            len(session),
+            len(new_messages),
+            context_tokens,
+        )
+        return (
+            f"🗜️ Our conversation was getting large (~{context_tokens:,} tokens). "
+            "I summarized the earlier part to free up space; recent messages are kept as-is."
         )
 
     def _build_user_message(
         self,
         message: str,
         attachments: list[Attachment] | None = None,
+        preamble: str = "",
     ) -> dict:
-        """Build the user message dict, handling multimodal content."""
+        """Build the user message dict, handling multimodal content.
+
+        ``preamble`` (live date/time + optional execution plan) is prepended to
+        the message text so the agent always knows 'now' for the current turn.
+        """
+        text = f"{preamble}\n\n{message}" if preamble else message
         image_attachments = [a for a in (attachments or []) if a.is_image]
         if image_attachments:
             content_blocks: list[dict] = []
-            if message:
-                content_blocks.append({"type": "text", "text": message})
+            if text:
+                content_blocks.append({"type": "text", "text": text})
             for att in image_attachments:
                 if self.llm.provider == "anthropic":
                     content_blocks.append(att.to_anthropic_block())
                 else:
                     content_blocks.append(att.to_openai_block())
             return {"role": "user", "content": content_blocks}
-        return {"role": "user", "content": message}
+        return {"role": "user", "content": text}
 
     async def _process_injection(
         self,
         system: str,
+        preamble: str,
         message: str,
         channel: str,
         user_id: str,
@@ -368,7 +465,7 @@ class AgentCore:
                 messages.append({"role": turn["role"], "content": turn["content"]})
 
         # The actual current request — always the last user message.
-        messages.append(self._build_user_message(message, attachments))
+        messages.append(self._build_user_message(message, attachments, preamble))
 
         log.info(
             "Processing message (injection) from %s/%s/%s: %s",
@@ -445,6 +542,7 @@ class AgentCore:
     async def _process_session(
         self,
         system: str,
+        preamble: str,
         message: str,
         channel: str,
         user_id: str,
@@ -460,8 +558,8 @@ class AgentCore:
         # Load existing session (from memory cache or DB)
         session = await self.history.get_session(channel, user_id, chat_id)
 
-        # Append the new user message
-        user_msg = self._build_user_message(message, attachments)
+        # Append the new user message (with the live date/time preamble)
+        user_msg = self._build_user_message(message, attachments, preamble)
         await self.history.append_session_message(channel, user_id, user_msg, chat_id)
 
         log.info(
@@ -526,6 +624,11 @@ class AgentCore:
         final_text = response.text
         log.info("Response: %s", final_text[:200])
 
+        # Compaction — if the context has grown past the configured threshold,
+        # summarise the oldest turns. ``response.usage`` reflects the full
+        # session that was just sent, so it's the authoritative context size.
+        system_notice = await self._maybe_compact(channel, user_id, chat_id, response)
+
         # Check if the LLM wants to respond with voice
         voice_bytes = await self._maybe_synthesize_voice(final_text)
         if voice_bytes:
@@ -545,7 +648,7 @@ class AgentCore:
                 name=f"task-reflect-{user_id}",
             )
 
-        return AgentResponse(text=final_text, voice=voice_bytes)
+        return AgentResponse(text=final_text, voice=voice_bytes, system_notice=system_notice)
 
     @staticmethod
     def _history_message_text(message: str, attachments: list[Attachment] | None = None) -> str:
