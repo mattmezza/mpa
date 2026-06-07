@@ -1065,6 +1065,17 @@ A scheduled job of type `memory_consolidation` runs on a configurable cron sched
 
 2. **Cleanup** — deletes all expired short-term memories regardless of whether the LLM call succeeded.
 
+#### Unified long-term write pipeline
+
+Every long-term write — both the automatic per-turn extraction and consolidation's promotions — flows through a single path, `MemoryStore.update_memory`. For each candidate fact it retrieves the most lexically similar existing long-term memories (cheap token-overlap ranking, no embeddings or extra dependencies), then makes one LLM call that decides exactly one operation:
+
+- **ADD** — genuinely new information.
+- **UPDATE** — refines, corrects, or re-words one existing memory (the LLM returns the merged content to keep).
+- **DELETE** — the candidate says an existing memory is no longer true, with nothing worth keeping in its place.
+- **NOOP** — duplicate or not worth keeping.
+
+The decision prompt includes each candidate's `created_at`/`updated_at`, so the model can prefer recent facts when resolving contradictions. When nothing similar exists the fact is added directly without an LLM call. This replaces the earlier exact-subject + substring + "longer content wins" heuristic, which missed semantic duplicates and never resolved contradictions. Malformed model output is a safe no-op.
+
 This is configured as a regular scheduled job in `config.yml`:
 
 ```yaml
@@ -1084,6 +1095,47 @@ memory:
 ```
 
 You can also trigger consolidation manually via the admin API: `POST /memory/consolidate`.
+
+#### Semantic retrieval & relevance-ranked injection (Tier 2)
+
+Each long-term memory gets a vector embedding, stored as a packed float32 blob in the `embedding` column. Similarity is brute-force cosine in Python (no native SQLite extension, so it behaves identically locally and in the container; trivial at <1k rows).
+
+**Backends** (`memory.embedding.provider`):
+
+- `local` (default) — runs a small on-device model via `fastembed` (`BAAI/bge-small-en-v1.5`, 384-dim, ~130MB ONNX/CPU). Private (memory never leaves the box), no API key, free. The model is **prefetched at Docker build** into `/app/models` (outside the data volume) so the first call has no download latency and the container works offline. The model loads lazily on first use, in a worker thread. A "Download model" button in the admin Memory tab (and `python -m core.embeddings prefetch`) fetches it on demand.
+- `openai` / `google` (or any OpenAI-compatible `/embeddings` endpoint via `base_url`) — calls a remote API. Needs a key (falls back to the matching agent provider key); a few cents/year at typical volume, but memory text is sent to the provider. Note: DeepSeek has no embeddings endpoint.
+
+Set `memory.embedding.enabled: false` to fall back to Tier-1 lexical (word-overlap) retrieval — still works, no model needed. All of this is configurable from the **admin Memory tab** (enable toggle, backend, model, top-k, download/test buttons) and applies live to the running agent.
+
+With embeddings on:
+
+- `update_memory` retrieves ADD/UPDATE/DELETE/NOOP candidates by cosine similarity (with a lexical fallback for any memory that has no vector yet).
+- Prompt injection becomes **relevance-ranked**: instead of dumping the most recent `long_term_limit` rows, only the `injection_top_k` memories most relevant to the current message are injected, scored Generative-Agents style (relevance + importance + recency). The inbound message is threaded into prompt building as the query. In session mode (where the static prompt is snapshotted once), the first message of the session is used as the query.
+
+#### Forgetting, importance & reinforcement (Tier 3)
+
+`long_term` carries `importance` (1–10), `last_accessed`, `access_count`, and an `archived` flag. Recalled memories are reinforced (their `access_count`/`last_accessed` are bumped), and re-mentioning a fact (an UPDATE through the unified pipeline) raises its importance. The consolidation job archives **cold** memories — old, low-importance, and not accessed recently — via the `archived` flag (a soft delete, not a hard delete), so long-term memory stops growing without bound. Thresholds are configurable (`archive_after_days`, `archive_max_importance`, `archive_min_idle_days`).
+
+#### Long-term hygiene pass (Tier 4)
+
+Each consolidation run also clusters near-duplicate long-term memories (by embedding or lexical similarity, threshold `hygiene_similarity_threshold`) and resolves each cluster with one LLM call that merges duplicates and drops contradictions, keeping the most recent fact. This compacts memories that accumulated over time, not just at write time.
+
+These behaviours are configured in the `memory` section (see `config.yml.example` for the full set):
+
+```yaml
+memory:
+  embedding:
+    enabled: true
+    provider: "local"                # "local" | "openai" | "google"
+    model: "BAAI/bge-small-en-v1.5"  # local model; API e.g. text-embedding-3-small
+    cache_dir: "models"              # local model store (bundled in the image)
+    injection_top_k: 12
+  default_importance: 5.0
+  archive_after_days: 90
+  hygiene_enabled: true
+```
+
+The consolidation summary returned by `consolidate_and_cleanup` reports `active_reviewed`, `promoted_to_long_term`, `expired_deleted`, `hygiene_merged`, and `archived`. The new columns are added to existing databases by an in-place `ALTER TABLE` migration in `MemoryStore._ensure_schema`, so upgrading needs no manual steps.
 
 ### 8.5 Memory in the Agent Loop
 

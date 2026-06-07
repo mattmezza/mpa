@@ -38,3 +38,6 @@ tailwindcss
 # Tailwind CSS build output
 api/static/style.css
 node_modules
+
+# Local embedding models (fastembed cache)
+models/

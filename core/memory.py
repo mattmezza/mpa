@@ -11,6 +11,13 @@ from pathlib import Path
 
 import aiosqlite
 
+from core.embeddings import (
+    EmbeddingClient,
+    cosine_similarity,
+    cosine_to_matrix,
+    pack_vector,
+    unpack_vector,
+)
 from core.llm import LLMClient
 
 log = logging.getLogger(__name__)
@@ -59,12 +66,69 @@ Rules:
 
 Respond with ONLY the JSON array, no other text."""
 
+_UPDATE_PROMPT = """\
+You maintain the long-term memory of a personal AI assistant. Decide what to do
+with a new candidate fact relative to the existing memories it most resembles.
+
+Today's date: {today}
+
+## Candidate fact
+[{category}] {subject}: {content}
+
+## Existing related memories
+{existing}
+
+Choose exactly ONE operation:
+- ADD — the candidate is genuinely new information not already covered above.
+- UPDATE — the candidate refines, corrects, or re-words ONE existing memory.
+  Give its id and the final merged content to keep (prefer the newer fact on
+  conflict; keep it short and dense).
+- DELETE — the candidate states that an existing memory is no longer true, and
+  there is nothing worth keeping in its place. Give the id to remove.
+- NOOP — the candidate duplicates an existing memory, or is not worth keeping.
+
+Keep long-term memories short and dense: strip dates, times, and situational
+framing. Use lowercase for subject.
+
+Respond with ONLY a JSON object, no other text. One of:
+  {{"operation": "ADD"}}
+  {{"operation": "UPDATE", "id": <id>, "category": "<cat>", \
+"subject": "<subj>", "content": "<merged fact>"}}
+  {{"operation": "DELETE", "id": <id>}}
+  {{"operation": "NOOP"}}"""
+
+_HYGIENE_PROMPT = """\
+You are tidying a cluster of near-duplicate or possibly conflicting long-term
+memories for a personal AI assistant.
+
+Today's date: {today}
+
+## Memories in this cluster
+{cluster}
+
+Resolve the cluster into the minimal set of correct, non-redundant memories:
+- Merge duplicates and overlapping facts into one, keeping the clearest wording.
+- On contradictions, keep the most recent fact and drop the stale one.
+- Keep each memory short and dense (strip dates, times, situational framing).
+
+Return ONLY a JSON object describing the changes to apply:
+  {{"updates": [{{"id": <id>, "category": "<cat>", "subject": "<subj>", \
+"content": "<merged fact>"}}],
+   "deletes": [<id>, <id>]}}
+
+- Put the surviving memory in "updates" (reuse one of the cluster ids), with the
+  final merged content.
+- Put every other id in the cluster that should be removed in "deletes".
+- If the cluster is already clean, return {{"updates": [], "deletes": []}}.
+
+Respond with ONLY the JSON object, no other text."""
+
 _EXTRACTION_PROMPT = """\
 Given this conversation exchange, identify any facts worth remembering.
 
 User: {user_msg}
 Assistant: {agent_msg}
-
+{recent_turns_block}
 {existing_memories_block}\
 For each fact, classify it into ONE of these tiers:
 
@@ -189,6 +253,184 @@ def _extract_json_array(raw: str) -> list | None:
     return None
 
 
+def _extract_json_object(raw: str) -> dict | None:
+    """Best-effort extraction of a single JSON object from an LLM response.
+
+    Mirrors :func:`_extract_json_array` but for ``{ ... }`` payloads. Returns
+    the parsed dict on success, or ``None`` if none could be extracted.
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    try:
+        result = json.loads(raw)
+        if isinstance(result, dict):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    fence_match = _FENCE_RE.search(raw)
+    if fence_match:
+        try:
+            result = json.loads(fence_match.group(1).strip())
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    start = raw.find("{")
+    if start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        end = -1
+        for i in range(start, len(raw)):
+            ch = raw[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end != -1:
+            try:
+                result = json.loads(raw[start : end + 1])
+                if isinstance(result, dict):
+                    return result
+            except json.JSONDecodeError:
+                pass
+
+    return None
+
+
+# Tokeniser for cheap lexical similarity (no embeddings, no new deps).
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "to",
+        "of",
+        "in",
+        "on",
+        "at",
+        "for",
+        "with",
+        "his",
+        "her",
+        "their",
+        "has",
+        "have",
+        "had",
+        "uses",
+        "use",
+        "that",
+        "this",
+        "it",
+        "as",
+        "by",
+    }
+)
+
+
+def _normalize_subject(subject: str) -> str:
+    """Canonicalise a memory subject (lowercase, trimmed)."""
+    return (subject or "").strip().lower()
+
+
+def _tokens(text: str) -> set[str]:
+    """Lowercase content words, dropping stopwords and single characters."""
+    return {t for t in _TOKEN_RE.findall(text.lower()) if len(t) > 1 and t not in _STOPWORDS}
+
+
+def _similarity(a: set[str], b: set[str]) -> float:
+    """Jaccard overlap between two token sets (0.0 when either is empty)."""
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if not inter:
+        return 0.0
+    return inter / len(a | b)
+
+
+# Half-life (in days) for the recency component of the retrieval score.
+_RECENCY_HALF_LIFE_DAYS = 30.0
+
+
+def _parse_sqlite_ts(ts: str | None) -> datetime | None:
+    """Parse a SQLite ``datetime('now')`` string (UTC, no tz suffix)."""
+    if not ts:
+        return None
+    try:
+        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+    except ValueError, TypeError:
+        return None
+
+
+def _recency_score(ts: str | None) -> float:
+    """Exponential-decay recency in [0, 1]; newer timestamps score higher."""
+    parsed = _parse_sqlite_ts(ts)
+    if parsed is None:
+        return 0.0
+    age_days = max(0.0, (datetime.now(tz=UTC) - parsed).total_seconds() / 86400.0)
+    return 0.5 ** (age_days / _RECENCY_HALF_LIFE_DAYS)
+
+
+def _batch_relevance(query_vec, rows: list[dict]) -> dict[int, float]:
+    """Map row index -> cosine similarity to *query_vec*, computed in one
+    vectorised pass. Only rows whose stored embedding matches the query
+    dimension are included; the rest are left for a lexical fallback by the
+    caller. Returns an empty map when there is no query vector."""
+    if query_vec is None:
+        return {}
+    dim = len(query_vec)
+    idxs: list[int] = []
+    vecs: list = []
+    for i, row in enumerate(rows):
+        vec = unpack_vector(row.get("embedding"))
+        if vec is not None and vec.shape[0] == dim:
+            idxs.append(i)
+            vecs.append(vec)
+    if not vecs:
+        return {}
+    sims = cosine_to_matrix(query_vec, vecs)
+    return {idx: float(sims[k]) for k, idx in enumerate(idxs)}
+
+
+def _pair_similarity(a: dict, b: dict) -> float:
+    """Similarity between two long-term rows: embedding cosine when both have a
+    stored vector, otherwise token overlap on subject + content."""
+    va = unpack_vector(a.get("embedding"))
+    vb = unpack_vector(b.get("embedding"))
+    if va is not None and vb is not None and va.shape == vb.shape:
+        return cosine_similarity(va, vb)
+    return _similarity(
+        _tokens(f"{a['subject']} {a['content']}"),
+        _tokens(f"{b['subject']} {b['content']}"),
+    )
+
+
 class MemoryStore:
     """Two-tier memory system backed by SQLite.
 
@@ -199,11 +441,35 @@ class MemoryStore:
     conversation turn.
     """
 
-    def __init__(self, db_path: str = "data/memory.db", long_term_limit: int = 50):
+    def __init__(
+        self,
+        db_path: str = "data/memory.db",
+        long_term_limit: int = 50,
+        *,
+        embedder: EmbeddingClient | None = None,
+        injection_top_k: int = 12,
+        default_importance: float = 5.0,
+        archive_after_days: int = 90,
+        archive_max_importance: float = 4.0,
+        archive_min_idle_days: int = 45,
+        hygiene_enabled: bool = True,
+        hygiene_similarity_threshold: float = 0.45,
+    ):
         self.db_path = db_path
         self.long_term_limit = long_term_limit
+        self.embedder = embedder
+        self.injection_top_k = injection_top_k
+        self.default_importance = default_importance
+        self.archive_after_days = archive_after_days
+        self.archive_max_importance = archive_max_importance
+        self.archive_min_idle_days = archive_min_idle_days
+        self.hygiene_enabled = hygiene_enabled
+        self.hygiene_similarity_threshold = hygiene_similarity_threshold
         self._ready = False
         self._last_extraction: float | None = None  # monotonic timestamp of last extraction
+        # Turns skipped by the cooldown, replayed into the next extraction so
+        # back-to-back salient turns aren't dropped (issue #7).
+        self._pending_turns: list[tuple[str, str]] = []
 
     async def _ensure_schema(self) -> None:
         if self._ready:
@@ -212,18 +478,101 @@ class MemoryStore:
         schema = _SCHEMA_FILE.read_text()
         async with aiosqlite.connect(self.db_path) as db:
             await db.executescript(schema)
+            await self._migrate_long_term(db)
         self._ready = True
 
+    # Columns added after the original two-tier schema shipped. Each is applied
+    # via ALTER TABLE on databases created before the column existed, so an
+    # existing data/memory.db upgrades in place (defaults are constant, as
+    # required by SQLite's ALTER TABLE ADD COLUMN).
+    _LONG_TERM_MIGRATIONS = (
+        ("embedding", "embedding BLOB"),
+        ("importance", "importance REAL NOT NULL DEFAULT 5.0"),
+        ("last_accessed", "last_accessed DATETIME"),
+        ("access_count", "access_count INTEGER NOT NULL DEFAULT 0"),
+        ("archived", "archived INTEGER NOT NULL DEFAULT 0"),
+    )
+
+    async def _migrate_long_term(self, db: aiosqlite.Connection) -> None:
+        cursor = await db.execute("PRAGMA table_info(long_term)")
+        existing = {row[1] for row in await cursor.fetchall()}
+        for name, ddl in self._LONG_TERM_MIGRATIONS:
+            if name not in existing:
+                await db.execute(f"ALTER TABLE long_term ADD COLUMN {ddl}")  # noqa: S608
+        # Safe to create now: the archived column is guaranteed to exist (fresh
+        # DBs declare it; legacy DBs just had it added above).
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_lt_archived ON long_term(archived)")
+        await db.commit()
+
     async def get_long_term(self) -> list[dict]:
-        """Retrieve long-term memories for system prompt injection."""
+        """Retrieve recent (non-archived) long-term memories for injection."""
         await self._ensure_schema()
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT category, subject, content FROM long_term ORDER BY updated_at DESC LIMIT ?",
+                "SELECT category, subject, content FROM long_term "
+                "WHERE archived = 0 ORDER BY updated_at DESC LIMIT ?",
                 (self.long_term_limit,),
             )
             return [dict(row) for row in await cursor.fetchall()]
+
+    async def get_relevant_long_term(self, query: str) -> list[dict]:
+        """Return long-term memories most relevant to *query*, relevance-ranked.
+
+        Uses a Generative-Agents-style score (recency + importance + relevance)
+        over embedding cosine similarity, and reinforces the chosen memories
+        (bumps ``access_count`` / ``last_accessed``). Falls back to recency
+        order when embeddings are unavailable or the query can't be embedded.
+        """
+        if not self.embedder or not query.strip():
+            return await self.get_long_term()
+
+        try:
+            query_vec = await self.embedder.embed_one(query)
+        except Exception:
+            log.exception("Query embedding failed; falling back to recency order")
+            return await self.get_long_term()
+        if not query_vec:
+            return await self.get_long_term()
+
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT id, category, subject, content, importance, embedding, "
+                "updated_at, last_accessed FROM long_term WHERE archived = 0"
+            )
+            rows = [dict(r) for r in await cursor.fetchall()]
+
+        rel_map = _batch_relevance(query_vec, rows)
+        scored: list[tuple[float, dict]] = []
+        for i, row in enumerate(rows):
+            relevance = rel_map.get(i, 0.0)
+            importance = (row.get("importance") or self.default_importance) / 10.0
+            recency = _recency_score(row.get("last_accessed") or row.get("updated_at"))
+            score = relevance + 0.5 * importance + 0.3 * recency
+            scored.append((score, row))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        top = [row for _, row in scored[: self.injection_top_k]]
+        await self._reinforce([row["id"] for row in top])
+        return [
+            {"category": r["category"], "subject": r["subject"], "content": r["content"]}
+            for r in top
+        ]
+
+    async def _reinforce(self, ids: list[int]) -> None:
+        """Strengthen recalled memories: bump access_count and last_accessed."""
+        if not ids:
+            return
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executemany(
+                "UPDATE long_term SET access_count = access_count + 1, "
+                "last_accessed = datetime('now') WHERE id = ?",
+                [(i,) for i in ids],
+            )
+            await db.commit()
 
     async def get_short_term(self) -> list[dict]:
         """Retrieve active (non-expired) short-term memories."""
@@ -237,11 +586,19 @@ class MemoryStore:
             )
             return [dict(row) for row in await cursor.fetchall()]
 
-    async def format_for_prompt(self) -> str:
-        """Format both tiers into a block for the system prompt."""
+    async def format_for_prompt(self, query: str | None = None) -> str:
+        """Format both tiers into a block for the system prompt.
+
+        When *query* is given and embeddings are enabled, only the long-term
+        memories most relevant to the query are injected (relevance-ranked),
+        instead of dumping the most recent ``long_term_limit`` rows (issue #5).
+        """
         sections: list[str] = []
 
-        long_term = await self.get_long_term()
+        if query:
+            long_term = await self.get_relevant_long_term(query)
+        else:
+            long_term = await self.get_long_term()
         if long_term:
             lines = [f"- [{m['category']}] {m['subject']}: {m['content']}" for m in long_term]
             sections.append("## Long-term memories\n" + "\n".join(lines))
@@ -262,6 +619,22 @@ class MemoryStore:
 
     # Maximum number of memories to store per extraction call.
     _MAX_PER_TURN = 3
+
+    # Maximum number of cooldown-skipped turns to buffer for the next extraction.
+    _MAX_PENDING_TURNS = 6
+
+    # Number of similar long-term memories retrieved as ADD/UPDATE/DELETE candidates.
+    _UPDATE_TOP_K = 8
+
+    def _format_pending_turns(self) -> str:
+        """Render buffered cooldown turns as a prompt section (empty if none)."""
+        if not self._pending_turns:
+            return ""
+        lines = ["", "Earlier turns since the last review (also consider these):"]
+        for user_msg, agent_msg in self._pending_turns:
+            lines.append(f"User: {user_msg}")
+            lines.append(f"Assistant: {agent_msg}")
+        return "\n".join(lines) + "\n"
 
     async def extract_memories(
         self,
@@ -287,12 +660,21 @@ class MemoryStore:
             and self._last_extraction is not None
             and now - self._last_extraction < cooldown_seconds
         ):
+            # Buffer the skipped turn instead of dropping it; it is replayed
+            # into the next extraction once the cooldown elapses (issue #7).
+            self._pending_turns.append((user_msg, agent_msg))
+            del self._pending_turns[: -self._MAX_PENDING_TURNS]
             log.debug(
-                "Skipping memory extraction (cooldown: %.0fs remaining)",
+                "Buffering memory extraction (cooldown: %.0fs remaining, %d pending)",
                 cooldown_seconds - (now - self._last_extraction),
+                len(self._pending_turns),
             )
             return 0
         self._last_extraction = now
+
+        # Replay any turns buffered during the cooldown, then clear the buffer.
+        recent_turns_block = self._format_pending_turns()
+        self._pending_turns = []
 
         # Build existing-memories block so the LLM can avoid duplicates.
         existing_block = await self._existing_memories_block()
@@ -300,6 +682,7 @@ class MemoryStore:
         prompt = _EXTRACTION_PROMPT.format(
             user_msg=user_msg,
             agent_msg=agent_msg,
+            recent_turns_block=recent_turns_block,
             existing_memories_block=existing_block,
         )
 
@@ -319,7 +702,9 @@ class MemoryStore:
             try:
                 tier = mem.get("tier", "").upper()
                 if tier == "LONG_TERM":
-                    stored += await self._store_long_term(mem)
+                    op = await self.update_memory(llm, model, mem)
+                    if op in ("ADD", "UPDATE"):
+                        stored += 1
                 elif tier == "SHORT_TERM":
                     stored += await self._store_short_term(mem)
                 else:
@@ -352,44 +737,177 @@ class MemoryStore:
         parts.append("")  # trailing newline
         return "\n".join(parts) + "\n"
 
-    async def _store_long_term(self, mem: dict) -> int:
-        """Store a long-term memory, skipping if a similar one exists."""
-        category = mem.get("category", "fact")
-        subject = mem.get("subject", "")
-        content = mem.get("content", "")
-        if not content:
-            return 0
+    async def update_memory(self, llm: LLMClient, model: str, candidate: dict) -> str:
+        """Apply a candidate fact to long-term memory via a unified pipeline.
 
+        Retrieves the most lexically similar existing long-term memories, then
+        a single LLM call decides ADD / UPDATE / DELETE / NOOP — handling
+        semantic duplicates, refinements, and contradictions (issues #1–#4, #8).
+        When nothing similar exists the candidate is added directly without an
+        LLM call. Malformed model output is a safe no-op.
+
+        Returns the operation applied: ``"ADD"``, ``"UPDATE"``, ``"DELETE"``,
+        or ``"NOOP"``.
+        """
+        category = candidate.get("category") or "fact"
+        subject = _normalize_subject(candidate.get("subject", ""))
+        content = (candidate.get("content") or "").strip()
+        if not content:
+            return "NOOP"
+
+        similar = await self._retrieve_similar_long_term(subject, content)
+        if not similar:
+            await self._insert_long_term(category, subject, content)
+            log.debug("ADD long-term (no similar): [%s] %s: %s", category, subject, content[:80])
+            return "ADD"
+
+        existing_lines = []
+        for row in similar:
+            existing_lines.append(
+                f"- id={row['id']} [{row['category']}] {row['subject']}: {row['content']} "
+                f"(created {row['created_at']}, updated {row['updated_at']})"
+            )
+        prompt = _UPDATE_PROMPT.format(
+            today=datetime.now(tz=UTC).date().isoformat(),
+            category=category,
+            subject=subject or "(unknown)",
+            content=content,
+            existing="\n".join(existing_lines),
+        )
+
+        try:
+            raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=1024)
+        except Exception:
+            log.exception("update_memory LLM call failed; skipping candidate")
+            return "NOOP"
+
+        decision = _extract_json_object(raw)
+        if not isinstance(decision, dict):
+            log.warning("update_memory returned non-JSON: %s", raw[:200])
+            return "NOOP"
+
+        operation = str(decision.get("operation", "")).upper()
+        valid_ids = {row["id"] for row in similar}
+
+        if operation == "ADD":
+            await self._insert_long_term(category, subject, content)
+            log.debug("ADD long-term: [%s] %s: %s", category, subject, content[:80])
+            return "ADD"
+
+        if operation == "UPDATE":
+            target_id = decision.get("id")
+            if target_id not in valid_ids:
+                log.warning("update_memory UPDATE with invalid id %r; no-op", target_id)
+                return "NOOP"
+            new_content = (decision.get("content") or content).strip()
+            new_category = decision.get("category") or category
+            new_subject = _normalize_subject(decision.get("subject") or subject)
+            blob = await self._embed_blob(f"{new_subject}: {new_content}")
+            await self._ensure_schema()
+            async with aiosqlite.connect(self.db_path) as db:
+                # Re-mentioning a fact reinforces it: bump importance (capped).
+                if blob is not None:
+                    await db.execute(
+                        "UPDATE long_term SET category = ?, subject = ?, content = ?, "
+                        "embedding = ?, importance = MIN(10.0, importance + 1.0), "
+                        "updated_at = datetime('now') WHERE id = ?",
+                        (new_category, new_subject, new_content, blob, target_id),
+                    )
+                else:
+                    await db.execute(
+                        "UPDATE long_term SET category = ?, subject = ?, content = ?, "
+                        "importance = MIN(10.0, importance + 1.0), "
+                        "updated_at = datetime('now') WHERE id = ?",
+                        (new_category, new_subject, new_content, target_id),
+                    )
+                await db.commit()
+            log.debug("UPDATE long-term %s: %s", target_id, new_content[:80])
+            return "UPDATE"
+
+        if operation == "DELETE":
+            target_id = decision.get("id")
+            if target_id not in valid_ids:
+                log.warning("update_memory DELETE with invalid id %r; no-op", target_id)
+                return "NOOP"
+            await self._ensure_schema()
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("DELETE FROM long_term WHERE id = ?", (target_id,))
+                await db.commit()
+            log.debug("DELETE long-term %s (contradicted)", target_id)
+            return "DELETE"
+
+        return "NOOP"
+
+    async def _retrieve_similar_long_term(self, subject: str, content: str) -> list[dict]:
+        """Return the top-k existing (non-archived) long-term memories similar to
+        a candidate (subject + content).
+
+        Uses embedding cosine similarity when an embedder is configured (with a
+        per-row lexical fallback for memories that have no stored vector yet),
+        otherwise pure token overlap. A matching subject adds a fixed boost.
+        Cheap and dependency-free at <1k rows."""
         await self._ensure_schema()
         async with aiosqlite.connect(self.db_path) as db:
-            # Check for duplicates: same subject + overlapping content
+            db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT id, content FROM long_term WHERE subject = ?",
-                (subject,),
+                "SELECT id, category, subject, content, created_at, updated_at, embedding "
+                "FROM long_term WHERE archived = 0"
             )
-            existing = await cursor.fetchall()
-            content_lower = content.lower()
-            for row in existing:
-                if content_lower in row[1].lower() or row[1].lower() in content_lower:
-                    # Update the existing memory if the new content is more detailed
-                    if len(content) > len(row[1]):
-                        await db.execute(
-                            "UPDATE long_term SET content = ?, updated_at = datetime('now') "
-                            "WHERE id = ?",
-                            (content, row[0]),
-                        )
-                        await db.commit()
-                        log.debug("Updated long-term memory %d: %s", row[0], content[:80])
-                    return 0
+            rows = [dict(r) for r in await cursor.fetchall()]
 
+        subject_norm = _normalize_subject(subject)
+        cand_tokens = _tokens(f"{subject} {content}")
+        cand_vec = await self._safe_embed(f"{subject}: {content}")
+        # Embedding cosine for rows with a matching-dim vector; lexical for the rest.
+        rel_map = _batch_relevance(cand_vec, rows)
+
+        scored: list[tuple[float, dict]] = []
+        for i, row in enumerate(rows):
+            if i in rel_map:
+                base = rel_map[i]
+            else:
+                base = _similarity(cand_tokens, _tokens(f"{row['subject']} {row['content']}"))
+            score = base
+            if subject_norm and _normalize_subject(row["subject"]) == subject_norm:
+                score += 0.5
+            if score > 0:
+                row.pop("embedding", None)
+                scored.append((score, row))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [row for _, row in scored[: self._UPDATE_TOP_K]]
+
+    async def _safe_embed(self, text: str) -> list[float] | None:
+        """Best-effort embedding; returns None if disabled or on failure."""
+        if not self.embedder:
+            return None
+        try:
+            vec = await self.embedder.embed_one(text)
+        except Exception:
+            log.exception("Embedding call failed; proceeding without a vector")
+            return None
+        return vec or None
+
+    async def _embed_blob(self, text: str) -> bytes | None:
+        """Best-effort packed embedding blob (None if disabled or on failure)."""
+        vec = await self._safe_embed(text)
+        return pack_vector(vec) if vec else None
+
+    async def _insert_long_term(
+        self, category: str, subject: str, content: str, importance: float | None = None
+    ) -> None:
+        """Insert a new long-term memory row (with embedding + importance)."""
+        await self._ensure_schema()
+        blob = await self._embed_blob(f"{subject}: {content}")
+        imp = self.default_importance if importance is None else importance
+        async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
-                "INSERT INTO long_term (category, subject, content, source, confidence) "
-                "VALUES (?, ?, ?, 'conversation', 'stated')",
-                (category, subject, content),
+                "INSERT INTO long_term "
+                "(category, subject, content, source, confidence, embedding, importance) "
+                "VALUES (?, ?, ?, 'conversation', 'stated', ?, ?)",
+                (category, subject, content, blob, imp),
             )
             await db.commit()
-            log.debug("Stored long-term memory: [%s] %s: %s", category, subject, content[:80])
-            return 1
 
     async def _store_short_term(self, mem: dict) -> int:
         """Store a short-term memory with a LLM-determined TTL.
@@ -462,18 +980,169 @@ class MemoryStore:
         # Delete all expired short-term memories
         expired_count = await self._delete_expired_short_term()
 
+        # Tier 4: merge near-duplicate / contradictory long-term rows.
+        merged = 0
+        if self.hygiene_enabled:
+            merged = await self._hygiene_pass(llm, model)
+
+        # Tier 3: archive cold, low-importance long-term memories.
+        archived = await self._archive_cold_memories()
+
         summary = {
             "active_reviewed": len(active_short_term),
             "promoted_to_long_term": promoted,
             "expired_deleted": expired_count,
+            "hygiene_merged": merged,
+            "archived": archived,
         }
         log.info(
-            "Memory consolidation complete: %d active reviewed, %d promoted, %d expired deleted",
+            "Memory consolidation complete: %d reviewed, %d promoted, %d expired deleted, "
+            "%d merged, %d archived",
             summary["active_reviewed"],
             summary["promoted_to_long_term"],
             summary["expired_deleted"],
+            summary["hygiene_merged"],
+            summary["archived"],
         )
         return summary
+
+    async def _archive_cold_memories(self) -> int:
+        """Archive cold, low-importance long-term memories (Tier 3, issue #9).
+
+        A memory is archived (soft-deleted via the ``archived`` flag, not hard
+        deleted) when it is old enough, has low importance, and has not been
+        accessed recently. Returns the number archived.
+        """
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "UPDATE long_term SET archived = 1 WHERE archived = 0 "
+                "AND importance <= ? "
+                "AND created_at < datetime('now', ?) "
+                "AND COALESCE(last_accessed, created_at) < datetime('now', ?)",
+                (
+                    self.archive_max_importance,
+                    f"-{self.archive_after_days} days",
+                    f"-{self.archive_min_idle_days} days",
+                ),
+            )
+            count = cursor.rowcount
+            await db.commit()
+        if count:
+            log.info("Archived %d cold long-term memories", count)
+        return count
+
+    # Cap how many clusters one hygiene pass resolves, to bound LLM cost.
+    _HYGIENE_MAX_CLUSTERS = 10
+
+    async def _hygiene_pass(self, llm: LLMClient, model: str) -> int:
+        """Cluster near-duplicate long-term memories and merge each cluster via
+        one LLM call (Tier 4, issue #6). Returns the number of rows removed."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT id, category, subject, content, created_at, updated_at, embedding "
+                "FROM long_term WHERE archived = 0"
+            )
+            rows = [dict(r) for r in await cursor.fetchall()]
+
+        if len(rows) < 2:
+            return 0
+
+        clusters = self._cluster_long_term(rows)[: self._HYGIENE_MAX_CLUSTERS]
+        removed = 0
+        for cluster in clusters:
+            try:
+                removed += await self._resolve_cluster(llm, model, cluster)
+            except Exception:
+                log.exception("Hygiene cluster resolution failed")
+        if removed:
+            log.info("Hygiene pass merged away %d duplicate long-term memories", removed)
+        return removed
+
+    def _cluster_long_term(self, rows: list[dict]) -> list[list[dict]]:
+        """Greedily group memories whose pairwise similarity meets the threshold.
+
+        Returns only clusters with two or more members (singletons need no work).
+        """
+        threshold = self.hygiene_similarity_threshold
+        unassigned = list(rows)
+        clusters: list[list[dict]] = []
+        while unassigned:
+            seed = unassigned.pop(0)
+            cluster = [seed]
+            rest: list[dict] = []
+            for row in unassigned:
+                if _pair_similarity(seed, row) >= threshold:
+                    cluster.append(row)
+                else:
+                    rest.append(row)
+            unassigned = rest
+            if len(cluster) >= 2:
+                clusters.append(cluster)
+        return clusters
+
+    async def _resolve_cluster(self, llm: LLMClient, model: str, cluster: list[dict]) -> int:
+        """Ask the LLM to merge one cluster; apply updates/deletes. Returns rows
+        removed (deletes that actually matched a cluster member)."""
+        cluster_lines = [
+            f"- id={row['id']} [{row['category']}] {row['subject']}: {row['content']} "
+            f"(created {row['created_at']}, updated {row['updated_at']})"
+            for row in cluster
+        ]
+        prompt = _HYGIENE_PROMPT.format(
+            today=datetime.now(tz=UTC).date().isoformat(),
+            cluster="\n".join(cluster_lines),
+        )
+        try:
+            raw = await llm.generate_text(model=model, prompt=prompt, max_tokens=1024)
+        except Exception:
+            log.exception("Hygiene LLM call failed")
+            return 0
+
+        plan = _extract_json_object(raw)
+        if not isinstance(plan, dict):
+            log.warning("Hygiene LLM returned non-JSON: %s", raw[:200])
+            return 0
+
+        valid_ids = {row["id"] for row in cluster}
+        updates = plan.get("updates") or []
+        deletes = plan.get("deletes") or []
+
+        removed = 0
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            for upd in updates:
+                if not isinstance(upd, dict):
+                    continue
+                uid = upd.get("id")
+                if uid not in valid_ids:
+                    continue
+                content = (upd.get("content") or "").strip()
+                if not content:
+                    continue
+                subject = _normalize_subject(upd.get("subject") or "")
+                category = upd.get("category") or "fact"
+                blob = await self._embed_blob(f"{subject}: {content}")
+                if blob is not None:
+                    await db.execute(
+                        "UPDATE long_term SET category = ?, subject = ?, content = ?, "
+                        "embedding = ?, updated_at = datetime('now') WHERE id = ?",
+                        (category, subject, content, blob, uid),
+                    )
+                else:
+                    await db.execute(
+                        "UPDATE long_term SET category = ?, subject = ?, content = ?, "
+                        "updated_at = datetime('now') WHERE id = ?",
+                        (category, subject, content, uid),
+                    )
+            for did in deletes:
+                if did in valid_ids:
+                    await db.execute("DELETE FROM long_term WHERE id = ?", (did,))
+                    removed += 1
+            await db.commit()
+        return removed
 
     async def _run_consolidation_llm(
         self, llm: LLMClient, model: str, short_term_rows: list[dict]
@@ -515,14 +1184,17 @@ class MemoryStore:
         stored = 0
         for mem in promotions:
             try:
-                count = await self._store_long_term(
+                op = await self.update_memory(
+                    llm,
+                    model,
                     {
                         "category": mem.get("category", "fact"),
                         "subject": mem.get("subject", ""),
                         "content": mem.get("content", ""),
-                    }
+                    },
                 )
-                stored += count
+                if op in ("ADD", "UPDATE"):
+                    stored += 1
             except Exception:
                 log.exception("Failed to store promoted memory: %s", mem)
 

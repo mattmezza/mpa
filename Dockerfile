@@ -50,6 +50,13 @@ COPY tools/ tools/
 COPY voice/ voice/
 COPY api/ api/
 
+# Prefetch the local embedding model (semantic memory, Tier 2) so it is bundled
+# in the image — no runtime download, works offline. Stored in /app/models,
+# OUTSIDE the /app/data volume so the mounted volume cannot shadow it. Keep the
+# default in sync with EmbeddingConfig (core/config.py).
+ARG EMBED_MODEL=BAAI/bge-small-en-v1.5
+RUN uv run python -m core.embeddings prefetch "${EMBED_MODEL}" /app/models
+
 # Build CSS with Tailwind CSS v4 standalone CLI
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "arm64" ]; then TW_ARCH="linux-arm64"; else TW_ARCH="linux-x64"; fi && \

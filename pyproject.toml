@@ -23,6 +23,8 @@ dependencies = [
     "jinja2",
     "python-multipart>=0.0.22",
     "vobject>=0.9.9",
+    "fastembed",
+    "numpy",
 ]
 
 [dependency-groups]

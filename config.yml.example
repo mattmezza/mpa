@@ -75,3 +75,29 @@ memory:
   db_path: "data/memory.db"
   long_term_limit: 50
   extraction_model: "claude-haiku-4-5"  # cheap model for post-turn memory extraction
+  consolidation_model: "claude-haiku-4-5"  # model for scheduled consolidation + hygiene
+
+  # Tier 2 — semantic similarity + relevance-ranked injection.
+  # Default: a local on-device model (fastembed, private, no API key, free).
+  # The model is bundled in the Docker image (prefetched at build). Set
+  # enabled: false to fall back to lexical (word-overlap) retrieval, or switch
+  # provider to "openai"/"google" to use a remote embeddings API instead.
+  embedding:
+    enabled: true
+    provider: "local"                # "local" (on-device) | "openai" | "google"
+    model: "BAAI/bge-small-en-v1.5"  # local model id; for API e.g. text-embedding-3-small
+    cache_dir: "models"              # where local models live (bundled in the image)
+    api_key: ""                      # API providers only; falls back to the agent provider key
+    base_url: ""                     # API providers only; falls back to the agent provider base URL
+    dimensions: 0                    # 0 = provider default (API providers only)
+    injection_top_k: 12              # relevance-ranked memories injected per turn
+
+  # Tier 3 — forgetting / importance / reinforcement
+  default_importance: 5.0            # 1-10 scale assigned to new long-term memories
+  archive_after_days: 90             # min age before a cold memory may be archived
+  archive_max_importance: 4.0        # only archive memories at/below this importance
+  archive_min_idle_days: 45          # require this long since last access/creation
+
+  # Tier 4 — long-term hygiene pass (cluster + merge near-duplicates)
+  hygiene_enabled: true
+  hygiene_similarity_threshold: 0.45 # min similarity to cluster two memories

@@ -131,6 +131,26 @@ class HistoryConfig(BaseModel):
     mode: str = "injection"  # "injection" (windowed history) or "session" (sticky per channel)
 
 
+class EmbeddingConfig(BaseModel):
+    """Tier 2 — semantic similarity + relevance-ranked injection.
+
+    Disabled by default so the system runs on Tier-1 lexical retrieval with no
+    extra dependency or network call. When enabled, vectors are fetched from an
+    OpenAI-compatible ``/embeddings`` endpoint and stored as a blob alongside
+    each long-term memory (brute-force cosine in Python — fine at <1k rows, no
+    native extension required, identical on local and container SQLite).
+    """
+
+    enabled: bool = True
+    provider: str = "local"  # "local" (fastembed, on-device) or an OpenAI-compatible API
+    model: str = "BAAI/bge-small-en-v1.5"  # local model id; for API use e.g. text-embedding-3-small
+    cache_dir: str = "models"  # where local models are stored (bundled in the Docker image)
+    api_key: str = ""  # API providers only; falls back to the agent provider key when empty
+    base_url: str = ""  # API providers only; falls back to the agent provider base URL when empty
+    dimensions: int = 0  # 0 = provider default (API providers only)
+    injection_top_k: int = 12  # relevance-ranked memories injected per turn
+
+
 class MemoryConfig(BaseModel):
     db_path: str = "data/memory.db"
     long_term_limit: int = 50
@@ -139,6 +159,18 @@ class MemoryConfig(BaseModel):
     consolidation_provider: str = "anthropic"
     consolidation_model: str = "claude-haiku-4-5"
     extraction_cooldown_seconds: int = 120  # minimum seconds between extractions
+
+    embedding: EmbeddingConfig = EmbeddingConfig()
+
+    # Tier 3 — forgetting / importance / reinforcement
+    default_importance: float = 5.0  # 1-10 scale assigned to new long-term memories
+    archive_after_days: int = 90  # min age before a cold memory may be archived
+    archive_max_importance: float = 4.0  # only archive memories at/below this importance
+    archive_min_idle_days: int = 45  # require this long since last access/creation
+
+    # Tier 4 — long-term hygiene pass (cluster + merge near-duplicates)
+    hygiene_enabled: bool = True
+    hygiene_similarity_threshold: float = 0.45  # min similarity to cluster two memories
 
 
 class GoalDecompositionConfig(BaseModel):
