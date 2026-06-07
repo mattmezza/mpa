@@ -14,6 +14,7 @@ import aiosqlite
 from core.embeddings import (
     EmbeddingClient,
     cosine_similarity,
+    cosine_to_matrix,
     pack_vector,
     unpack_vector,
 )
@@ -396,12 +397,33 @@ def _recency_score(ts: str | None) -> float:
     return 0.5 ** (age_days / _RECENCY_HALF_LIFE_DAYS)
 
 
+def _batch_relevance(query_vec, rows: list[dict]) -> dict[int, float]:
+    """Map row index -> cosine similarity to *query_vec*, computed in one
+    vectorised pass. Only rows whose stored embedding matches the query
+    dimension are included; the rest are left for a lexical fallback by the
+    caller. Returns an empty map when there is no query vector."""
+    if query_vec is None:
+        return {}
+    dim = len(query_vec)
+    idxs: list[int] = []
+    vecs: list = []
+    for i, row in enumerate(rows):
+        vec = unpack_vector(row.get("embedding"))
+        if vec is not None and vec.shape[0] == dim:
+            idxs.append(i)
+            vecs.append(vec)
+    if not vecs:
+        return {}
+    sims = cosine_to_matrix(query_vec, vecs)
+    return {idx: float(sims[k]) for k, idx in enumerate(idxs)}
+
+
 def _pair_similarity(a: dict, b: dict) -> float:
     """Similarity between two long-term rows: embedding cosine when both have a
     stored vector, otherwise token overlap on subject + content."""
     va = unpack_vector(a.get("embedding"))
     vb = unpack_vector(b.get("embedding"))
-    if va and vb:
+    if va is not None and vb is not None and va.shape == vb.shape:
         return cosine_similarity(va, vb)
     return _similarity(
         _tokens(f"{a['subject']} {a['content']}"),
@@ -522,10 +544,10 @@ class MemoryStore:
             )
             rows = [dict(r) for r in await cursor.fetchall()]
 
+        rel_map = _batch_relevance(query_vec, rows)
         scored: list[tuple[float, dict]] = []
-        for row in rows:
-            vec = unpack_vector(row.get("embedding"))
-            relevance = cosine_similarity(query_vec, vec) if vec else 0.0
+        for i, row in enumerate(rows):
+            relevance = rel_map.get(i, 0.0)
             importance = (row.get("importance") or self.default_importance) / 10.0
             recency = _recency_score(row.get("last_accessed") or row.get("updated_at"))
             score = relevance + 0.5 * importance + 0.3 * recency
@@ -836,19 +858,15 @@ class MemoryStore:
         subject_norm = _normalize_subject(subject)
         cand_tokens = _tokens(f"{subject} {content}")
         cand_vec = await self._safe_embed(f"{subject}: {content}")
+        # Embedding cosine for rows with a matching-dim vector; lexical for the rest.
+        rel_map = _batch_relevance(cand_vec, rows)
 
         scored: list[tuple[float, dict]] = []
-        for row in rows:
-            row_tokens = _tokens(f"{row['subject']} {row['content']}")
-            if cand_vec:
-                vec = unpack_vector(row.get("embedding"))
-                base = (
-                    cosine_similarity(cand_vec, vec)
-                    if vec
-                    else _similarity(cand_tokens, row_tokens)
-                )
+        for i, row in enumerate(rows):
+            if i in rel_map:
+                base = rel_map[i]
             else:
-                base = _similarity(cand_tokens, row_tokens)
+                base = _similarity(cand_tokens, _tokens(f"{row['subject']} {row['content']}"))
             score = base
             if subject_norm and _normalize_subject(row["subject"]) == subject_norm:
                 score += 0.5

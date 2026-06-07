@@ -8,12 +8,12 @@ identically on a local machine and inside the container.
 
 from __future__ import annotations
 
-import array
 import asyncio
 import importlib
 import logging
-import math
 from typing import Any, cast
+
+import numpy as np
 
 log = logging.getLogger(__name__)
 
@@ -32,34 +32,51 @@ _DEFAULT_BASE_URLS = {
 }
 
 
-def pack_vector(vector: list[float]) -> bytes:
-    """Pack a float vector into a compact float32 blob for storage."""
-    return array.array("f", vector).tobytes()
+def pack_vector(vector) -> bytes:
+    """Pack a float vector (list or ndarray) into a compact float32 blob."""
+    return np.asarray(vector, dtype=np.float32).tobytes()
 
 
-def unpack_vector(blob: bytes | None) -> list[float] | None:
-    """Unpack a float32 blob back into a list of floats (None if empty)."""
+def unpack_vector(blob: bytes | None) -> np.ndarray | None:
+    """Unpack a float32 blob back into a 1-D ndarray (None if empty)."""
     if not blob:
         return None
-    arr = array.array("f")
-    arr.frombytes(blob)
-    return list(arr)
+    return np.frombuffer(blob, dtype=np.float32)
 
 
-def cosine_similarity(a: list[float], b: list[float]) -> float:
+def cosine_similarity(a, b) -> float:
     """Cosine similarity between two equal-length vectors (0.0 on degenerate input)."""
-    if not a or not b or len(a) != len(b):
+    va = np.asarray(a, dtype=np.float32)
+    vb = np.asarray(b, dtype=np.float32)
+    if va.size == 0 or vb.size == 0 or va.shape != vb.shape:
         return 0.0
-    dot = 0.0
-    na = 0.0
-    nb = 0.0
-    for x, y in zip(a, b, strict=False):
-        dot += x * y
-        na += x * x
-        nb += y * y
+    na = float(np.linalg.norm(va))
+    nb = float(np.linalg.norm(vb))
     if na == 0.0 or nb == 0.0:
         return 0.0
-    return dot / (math.sqrt(na) * math.sqrt(nb))
+    return float(np.dot(va, vb) / (na * nb))
+
+
+def cosine_to_matrix(query, vectors: list[np.ndarray]) -> np.ndarray:
+    """Cosine of *query* against every row in *vectors* in one vectorised pass.
+
+    All vectors must share the query's dimension (callers filter mismatches).
+    Returns a 1-D array of similarities (empty array when there are no vectors).
+    Rows with a zero norm score 0.0.
+    """
+    if not vectors:
+        return np.empty(0, dtype=np.float32)
+    q = np.asarray(query, dtype=np.float32)
+    qn = float(np.linalg.norm(q))
+    if qn == 0.0:
+        return np.zeros(len(vectors), dtype=np.float32)
+    matrix = np.vstack(vectors).astype(np.float32, copy=False)
+    dots = matrix @ q
+    norms = np.linalg.norm(matrix, axis=1) * qn
+    out = np.zeros(len(vectors), dtype=np.float32)
+    nonzero = norms > 0
+    out[nonzero] = dots[nonzero] / norms[nonzero]
+    return out
 
 
 class EmbeddingClient:

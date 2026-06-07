@@ -8,9 +8,10 @@ import json
 import re
 
 import aiosqlite
+import numpy as np
 import pytest
 
-from core.embeddings import cosine_similarity, pack_vector, unpack_vector
+from core.embeddings import cosine_similarity, cosine_to_matrix, pack_vector, unpack_vector
 from core.memory import MemoryStore
 
 
@@ -102,7 +103,7 @@ class TestVectorHelpers:
     def test_pack_unpack_roundtrip(self):
         vec = [0.1, -2.0, 3.5, 0.0]
         out = unpack_vector(pack_vector(vec))
-        assert out == pytest.approx(vec, abs=1e-6)
+        assert out.tolist() == pytest.approx(vec, abs=1e-6)
 
     def test_unpack_none(self):
         assert unpack_vector(None) is None
@@ -113,6 +114,22 @@ class TestVectorHelpers:
         assert cosine_similarity([1, 0], [0, 1]) == pytest.approx(0.0)
         assert cosine_similarity([], [1]) == 0.0
         assert cosine_similarity([0, 0], [1, 1]) == 0.0
+        assert cosine_similarity([1, 2, 3], [1, 2]) == 0.0  # shape mismatch
+
+    def test_cosine_to_matrix(self):
+        q = [1.0, 0.0]
+        rows = [np.array([1.0, 0.0]), np.array([0.0, 1.0]), np.array([1.0, 1.0])]
+        out = cosine_to_matrix(q, rows)
+        assert out.shape == (3,)
+        assert out[0] == pytest.approx(1.0)
+        assert out[1] == pytest.approx(0.0)
+        assert out[2] == pytest.approx(0.7071, abs=1e-3)
+        # Matches the scalar implementation row-by-row.
+        for i, r in enumerate(rows):
+            assert out[i] == pytest.approx(cosine_similarity(q, r), abs=1e-5)
+
+    def test_cosine_to_matrix_empty(self):
+        assert cosine_to_matrix([1.0, 0.0], []).shape == (0,)
 
 
 # -- Tier 2: embeddings --
