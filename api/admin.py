@@ -1277,15 +1277,16 @@ def create_admin_app(
 
         memories = ""
         if body.include_memories:
+            query = message or None
             if agent_state.agent:
-                memories = await agent_state.agent.memory.format_for_prompt()
+                memories = await agent_state.agent.memory.format_for_prompt(query=query)
             else:
                 from core.memory import MemoryStore
 
                 memories = await MemoryStore(
                     db_path=config.memory.db_path,
                     long_term_limit=config.memory.long_term_limit,
-                ).format_for_prompt()
+                ).format_for_prompt(query=query)
 
         reflections = ""
         if body.include_reflections and config.task_reflection.enabled:

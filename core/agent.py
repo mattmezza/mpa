@@ -17,6 +17,7 @@ from tavily import TavilyClient
 
 from core.compaction import compact_messages, should_compact
 from core.config import Config
+from core.embeddings import EmbeddingClient
 from core.executor import ToolExecutor
 from core.goal_decomposition import DecomposedGoal, classify_complexity, decompose_goal
 from core.history import ConversationHistory
@@ -254,9 +255,18 @@ class AgentCore:
             max_turns=config.history.max_turns,
         )
         self.history_mode = config.history.mode  # "injection" or "session"
+        mem_cfg = config.memory
         self.memory = MemoryStore(
-            db_path=config.memory.db_path,
-            long_term_limit=config.memory.long_term_limit,
+            db_path=mem_cfg.db_path,
+            long_term_limit=mem_cfg.long_term_limit,
+            embedder=self._build_embedder(),
+            injection_top_k=mem_cfg.embedding.injection_top_k,
+            default_importance=mem_cfg.default_importance,
+            archive_after_days=mem_cfg.archive_after_days,
+            archive_max_importance=mem_cfg.archive_max_importance,
+            archive_min_idle_days=mem_cfg.archive_min_idle_days,
+            hygiene_enabled=mem_cfg.hygiene_enabled,
+            hygiene_similarity_threshold=mem_cfg.hygiene_similarity_threshold,
         )
         self.reflections = ReflectionStore(
             db_path=config.task_reflection.db_path,
@@ -325,9 +335,9 @@ class AgentCore:
         # is only built once, not rebuilt and re-sent each turn). In injection
         # mode the prompt is windowed/stateless, so it is rebuilt per call.
         if self.history_mode == "session":
-            system = await self._session_system_prompt(channel, user_id, chat_id)
+            system = await self._session_system_prompt(channel, user_id, chat_id, query=message)
         else:
-            system = await self._build_system_prompt()
+            system = await self._build_system_prompt(query=message)
 
         if self.config.admin.capture_prompts:
             self._record_system_prompt(
@@ -365,16 +375,20 @@ class AgentCore:
             )
         return preamble
 
-    async def _session_system_prompt(self, channel: str, user_id: str, chat_id: str) -> str:
+    async def _session_system_prompt(
+        self, channel: str, user_id: str, chat_id: str, query: str | None = None
+    ) -> str:
         """Return the session's static system prompt, building it once if needed.
 
         Built fresh after a ``/new`` (when no snapshot exists), then reused for
         the lifetime of the session so the static content is sent only once.
+        Relevance-ranked memory injection therefore uses the first message of
+        the session as its query.
         """
         cached = await self.history.get_session_system(channel, user_id, chat_id)
         if cached is not None:
             return cached
-        system = await self._build_system_prompt()
+        system = await self._build_system_prompt(query=query)
         await self.history.set_session_system(channel, user_id, system, chat_id)
         return system
 
@@ -1130,6 +1144,35 @@ class AgentCore:
             base_url=getattr(cfg, f"{provider}_base_url", None),
         )
 
+    def _build_embedder(self) -> EmbeddingClient | None:
+        """Construct the embedding client for semantic memory, if enabled.
+
+        Credentials fall back to the matching agent provider key / base URL when
+        not set explicitly on the embedding config. Returns None when disabled
+        or when no usable API key is available (the store then runs on Tier-1
+        lexical retrieval).
+        """
+        emb = self.config.memory.embedding
+        if not emb.enabled:
+            return None
+        cfg = self.config.agent
+        api_key = emb.api_key or getattr(cfg, f"{emb.provider}_api_key", "")
+        base_url = emb.base_url or getattr(cfg, f"{emb.provider}_base_url", "") or None
+        if not api_key:
+            log.warning("Memory embeddings enabled but no API key for provider %s", emb.provider)
+            return None
+        try:
+            return EmbeddingClient(
+                provider=emb.provider,
+                api_key=api_key,
+                model=emb.model,
+                base_url=base_url,
+                dimensions=emb.dimensions,
+            )
+        except Exception:
+            log.exception("Failed to build embedding client; disabling semantic memory")
+            return None
+
     async def _maybe_decompose(self, message: str) -> DecomposedGoal | None:
         """Classify and optionally decompose a user message into sub-goals.
 
@@ -1177,9 +1220,11 @@ class AgentCore:
         except Exception:
             log.exception("Background task reflection failed")
 
-    async def _build_system_prompt(self, decomposed_goal: DecomposedGoal | None = None) -> str:
+    async def _build_system_prompt(
+        self, decomposed_goal: DecomposedGoal | None = None, query: str | None = None
+    ) -> str:
         skills_index = await self.skills.get_index_block()
-        memories = await self.memory.format_for_prompt()
+        memories = await self.memory.format_for_prompt(query=query)
 
         # Task reflections — lessons learned from past tasks
         reflections = ""
