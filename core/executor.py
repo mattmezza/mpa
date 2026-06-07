@@ -19,14 +19,10 @@ def _find_wacli_bin() -> str:
     from_path = shutil.which("wacli")
     if from_path:
         return from_path
-    # Docker: /app/tools/wacli/dist/wacli
-    docker_path = Path("/app/tools/wacli/dist/wacli")
-    if docker_path.exists():
-        return str(docker_path)
-    # Local dev: <project_root>/tools/wacli/dist/wacli
-    local_path = Path(__file__).resolve().parents[1] / "tools" / "wacli" / "dist" / "wacli"
-    if local_path.exists():
-        return str(local_path)
+    # Local dev: `go install` / `make dev-wa` drops the binary in ~/go/bin.
+    go_bin = Path.home() / "go" / "bin" / "wacli"
+    if go_bin.exists():
+        return str(go_bin)
     return "wacli"  # fallback — let the shell try PATH
 
 
@@ -95,10 +91,14 @@ class ToolExecutor:
     async def _exec(self, command: str, timeout: int) -> dict:
         """Run a shell command and capture output."""
         env = None
-        if "himalaya" in command or self.tool_env:
+        wants_wacli_label = "wacli" in command and "WACLI_DEVICE_LABEL" not in os.environ
+        if "himalaya" in command or self.tool_env or wants_wacli_label:
             env = os.environ.copy()
             if "himalaya" in command:
                 env.update(himalaya_env())
+            # wacli: identify the linked device as MPA (matches the Docker ENV).
+            if wants_wacli_label:
+                env.setdefault("WACLI_DEVICE_LABEL", "MPA")
             # Tool auth (e.g. GH_TOKEN) — only set when a tool is enabled.
             env.update(self.tool_env)
         proc = await asyncio.create_subprocess_shell(
