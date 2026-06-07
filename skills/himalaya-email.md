@@ -1,17 +1,19 @@
 # Himalaya Email CLI
 
-You have access to the `himalaya` CLI to manage emails. Himalaya is a stateless CLI
-email client — each command is independent, no session state.
+You have access to the `himalaya` CLI (**v1.2.0**) to manage emails. Himalaya is a
+stateless CLI email client — each command is independent, no session state.
 
 ## Configuration
 
 Himalaya is pre-configured. The available accounts are defined in its TOML config file.
 Always specify the account with `-a <account_name>`.
 
-To see which accounts are available:
-
 ```bash
+# List configured accounts
 himalaya account list
+
+# List folders for an account (use exact names from here for move/copy)
+himalaya folder list -a personal -o json
 ```
 
 ## Reading emails
@@ -23,90 +25,119 @@ himalaya account list
 himalaya envelope list -a personal -s 10 -o json
 
 # List emails in a specific folder
-himalaya envelope list -a work --folder "Archives" -s 20 -o json
+himalaya envelope list -a personal --folder "Archives" -s 20 -o json
 
 # Page through results (page 2)
 himalaya envelope list -a personal -s 10 -p 2 -o json
 ```
 
-The JSON output is an array of envelope objects with fields like id, subject, from, date, and flags.
+JSON output is an array of envelope objects with fields like `id`, `subject`, `from`,
+`date`, and `flags`.
 
 ### Read a specific email
 
 ```bash
-# Read email by ID (returns plain text body with headers)
+# Read email by ID — AUTO-MARKS the message as Seen
 himalaya message read -a personal 123
+
+# Preview WITHOUT marking as Seen
+himalaya message read -a personal -p 123
 
 # Read specific headers only
 himalaya message read -a personal 123 --header From --header Subject --header Date
 ```
 
-### Search emails
+### Search emails (query DSL)
 
-Himalaya uses IMAP search queries after `--`:
+v1.x uses a **positional query DSL** — no `--`, no raw IMAP syntax.
+
+- Conditions: `date`, `before`, `after`, `from`, `to`, `subject`, `body`, `flag`
+- Operators: `not`, `and`, `or`
+- Ordering: `order by <date|from|to|subject> [asc|desc]`
 
 ```bash
-# Search by subject
-himalaya envelope list -a work -o json -- "subject invoice"
+# Unread emails
+himalaya envelope list -a personal -o json "not flag seen"
 
-# Search by sender
-himalaya envelope list -a personal -o json -- "from alice@example.com"
+# By subject
+himalaya envelope list -a personal -o json "subject invoice"
 
-# Search for unseen emails
-himalaya envelope list -a personal -o json -- "not flag seen"
+# By sender
+himalaya envelope list -a personal -o json "from alice@example.com"
 
-# Combined search
-himalaya envelope list -a work -o json -- "from ikea subject contract unseen"
+# Combined, newest first
+himalaya envelope list -a personal -o json "from ikea and subject contract and not flag seen order by date desc"
 ```
 
 ## Sending emails
 
-**IMPORTANT:** Do NOT use `run_command` with piped `printf` / `echo` commands to send or reply to
-emails. Instead, always use the dedicated structured tools:
+`message read/reply/forward/write/edit` open `$EDITOR` interactively — **not**
+automation-safe. For automation use the non-interactive `template` path, or pipe a raw
+message into `message send`.
 
-- **`send_email`** — for composing and sending a new email (pass account, to, subject, body, etc.)
-- **`reply_email`** — for replying to an existing email by message ID (pass account, message_id, body)
-
-These tools handle shell quoting and piping internally. Using `run_command` with `printf ... | himalaya`
-will fail because `printf` is not an allowed command prefix.
-
-### Forward an email
-
-Forwarding is not available as a structured tool, so use `run_command` with himalaya as the first
-command in the pipe:
+### Send a new email
 
 ```bash
-# Forward with added text
-himalaya -a work message forward 123 <<< 'FYI — see below.'
+printf 'From: matteo@merola.co\nTo: bob@example.com\nSubject: Hello\n\nBody text here.\n' \
+  | himalaya message send -a personal
 ```
+
+### Reply (and reply-all)
+
+```bash
+# Reply to sender
+himalaya template reply -a personal 123 "Thanks, got it." | himalaya template send -a personal
+
+# Reply-all: add -A
+himalaya template reply -a personal -A 123 "Thanks all." | himalaya template send -a personal
+```
+
+### Forward
+
+```bash
+himalaya template forward -a personal 123 "FYI — see below." | himalaya template send -a personal
+```
+
+Always include a correct `From:` header matching the account email. Before sending,
+present the draft to the user for approval.
 
 ## Managing emails
 
-```bash
-# Move to a folder
-himalaya message move 123 "Archives" -a personal
+`message move`/`copy` take the **TARGET folder FIRST**, then the ID. `-f` sets the
+SOURCE folder.
 
-# Copy to a folder
-himalaya message copy 123 "Important" -a personal
+```bash
+# Move to a folder (TARGET first)
+himalaya message move -a personal Archives 123
+
+# Move from a non-INBOX source folder
+himalaya message move -a personal -f Spam INBOX 123
+
+# Copy to a folder (TARGET first)
+himalaya message copy -a personal Important 123
+
+# Mark as spam — no spam flag exists; move to the Spam folder
+# (run `folder list` for the exact name)
+himalaya message move -a personal Spam 123
 
 # Delete (moves to Trash)
-himalaya message delete 123 -a personal
+himalaya message delete -a personal 123
 
-# Add a flag
-himalaya flag add 123 Seen -a personal
-himalaya flag add 123 Flagged -a personal
+# Mark read / unread
+himalaya flag add -a personal 123 Seen
+himalaya flag remove -a personal 123 Seen
 
-# Remove a flag
-himalaya flag remove 123 Seen -a personal
-
-# List all folders
-himalaya folder list -o json -a personal
+# Other flags
+himalaya flag add -a personal 123 Flagged
 ```
 
 ## Important notes
 
-- Always use `-o json` when you need to parse results programmatically.
-- Email IDs are folder-relative — always specify `--folder` when not using INBOX.
-- Use `printf` with `\n` for newlines when constructing email messages to pipe to himalaya. Never use bare `echo` with literal newlines as it can break in shell.
-- When sending on behalf of the user, always include the correct `From:` header matching the account's email address.
-- Before sending, always present the draft to the user for approval.
+- Use `-o json` whenever you need to parse results programmatically.
+- Email IDs are folder-relative — specify `--folder` when not operating on INBOX.
+- `message read` marks Seen; use `-p`/`--preview` to avoid changing flags.
+- Sending uses SMTP auth from the account config. The personal account reuses
+  `$MAIL_MEROLA_CO_APP_PASSWORD` for both IMAP and SMTP — if sending fails with an auth
+  error, confirm that env var is exported.
+- Use `printf` with `\n` for newlines when building raw messages; never use bare `echo`
+  with literal newlines.
