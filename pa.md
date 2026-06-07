@@ -1278,7 +1278,7 @@ personal-agent/
 ├── api/
 │   └── admin.py                # FastAPI admin endpoints
 │
-├── tools/wacli/                # WhatsApp CLI (Go, vendored)
+│   # wacli (WhatsApp CLI) is installed from pinned upstream, not vendored
 │
 ├── cli-configs/                # Config files for CLI tools (mounted into container)
 │   ├── himalaya.toml           # → ~/.config/himalaya/config.toml

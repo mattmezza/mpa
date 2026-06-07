@@ -3,11 +3,11 @@ FROM python:3.14-slim
 WORKDIR /app
 
 # System deps (ffmpeg for voice pipeline, curl for health checks, sqlite3 for memory)
+# golang + build-essential build wacli (CGO, sqlite_fts5) from the pinned upstream tag.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg curl ca-certificates jq sqlite3 \
     bash tar gzip xz-utils \
     golang build-essential pkg-config \
-    nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Himalaya CLI (pre-built Rust binary for email management)
@@ -22,14 +22,20 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Install wacli from pinned upstream tag (github.com/openclaw/wacli).
+# Bump WACLI_VERSION to cross WhatsApp protocol breaks (e.g. 405 Client Outdated).
+ARG WACLI_VERSION=v0.11.0
+RUN CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
+    GOBIN=/usr/local/bin \
+    go install -tags sqlite_fts5 github.com/openclaw/wacli/cmd/wacli@${WACLI_VERSION} \
+    && wacli version
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Install dependencies (cached layer — only re-runs when lockfile changes)
 COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev --no-install-project
-
-# Contacts tooling handled by native CLI in /app/tools
 
 # Create non-root user
 RUN groupadd --gid 10001 mpa && \
@@ -52,17 +58,14 @@ RUN ARCH=$(dpkg --print-architecture) && \
     /tmp/tailwindcss --input api/static/input.css --output api/static/style.css --minify && \
     rm /tmp/tailwindcss
 
-# CLI config directories
-RUN mkdir -p /home/mpa/.config/himalaya /app/data \
+# Data directory
+RUN mkdir -p /app/data \
     && chown -R mpa:mpa /home/mpa /app
 
-# Build wacli
-RUN corepack enable && \
-    corepack prepare pnpm@9.15.2 --activate && \
-    cd tools/wacli && \
-    pnpm -s build
-
 USER mpa
+
+# Identify the linked WhatsApp device as "MPA" (native since wacli 0.2.0).
+ENV WACLI_DEVICE_LABEL=MPA
 
 EXPOSE 8000
 CMD ["uv", "run", "python", "-m", "core.main"]

@@ -47,7 +47,9 @@ Subject: Meeting tomorrow
 
 ## WhatsApp
 
-MPA uses [wacli](https://github.com/nickelc/wacli) — a local WhatsApp CLI written in Go — for WhatsApp integration. No cloud APIs or business verification needed.
+MPA uses [wacli](https://github.com/openclaw/wacli) — a local WhatsApp CLI written in Go — for WhatsApp integration. No cloud APIs or business verification needed.
+
+The binary is not vendored: the Docker image installs a pinned upstream tag (`WACLI_VERSION` in the `Dockerfile`, currently `v0.11.0`) with `go install`. For local dev, `make dev-wa` installs the same tag into `~/go/bin`. Point MPA at a custom binary with the `WACLI_BIN` env var. The linked device shows up as **MPA** via `WACLI_DEVICE_LABEL`.
 
 ### Setup
 
@@ -73,10 +75,18 @@ channels:
 - Messages are received via a webhook from wacli to the agent
 - Outgoing messages are sent via wacli CLI commands
 
+### Upgrading wacli
+
+WhatsApp force-unlinks outdated clients (`405 Client Outdated`), which shows up
+as repeated auth loss. The fix is a version bump:
+
+1. Bump `WACLI_VERSION` in the `Dockerfile` (and `Makefile`) to the new upstream tag and rebuild.
+2. Crossing a protocol break invalidates the session, so **re-authenticate once**: in the admin UI go to Channels > WhatsApp and rescan the QR code. Only `session.db` changes; the message store (`wacli.db`) is preserved — back it up first to be safe.
+
 ### Limitations
 
 - Uses WhatsApp Web protocol (unofficial)
-- Session may need re-authentication periodically
+- Session may need re-authentication periodically (and after a wacli version bump)
 - WhatsApp may restrict accounts using unofficial clients
 
 ## Channel architecture

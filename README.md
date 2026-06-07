@@ -88,7 +88,6 @@ MPA uses a dual-layer config system:
 | `character.md` | Agent personality and communication style (editable) |
 | `personalia.md` | Agent identity facts — name, owner, context (append-only) |
 | `skills/*.md` | Skill documents that teach the agent how to use tools |
-| `cli-configs/` | Configuration for Himalaya |
 
 ## Project structure
 
@@ -163,8 +162,8 @@ Behavior and identity are configured in `character.md.example` and `personalia.m
 
 ## WhatsApp
 
-MPA uses wacli to authenticate and sync WhatsApp locally. The admin UI starts auth, displays the QR code, and manages sync.
-See `tools/wacli/` for the vendored CLI source and build instructions.
+MPA uses [wacli](https://github.com/openclaw/wacli) to authenticate and sync WhatsApp locally. The admin UI starts auth, displays the QR code, and manages sync.
+The binary is installed from a pinned upstream tag (`WACLI_VERSION` in the `Dockerfile`; `make dev-wa` for local dev) — not vendored. See `docs/content/docs/channels.mdx` for upgrade/re-auth notes.
 
 ## Tech stack
 

@@ -6,6 +6,9 @@ TAILWIND := ./tailwindcss
 CSS_IN := api/static/input.css
 CSS_OUT := api/static/style.css
 
+# Pinned upstream wacli (github.com/openclaw/wacli). Keep in sync with Dockerfile.
+WACLI_VERSION := v0.11.0
+
 # Show available targets
 help:
 	@echo ""
@@ -23,7 +26,7 @@ help:
 	@echo "    make dev          Show instructions for running dev services"
 	@echo "    make dev-agent    Run agent with auto-reload"
 	@echo "    make dev-css      Run Tailwind CSS watcher"
-	@echo "    make dev-wa       Build WhatsApp CLI (wacli)"
+	@echo "    make dev-wa       Install WhatsApp CLI (wacli) from upstream"
 	@echo "    make docs-dev     Run docs site with hot reload"
 	@echo ""
 	@echo "  Quality:"
@@ -94,11 +97,9 @@ dev:
 	@echo "  2. Tailwind CSS watcher:"
 	@echo "     make dev-css"
 	@echo ""
-	@if [ -d tools/wacli ]; then \
-		echo "  3. WhatsApp (wacli build):"; \
-		echo "     make dev-wa"; \
-		echo ""; \
-	fi
+	@echo "  3. WhatsApp (wacli install):"
+	@echo "     make dev-wa"
+	@echo ""
 	@echo "  Docs (optional):"
 	@echo "     make docs-dev"
 	@echo ""
@@ -114,12 +115,16 @@ dev-agent:
 dev-css:
 	$(TAILWIND) --input $(CSS_IN) --output $(CSS_OUT) --watch
 
-# Dev: WhatsApp (wacli)
+# Dev: WhatsApp (wacli) — install the pinned upstream binary into $GOBIN/~/go/bin.
+# Needs Go + a C toolchain (CGO, sqlite_fts5). Override WACLI_BIN to point the
+# agent elsewhere; otherwise core/wacli.py resolves it from PATH or ~/go/bin.
 dev-wa:
-	@if [ ! -x tools/wacli/dist/wacli ]; then \
-		echo "Building wacli..."; \
-		cd tools/wacli && pnpm -s build; \
-	fi
+	@command -v wacli >/dev/null 2>&1 || test -x "$(HOME)/go/bin/wacli" || { \
+		echo "Installing wacli $(WACLI_VERSION) from github.com/openclaw/wacli..."; \
+		CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
+			go install -tags sqlite_fts5 github.com/openclaw/wacli/cmd/wacli@$(WACLI_VERSION); \
+	}
+	@wacli version 2>/dev/null || "$(HOME)/go/bin/wacli" version
 
 # Remove venv and caches
 clean:
