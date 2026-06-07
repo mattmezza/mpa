@@ -58,8 +58,8 @@ RUN ARCH=$(dpkg --print-architecture) && \
     /tmp/tailwindcss --input api/static/input.css --output api/static/style.css --minify && \
     rm /tmp/tailwindcss
 
-# CLI config directories
-RUN mkdir -p /home/mpa/.config/himalaya /app/data \
+# Data directory
+RUN mkdir -p /app/data \
     && chown -R mpa:mpa /home/mpa /app
 
 USER mpa

@@ -88,7 +88,6 @@ MPA uses a dual-layer config system:
 | `character.md` | Agent personality and communication style (editable) |
 | `personalia.md` | Agent identity facts — name, owner, context (append-only) |
 | `skills/*.md` | Skill documents that teach the agent how to use tools |
-| `cli-configs/` | Configuration for Himalaya |
 
 ## Project structure
 

@@ -24,8 +24,6 @@ build/
 config.yml
 character.md
 personalia.md
-cli-configs/*
-!cli-configs/*.example
 
 # Data (runtime state, DB, models)
 data/

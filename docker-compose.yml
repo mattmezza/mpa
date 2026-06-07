@@ -11,5 +11,4 @@ services:
       - ./character.md:/app/character.md:ro
       - ./personalia.md:/app/personalia.md
       - ./skills:/app/skills:ro
-      - ./cli-configs/himalaya.toml:/home/mpa/.config/himalaya/config.toml:ro
     env_file: .env
