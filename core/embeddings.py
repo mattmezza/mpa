@@ -9,12 +9,21 @@ identically on a local machine and inside the container.
 from __future__ import annotations
 
 import array
+import asyncio
 import importlib
 import logging
 import math
 from typing import Any, cast
 
 log = logging.getLogger(__name__)
+
+# Default local model: small, CPU-friendly, 384-dim (~130MB ONNX). Good balance
+# of quality and speed on modest self-hosted hardware.
+DEFAULT_LOCAL_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_LOCAL_CACHE = "models"
+
+# Provider names that mean "run the model locally" rather than call an API.
+LOCAL_PROVIDERS = frozenset({"local", "fastembed"})
 
 # OpenAI-compatible base URLs for providers that expose an /embeddings endpoint.
 _DEFAULT_BASE_URLS = {
@@ -91,3 +100,84 @@ class EmbeddingClient:
         """Return a single embedding vector (empty list on failure)."""
         vectors = await self.embed([text])
         return vectors[0] if vectors else []
+
+
+class LocalEmbeddingClient:
+    """Runs a sentence-embedding model locally via ``fastembed`` (ONNX/CPU).
+
+    No API key, no network at inference time, and the data never leaves the
+    machine. The model is loaded lazily on first use (in a worker thread, so it
+    never blocks construction or the event loop) and cached for the process
+    lifetime. In Docker the model is prefetched at build time (see the
+    ``prefetch`` entry point below) so the first call has no download latency.
+    """
+
+    def __init__(self, model: str = DEFAULT_LOCAL_MODEL, cache_dir: str | None = None):
+        self.model = model or DEFAULT_LOCAL_MODEL
+        self.cache_dir = cache_dir or DEFAULT_LOCAL_CACHE
+        self._model: Any = None
+        self._lock = asyncio.Lock()
+
+    def _load_model(self) -> Any:
+        try:
+            module = importlib.import_module("fastembed")
+            text_embedding = cast(Any, getattr(module, "TextEmbedding"))
+        except Exception as exc:  # pragma: no cover - import guard
+            raise RuntimeError(
+                "fastembed is required for local embeddings (pip install fastembed)"
+            ) from exc
+        return text_embedding(model_name=self.model, cache_dir=self.cache_dir)
+
+    async def _ensure_model(self) -> Any:
+        if self._model is None:
+            async with self._lock:
+                if self._model is None:
+                    log.info(
+                        "Loading local embedding model %s (cache=%s)", self.model, self.cache_dir
+                    )
+                    self._model = await asyncio.to_thread(self._load_model)
+        return self._model
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        model = await self._ensure_model()
+
+        def _run() -> list[list[float]]:
+            return [list(map(float, vec)) for vec in model.embed(list(texts))]
+
+        return await asyncio.to_thread(_run)
+
+    async def embed_one(self, text: str) -> list[float]:
+        vectors = await self.embed([text])
+        return vectors[0] if vectors else []
+
+
+def prefetch_local_model(
+    model: str = DEFAULT_LOCAL_MODEL, cache_dir: str = DEFAULT_LOCAL_CACHE
+) -> int:
+    """Download a local embedding model into *cache_dir* and verify it runs.
+
+    Returns the embedding dimension. Used by the Docker build (and the admin
+    "Download model" button) so the model is bundled ahead of time.
+    """
+    module = importlib.import_module("fastembed")
+    text_embedding = cast(Any, getattr(module, "TextEmbedding"))
+    embedder = text_embedding(model_name=model, cache_dir=cache_dir)
+    vec = next(iter(embedder.embed(["warmup"])))
+    dim = len(list(vec))
+    log.info("Prefetched local embedding model %s (dim=%d) into %s", model, dim, cache_dir)
+    return dim
+
+
+if __name__ == "__main__":  # pragma: no cover - build-time / CLI use
+    import sys
+
+    _args = sys.argv[1:]
+    if _args and _args[0] == "prefetch":
+        _model = _args[1] if len(_args) > 1 else DEFAULT_LOCAL_MODEL
+        _cache = _args[2] if len(_args) > 2 else DEFAULT_LOCAL_CACHE
+        _dim = prefetch_local_model(_model, _cache)
+        print(f"prefetched {_model} (dim={_dim}) -> {_cache}")
+    else:
+        print("usage: python -m core.embeddings prefetch [MODEL] [CACHE_DIR]")

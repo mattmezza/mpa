@@ -17,7 +17,7 @@ from tavily import TavilyClient
 
 from core.compaction import compact_messages, should_compact
 from core.config import Config
-from core.embeddings import EmbeddingClient
+from core.embeddings import LOCAL_PROVIDERS, EmbeddingClient, LocalEmbeddingClient
 from core.executor import ToolExecutor
 from core.goal_decomposition import DecomposedGoal, classify_complexity, decompose_goal
 from core.history import ConversationHistory
@@ -1144,17 +1144,26 @@ class AgentCore:
             base_url=getattr(cfg, f"{provider}_base_url", None),
         )
 
-    def _build_embedder(self) -> EmbeddingClient | None:
+    def _build_embedder(self):
         """Construct the embedding client for semantic memory, if enabled.
 
-        Credentials fall back to the matching agent provider key / base URL when
-        not set explicitly on the embedding config. Returns None when disabled
-        or when no usable API key is available (the store then runs on Tier-1
+        For ``provider: local`` a lazy on-device fastembed client is returned
+        (no model load until first use, so this stays cheap). For API providers
+        credentials fall back to the matching agent provider key / base URL.
+        Returns None when disabled or unusable (the store then runs on Tier-1
         lexical retrieval).
         """
         emb = self.config.memory.embedding
         if not emb.enabled:
             return None
+
+        if emb.provider in LOCAL_PROVIDERS:
+            try:
+                return LocalEmbeddingClient(model=emb.model, cache_dir=emb.cache_dir)
+            except Exception:
+                log.exception("Failed to build local embedder; disabling semantic memory")
+                return None
+
         cfg = self.config.agent
         api_key = emb.api_key or getattr(cfg, f"{emb.provider}_api_key", "")
         base_url = emb.base_url or getattr(cfg, f"{emb.provider}_base_url", "") or None

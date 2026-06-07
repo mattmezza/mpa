@@ -141,12 +141,13 @@ class EmbeddingConfig(BaseModel):
     native extension required, identical on local and container SQLite).
     """
 
-    enabled: bool = False
-    provider: str = "openai"  # OpenAI-compatible embeddings endpoint
-    model: str = "text-embedding-3-small"
-    api_key: str = ""  # falls back to the matching agent provider key when empty
-    base_url: str = ""  # falls back to the agent provider base URL when empty
-    dimensions: int = 0  # 0 = provider default
+    enabled: bool = True
+    provider: str = "local"  # "local" (fastembed, on-device) or an OpenAI-compatible API
+    model: str = "BAAI/bge-small-en-v1.5"  # local model id; for API use e.g. text-embedding-3-small
+    cache_dir: str = "models"  # where local models are stored (bundled in the Docker image)
+    api_key: str = ""  # API providers only; falls back to the agent provider key when empty
+    base_url: str = ""  # API providers only; falls back to the agent provider base URL when empty
+    dimensions: int = 0  # 0 = provider default (API providers only)
     injection_top_k: int = 12  # relevance-ranked memories injected per turn
 
 

@@ -78,16 +78,18 @@ memory:
   consolidation_model: "claude-haiku-4-5"  # model for scheduled consolidation + hygiene
 
   # Tier 2 — semantic similarity + relevance-ranked injection.
-  # Off by default: the memory pipeline works on lexical retrieval with no
-  # extra dependency. When enabled, vectors come from an OpenAI-compatible
-  # /embeddings endpoint and are stored alongside each long-term memory.
+  # Default: a local on-device model (fastembed, private, no API key, free).
+  # The model is bundled in the Docker image (prefetched at build). Set
+  # enabled: false to fall back to lexical (word-overlap) retrieval, or switch
+  # provider to "openai"/"google" to use a remote embeddings API instead.
   embedding:
-    enabled: false
-    provider: "openai"               # OpenAI-compatible embeddings endpoint
-    model: "text-embedding-3-small"
-    api_key: ""                      # falls back to the agent provider key when empty
-    base_url: ""                     # falls back to the agent provider base URL when empty
-    dimensions: 0                    # 0 = provider default
+    enabled: true
+    provider: "local"                # "local" (on-device) | "openai" | "google"
+    model: "BAAI/bge-small-en-v1.5"  # local model id; for API e.g. text-embedding-3-small
+    cache_dir: "models"              # where local models live (bundled in the image)
+    api_key: ""                      # API providers only; falls back to the agent provider key
+    base_url: ""                     # API providers only; falls back to the agent provider base URL
+    dimensions: 0                    # 0 = provider default (API providers only)
     injection_top_k: 12              # relevance-ranked memories injected per turn
 
   # Tier 3 — forgetting / importance / reinforcement
