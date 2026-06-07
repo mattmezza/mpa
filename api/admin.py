@@ -1750,7 +1750,7 @@ def create_admin_app(
         if not available:
             result["error"] = (
                 "wacli binary not found. "
-                "Run 'make dev-wa' or 'cd tools/wacli && pnpm build' to compile it."
+                "Run 'make dev-wa' to install it, or set WACLI_BIN to its path."
             )
         return result
 

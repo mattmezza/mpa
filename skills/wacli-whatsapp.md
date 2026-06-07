@@ -172,6 +172,29 @@ These require user confirmation before running:
 
 - Always use `--json` when you need to parse results programmatically.
 - Read commands (`messages`, `contacts search/show`, `chats`, `groups list`) query the local DB and do not require a WhatsApp connection.
-- Write commands (`sync`, `contacts refresh`, `groups refresh/info/rename`) connect to WhatsApp and acquire an exclusive file lock.
-- Only one wacli process can hold the lock at a time. If another is running, the command will fail immediately.
+- Write commands (`sync`, `contacts refresh`, `groups refresh/info/rename`) connect to WhatsApp and acquire an exclusive store lock.
+- Only one wacli process can write the store at a time. Add `--lock-wait 30s` to wait for the lock instead of failing fast when a `sync` is running; add `--read-only` to a read command to skip the lock entirely.
 - When the user says "check my WhatsApp" or "any new messages", **always sync first**, then list recent messages.
+
+## Global flags (wacli v0.11)
+
+- `--read-only` — reject any command that would write WhatsApp or the local store, and open the store without taking the session lock. Use for pure reads (`messages`, `chats`, `contacts search/show`).
+- `--lock-wait DUR` — wait up to `DUR` (e.g. `30s`) for the store lock before failing. Use on write commands when a background sync may hold the lock.
+- `--account NAME` — select a named account from `config.yaml` (multi-account setups).
+- `--events` — emit machine-readable NDJSON lifecycle events on stderr.
+
+## Newer commands (v0.7–0.11)
+
+```bash
+# Forward a stored message to another chat
+wacli --json messages forward --chat <src-jid> --id <msg-id> --to <dst-jid>
+
+# Revoke (delete for everyone) a message you sent
+wacli --json messages revoke --chat <jid> --id <msg-id>
+
+# Post a WhatsApp status broadcast
+wacli --json send status --message "hello"
+
+# List recent calls
+wacli --json calls list --limit 20
+```
