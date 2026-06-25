@@ -160,6 +160,18 @@ class _Session:
 
     def __init__(self, profile: str, headless: bool):
         self.profile = profile
+        # Headed Chromium needs an X/Wayland display. On a headless server (e.g.
+        # the Docker image) there is none, so a "show the browser" setting would
+        # crash the launch with "Missing X server or $DISPLAY". Fall back to
+        # headless instead of crashing. (CDP sidecar ignores this — it's remote.)
+        if (
+            not headless
+            and sys.platform.startswith("linux")
+            and not os.environ.get("DISPLAY")
+            and not os.environ.get("WAYLAND_DISPLAY")
+        ):
+            print("[browser] no display available — running headless", file=sys.stderr)
+            headless = True
         self.headless = headless
         self.is_cdp = False
         self._pw = None
