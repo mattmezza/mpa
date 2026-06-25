@@ -222,22 +222,117 @@ async def test_distinct_writes_are_independent_after_success(agent, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_identical_write_is_deduplicated(agent, monkeypatch) -> None:
-    """An identical repeated write within a turn is still suppressed."""
+    """An identical repeated write within a turn is still suppressed.
+
+    Uses send_email — a plain write — because manage_jobs is deliberately
+    exempt from the generic guard (it has its own id-based guard, see #11).
+    """
+    from core.llm import LLMToolCall
+
+    async def _ok_send_email(params):
+        return {"ok": True}
+
     monkeypatch.setattr(agent, "_request_approval", _approve)
-    monkeypatch.setattr(agent, "_tool_manage_jobs", _ok_manage_jobs)
+    monkeypatch.setattr(agent, "_tool_send_email", _ok_send_email)
+    agent.channels = {"telegram": object()}
+
+    args = {"account": "a", "to": "x@y.z", "subject": "s", "body": "b"}
+    state = agent._new_request_state()
+    first = await agent._execute_tool(
+        LLMToolCall(id="1", name="send_email", arguments=args), "telegram", "u1", state
+    )
+    repeat = await agent._execute_tool(
+        LLMToolCall(id="2", name="send_email", arguments=dict(args)), "telegram", "u1", state
+    )
+    assert first.get("ok") is True
+    assert "already completed" in repeat.get("error", "")
+
+
+# ---------------------------------------------------------------------------
+# Job creation (#11): block only a live duplicate id, never a prior write
+# ---------------------------------------------------------------------------
+
+
+async def _no_sync(job_id):  # scheduler.sync_job stub — no APScheduler in tests
+    return None
+
+
+@pytest.mark.asyncio
+async def test_brand_new_job_id_never_blocked(agent, monkeypatch) -> None:
+    """A brand-new job id creates even after another job was made this turn."""
+    monkeypatch.setattr(agent, "_request_approval", _approve)
+    monkeypatch.setattr(agent.scheduler, "sync_job", _no_sync)
     agent.channels = {"telegram": object()}
 
     state = agent._new_request_state()
-    call = _job_call("1", task="ping mum", run_at="2026-07-01T09:00:00")
-    first = await agent._execute_tool(call, "telegram", "u1", state)
-    repeat = await agent._execute_tool(
-        _job_call("2", task="ping mum", run_at="2026-07-01T09:00:00"),
+    await agent._execute_tool(
+        _job_call("1", job_id="setup", task="t", run_at="2026-07-01T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    new = await agent._execute_tool(
+        _job_call(
+            "2",
+            job_id="flight-monitor-lx1272",
+            task="watch flight",
+            run_at="2026-07-02T09:00:00",
+        ),
+        "telegram",
+        "u1",
+        state,
+    )
+    assert new.get("ok") is True
+    assert new.get("job_id") == "flight-monitor-lx1272"
+
+
+@pytest.mark.asyncio
+async def test_recreate_active_job_id_blocked_by_id_not_generic_guard(agent, monkeypatch) -> None:
+    """Recreating a live id is blocked with an id-based message, not 'already completed'."""
+    monkeypatch.setattr(agent, "_request_approval", _approve)
+    monkeypatch.setattr(agent.scheduler, "sync_job", _no_sync)
+    agent.channels = {"telegram": object()}
+
+    state = agent._new_request_state()
+    first = await agent._execute_tool(
+        _job_call("1", job_id="flight-x", task="t", run_at="2026-07-01T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    second = await agent._execute_tool(
+        _job_call("2", job_id="flight-x", task="t", run_at="2026-07-01T09:00:00"),
         "telegram",
         "u1",
         state,
     )
     assert first.get("ok") is True
-    assert "already completed" in repeat.get("error", "")
+    assert "already exists and is active" in second.get("error", "")
+    assert "already completed" not in second.get("error", "")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_job_id_can_be_recreated(agent, monkeypatch) -> None:
+    """A done/cancelled id is free to recreate (only live ids block)."""
+    monkeypatch.setattr(agent, "_request_approval", _approve)
+    monkeypatch.setattr(agent.scheduler, "sync_job", _no_sync)
+    agent.channels = {"telegram": object()}
+
+    state = agent._new_request_state()
+    await agent._execute_tool(
+        _job_call("1", job_id="flight-z", task="t", run_at="2026-07-01T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    await agent._tool_manage_jobs({"action": "cancel", "job_id": "flight-z"})
+    again = await agent._execute_tool(
+        _job_call("2", job_id="flight-z", task="t2", run_at="2026-07-03T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    assert again.get("ok") is True
 
 
 @pytest.mark.asyncio
