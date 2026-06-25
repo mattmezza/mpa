@@ -1318,8 +1318,6 @@ class AgentCore:
         cmd = params.get("command", "")
         if "browser.py act" not in cmd:
             return None
-        import shlex
-
         from tools.browser import _preview_path
 
         parts = shlex.split(cmd)
