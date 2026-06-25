@@ -86,13 +86,17 @@ class VoicePipeline:
 
     # -- TTS ----------------------------------------------------------------
 
-    async def synthesize(self, text: str) -> bytes:
-        """Convert text to speech using edge-tts.  Returns raw MP3 bytes."""
+    async def synthesize(self, text: str, voice: str | None = None) -> bytes:
+        """Convert text to speech using edge-tts.  Returns raw MP3 bytes.
+
+        ``voice`` overrides the configured default (e.g. an active persona's
+        own voice); empty/None falls back to ``self.tts_voice``.
+        """
         if not self.tts_enabled:
             raise RuntimeError("TTS is disabled in config")
 
         text = clean_for_speech(text)
-        communicate = edge_tts.Communicate(text, self.tts_voice)
+        communicate = edge_tts.Communicate(text, voice or self.tts_voice)
         buf = io.BytesIO()
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS personas (
     name TEXT PRIMARY KEY,
     role TEXT DEFAULT '',
     emoji TEXT DEFAULT '',
+    voice TEXT DEFAULT '',
     personalia TEXT DEFAULT '',
     character TEXT DEFAULT '',
     skills TEXT DEFAULT '',
@@ -45,6 +46,7 @@ class Persona:
     name: str
     role: str = ""
     emoji: str = ""
+    voice: str = ""  # TTS voice override; empty = configured default
     personalia: str = ""
     character: str = ""
     skills: list[str] = field(default_factory=list)  # allowlist; [] = all
@@ -106,6 +108,7 @@ def parse_markdown(text: str, *, name: str) -> Persona:
         name=name,
         role=str(fm.get("role", "") or ""),
         emoji=str(fm.get("emoji", "") or ""),
+        voice=str(fm.get("voice", "") or ""),
         personalia=str(fm.get("personalia", "") or ""),
         character=character,
         skills=_as_list(fm.get("skills")),
@@ -119,6 +122,7 @@ def to_markdown(p: Persona) -> str:
     fm = {
         "role": p.role,
         "emoji": p.emoji,
+        "voice": p.voice,
         "skills": p.skills,
         "tools": p.tools,
         "secrets": p.secrets,
@@ -167,16 +171,18 @@ class PersonaStore:
     async def _upsert(db: aiosqlite.Connection, p: Persona) -> None:
         await db.execute(
             "INSERT INTO personas "
-            "(name, role, emoji, personalia, character, skills, tools, secrets) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "(name, role, emoji, voice, personalia, character, skills, tools, secrets) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(name) DO UPDATE SET "
-            "role=excluded.role, emoji=excluded.emoji, personalia=excluded.personalia, "
-            "character=excluded.character, skills=excluded.skills, tools=excluded.tools, "
+            "role=excluded.role, emoji=excluded.emoji, voice=excluded.voice, "
+            "personalia=excluded.personalia, character=excluded.character, "
+            "skills=excluded.skills, tools=excluded.tools, "
             "secrets=excluded.secrets, updated_at=datetime('now')",
             (
                 p.name,
                 p.role,
                 p.emoji,
+                p.voice,
                 p.personalia,
                 p.character,
                 "\n".join(p.skills),
@@ -191,6 +197,7 @@ class PersonaStore:
             name=row["name"],
             role=row["role"] or "",
             emoji=row["emoji"] or "",
+            voice=row["voice"] or "",
             personalia=row["personalia"] or "",
             character=row["character"] or "",
             skills=_as_list(row["skills"]),

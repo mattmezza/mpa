@@ -578,7 +578,9 @@ class AgentCore:
         log.info("Response: %s", final_text[:200])
 
         # Check if the LLM wants to respond with voice
-        voice_bytes = await self._maybe_synthesize_voice(final_text)
+        voice_bytes = await self._maybe_synthesize_voice(
+            final_text, voice=persona.voice if persona else None
+        )
         if voice_bytes:
             final_text = final_text.replace("[respond_with_voice]", "").strip()
 
@@ -699,7 +701,9 @@ class AgentCore:
         system_notice = await self._maybe_compact(channel, user_id, chat_id, response)
 
         # Check if the LLM wants to respond with voice
-        voice_bytes = await self._maybe_synthesize_voice(final_text)
+        voice_bytes = await self._maybe_synthesize_voice(
+            final_text, voice=persona.voice if persona else None
+        )
         if voice_bytes:
             final_text = final_text.replace("[respond_with_voice]", "").strip()
 
@@ -730,12 +734,13 @@ class AgentCore:
             return (message + suffix) if message else suffix.strip()
         return message
 
-    async def _maybe_synthesize_voice(self, text: str) -> bytes | None:
-        """Synthesize voice if requested by the LLM."""
+    async def _maybe_synthesize_voice(self, text: str, voice: str | None = None) -> bytes | None:
+        """Synthesize voice if requested by the LLM, using the persona's voice
+        when one is set (else the configured default)."""
         if "[respond_with_voice]" in text and self.voice:
             clean_text = text.replace("[respond_with_voice]", "").strip()
             try:
-                return await self.voice.synthesize(clean_text)
+                return await self.voice.synthesize(clean_text, voice=voice)
             except Exception:
                 log.exception("TTS synthesis failed, sending text only")
         return None

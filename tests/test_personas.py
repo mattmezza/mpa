@@ -14,6 +14,7 @@ def test_parse_frontmatter_only() -> None:
     md = """---
 role: Fitness coach
 emoji: "🏋️"
+voice: en-US-GuyNeural
 skills: [scheduling, memory]
 tools: [run_command]
 secrets: [persona:fitness:key]
@@ -25,6 +26,7 @@ character: |
 """
     p = parse_markdown(md, name="fitness")
     assert p.role == "Fitness coach"
+    assert p.voice == "en-US-GuyNeural"
     assert p.skills == ["scheduling", "memory"]
     assert p.tools == ["run_command"]
     assert p.secrets == ["persona:fitness:key"]
@@ -42,6 +44,7 @@ def test_markdown_roundtrip() -> None:
         name="t",
         role="R",
         emoji="🤖",
+        voice="en-GB-SoniaNeural",
         personalia="Who.",
         character="How.",
         skills=["memory"],
@@ -49,7 +52,7 @@ def test_markdown_roundtrip() -> None:
         secrets=[],
     )
     p2 = parse_markdown(to_markdown(p), name="t")
-    assert (p2.role, p2.skills, p2.tools) == (p.role, p.skills, p.tools)
+    assert (p2.role, p2.voice, p2.skills, p2.tools) == (p.role, p.voice, p.skills, p.tools)
     assert p2.personalia.strip() == "Who." and p2.character.strip() == "How."
 
 
@@ -70,6 +73,15 @@ def test_scoped_tools_filters_but_keeps_load_skill() -> None:
     assert "run_command" in names
     assert "send_email" not in names
     assert "load_skill" in names  # always retained — core mechanic
+
+
+def test_gateable_tools_in_sync_with_tools() -> None:
+    # The admin UI lists GATEABLE_TOOLS for the scope checkboxes; it must stay
+    # in sync with the real tool set (every tool except always-on load_skill).
+    from api.admin import GATEABLE_TOOLS
+    from core.agent import TOOLS
+
+    assert set(GATEABLE_TOOLS) | {"load_skill"} == {t["name"] for t in TOOLS}
 
 
 def test_prompt_uses_persona_identity() -> None:
