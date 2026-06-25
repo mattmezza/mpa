@@ -30,16 +30,26 @@ _THOUGHT_LOGGERS = ("core.agent", "core.executor", "core.llm.reasoning")
 _NOISY_LOGGERS = ("httpx", "httpcore", "apscheduler", "telegram")
 
 
+_DIM = "\033[2m"  # thinking / reasoning — low contrast
+_CYAN = "\033[36m"  # tool calls / agent activity — stands out
+_RESET = "\033[0m"
+
+
 class _SpinnerHandler(logging.Handler):
-    """Prints log lines above the spinner, clearing its line first."""
+    """Prints log lines above the spinner, clearing its line first.
+
+    Reasoning (``core.llm.reasoning``) renders dim; everything else
+    (tool calls, agent activity) renders cyan so it stands out.
+    """
 
     def __init__(self, spinner: Spinner):
         super().__init__()
         self.spinner = spinner
-        self.setFormatter(logging.Formatter("  \033[2m· %(message)s\033[0m"))
 
     def emit(self, record: logging.LogRecord) -> None:
-        sys.stderr.write("\r\033[K" + self.format(record) + "\n")
+        color = _DIM if record.name == "core.llm.reasoning" else _CYAN
+        line = f"  {color}· {record.getMessage()}{_RESET}"
+        sys.stderr.write("\r\033[K" + line + "\n")
         sys.stderr.flush()
         self.spinner.redraw()
 
@@ -55,6 +65,8 @@ class Spinner:
         self._frame = "⠋"
 
     def redraw(self) -> None:
+        if self._task is None:  # not running — startup/idle log records mustn't draw it
+            return
         sys.stderr.write(f"\r\033[K\033[2m{self._frame} thinking… {self._elapsed():.0f}s\033[0m")
         sys.stderr.flush()
 
@@ -111,6 +123,23 @@ def _setup_logging(spinner: Spinner) -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
+def _print_debug_config(config) -> None:
+    a = config.agent
+    th = a.thinking_level or "off"
+    rows = [
+        ("agent", f"{a.name} (owner {a.owner_name})"),
+        ("inference", f"{a.llm_provider} / {a.model}  thinking={th}"),
+        ("memory", f"{config.memory.extraction_provider}/{config.memory.extraction_model}"),
+        ("history", config.history.mode),
+        ("voice", "on" if config.voice.tts_enabled else "off"),
+        ("timezone", a.timezone),
+    ]
+    print(f"\n{_CYAN}── REPL debug config ──{_RESET}")
+    for k, v in rows:
+        print(f"  {_DIM}{k:>10}{_RESET}  {v}")
+    print("\nCtrl-D or /exit to quit.\n")
+
+
 async def main() -> None:
     spinner = Spinner()
     _setup_logging(spinner)
@@ -123,10 +152,7 @@ async def main() -> None:
     agent = AgentCore(config)
     agent.channels["repl"] = ReplChannel(agent, spinner)
 
-    print(
-        f"{config.agent.name} REPL — model={config.agent.model} "
-        f"provider={config.agent.llm_provider}. Ctrl-D or /exit to quit.\n"
-    )
+    _print_debug_config(config)
 
     while True:
         try:
