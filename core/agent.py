@@ -499,7 +499,7 @@ class AgentCore:
         )
 
         # Agentic loop — keep going while the LLM wants to call tools
-        request_state = {"write_executed": False, "write_decision": None, "approvals": {}}
+        request_state = self._new_request_state()
         tool_log: list[dict] = []
         while response.tool_calls:
             tool_results = []
@@ -595,7 +595,7 @@ class AgentCore:
 
         # Agentic loop — keep going while the LLM wants to call tools
         new_messages: list[dict] = []
-        request_state = {"write_executed": False, "write_decision": None, "approvals": {}}
+        request_state = self._new_request_state()
         tool_log: list[dict] = []
         while response.tool_calls:
             tool_results = []
@@ -697,18 +697,27 @@ class AgentCore:
         params = tool_call.arguments
 
         if request_state is None:
-            request_state = {"write_executed": False, "write_decision": None, "approvals": {}}
+            request_state = self._new_request_state()
 
         is_write_action = self.permissions.is_write_action(name, params)
-        if is_write_action and request_state.get("write_executed"):
-            return {"error": "Request already fulfilled; not repeating write actions."}
-        if is_write_action and request_state.get("write_decision") == "denied":
+        # Write-state is tracked per distinct action (tool + params), so a
+        # failure, skip, or completion of one write never blocks a different one.
+        write_sig = self._write_signature(name, params) if is_write_action else None
+        executed_writes = request_state.setdefault("executed_writes", set())
+        write_decisions = request_state.setdefault("write_decisions", {})
+        if is_write_action and write_sig in executed_writes:
+            return {
+                "error": (
+                    "This exact action was already completed in this request; not repeating it."
+                )
+            }
+        if is_write_action and write_decisions.get(write_sig) == "denied":
             return {"error": "Action denied by user."}
-        if is_write_action and request_state.get("write_decision") == "skipped":
+        if is_write_action and write_decisions.get(write_sig) == "skipped":
             return {
                 "error": (
                     "User skipped this action. "
-                    "Do not retry this action or attempt similar alternatives — "
+                    "Do not retry this exact action — "
                     "move on to something else."
                 )
             }
@@ -723,17 +732,19 @@ class AgentCore:
         if level == PermissionLevel.ASK and channel != "system":
             match_key = self.permissions.match_key(name, params)
             approvals = request_state.get("approvals", {})
-            if is_write_action and request_state.get("write_decision") is not None:
-                decision = request_state.get("write_decision")
-            elif isinstance(approvals, dict) and match_key in approvals:
+            if is_write_action and write_sig in write_decisions:
+                # Same write asked earlier in this turn — reuse that decision
+                # rather than prompting again, but only for the identical action.
+                decision = write_decisions[write_sig]
+            elif not is_write_action and isinstance(approvals, dict) and match_key in approvals:
                 decision = approvals[match_key]
             else:
                 decision = await self._request_approval(name, params, channel, user_id)
-                if isinstance(approvals, dict):
+                if is_write_action:
+                    write_decisions[write_sig] = decision
+                elif isinstance(approvals, dict):
                     approvals[match_key] = decision
                     request_state["approvals"] = approvals
-                if is_write_action:
-                    request_state["write_decision"] = decision
             if decision == "skipped":
                 log.info("Permission SKIPPED by user: %s", name)
                 return {
@@ -761,25 +772,25 @@ class AgentCore:
         if name == "send_email":
             result = await self._tool_send_email(params)
             if is_write_action and self._is_tool_success(result):
-                request_state["write_executed"] = True
+                executed_writes.add(write_sig)
             return result
 
         if name == "reply_email":
             result = await self._tool_reply_email(params)
             if is_write_action and self._is_tool_success(result):
-                request_state["write_executed"] = True
+                executed_writes.add(write_sig)
             return result
 
         if name == "send_message":
             result = await self._tool_send_message(params)
             if is_write_action and self._is_tool_success(result):
-                request_state["write_executed"] = True
+                executed_writes.add(write_sig)
             return result
 
         if name == "create_calendar_event":
             result = await self._tool_create_calendar_event(params)
             if is_write_action and self._is_tool_success(result):
-                request_state["write_executed"] = True
+                executed_writes.add(write_sig)
             return result
 
         if name == "web_search":
@@ -799,10 +810,29 @@ class AgentCore:
             log.info("Tool call: manage_jobs — %s", params.get("action", ""))
             result = await self._tool_manage_jobs(params)
             if is_write_action and self._is_tool_success(result):
-                request_state["write_executed"] = True
+                executed_writes.add(write_sig)
             return result
 
         return {"error": f"Unknown tool: {name}"}
+
+    @staticmethod
+    def _new_request_state() -> dict:
+        """Fresh per-turn state tracking write actions and approval decisions."""
+        return {"executed_writes": set(), "write_decisions": {}, "approvals": {}}
+
+    @staticmethod
+    def _write_signature(name: str, params: dict) -> str:
+        """Stable signature for a write action, keyed on tool name + arguments.
+
+        Two calls share a signature only when they would perform the identical
+        write, so deduplication and remembered skip/deny decisions apply per
+        action rather than blocking every write after the first.
+        """
+        try:
+            payload = json.dumps(params, sort_keys=True, default=str)
+        except Exception:
+            payload = repr(params)
+        return f"{name}:{payload}"
 
     @staticmethod
     def _is_tool_success(result: dict) -> bool:
