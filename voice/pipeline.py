@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import logging
+import re
+import unicodedata
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -14,6 +16,33 @@ if TYPE_CHECKING:
     import asyncio
 
 log = logging.getLogger(__name__)
+
+_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)  # fenced code
+_INLINE_CODE_RE = re.compile(r"`[^`]*`")
+_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
+_LIST_MARKER_RE = re.compile(r"^[ \t]*[-*•‣◦]+[ \t]+", re.MULTILINE)  # leading bullets
+_MD_SYMBOLS_RE = re.compile(r"[*#_~>`|]")  # markdown emphasis/heading/table chars
+_WS_RE = re.compile(r"[ \t]{2,}")
+
+
+def clean_for_speech(text: str) -> str:
+    """Strip anything that reads badly when spoken: code, URLs, emojis, markdown.
+
+    Voice replies should be plain speakable text — no emojis, bullets, code
+    snippets, URLs, or symbols like * and #.  See issue #10.
+    """
+    text = _CODE_BLOCK_RE.sub(" ", text)
+    text = _INLINE_CODE_RE.sub(" ", text)
+    text = _URL_RE.sub(" ", text)
+    text = _LIST_MARKER_RE.sub("", text)
+    # dashes used as separators → pause; keep hyphens inside words
+    text = re.sub(r"\s[-–—]+\s", ", ", text)
+    text = _MD_SYMBOLS_RE.sub("", text)
+    # drop emoji & other pictographic symbols (unicode category "So")
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "So")
+    text = _WS_RE.sub(" ", text)
+    lines = (line.strip() for line in text.splitlines())
+    return "\n".join(line for line in lines if line).strip()
 
 
 class VoicePipeline:
@@ -62,6 +91,7 @@ class VoicePipeline:
         if not self.tts_enabled:
             raise RuntimeError("TTS is disabled in config")
 
+        text = clean_for_speech(text)
         communicate = edge_tts.Communicate(text, self.tts_voice)
         buf = io.BytesIO()
         async for chunk in communicate.stream():
