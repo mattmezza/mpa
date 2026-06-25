@@ -15,11 +15,18 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import os
 import sys
 import time
 
 from core.agent import AgentCore
 from core.config_store import ConfigStore
+
+try:  # POSIX-only: lets us watch for an ESC keypress mid-turn
+    import termios
+    import tty
+except ImportError:  # pragma: no cover - non-POSIX
+    termios = tty = None
 
 log = logging.getLogger(__name__)
 
@@ -137,7 +144,40 @@ def _print_debug_config(config) -> None:
     print(f"\n{_CYAN}── REPL debug config ──{_RESET}")
     for k, v in rows:
         print(f"  {_DIM}{k:>10}{_RESET}  {v}")
-    print("\nCtrl-D or /exit to quit.\n")
+    print("\nESC interrupts a turn · /clear resets context · Ctrl-D or /exit quits.\n")
+
+
+async def _run_turn(agent: AgentCore, spinner: Spinner, text: str):
+    """Run one turn, cancellable by pressing ESC. Returns None if interrupted."""
+    proc = asyncio.create_task(
+        agent.process(message=text, channel="repl", user_id=USER_ID, chat_id=USER_ID)
+    )
+    fd = sys.stdin.fileno()
+    loop = asyncio.get_running_loop()
+    watch = termios is not None and sys.stdin.isatty()
+    old = termios.tcgetattr(fd) if watch else None
+
+    def _on_key() -> None:
+        # A lone ESC (b"\x1b") interrupts; escape sequences (arrows) read longer → ignore.
+        try:
+            if os.read(fd, 16) == b"\x1b":
+                proc.cancel()
+        except OSError:
+            pass
+
+    if watch:
+        tty.setcbreak(fd)
+        loop.add_reader(fd, _on_key)
+    spinner.start()
+    try:
+        return await proc
+    except asyncio.CancelledError:
+        return None
+    finally:
+        if watch:
+            loop.remove_reader(fd)
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        await spinner.stop()
 
 
 async def main() -> None:
@@ -164,13 +204,14 @@ async def main() -> None:
             continue
         if text in ("/exit", "/quit"):
             break
-        spinner.start()
-        try:
-            response = await agent.process(
-                message=text, channel="repl", user_id=USER_ID, chat_id=USER_ID
-            )
-        finally:
-            await spinner.stop()
+        if text == "/clear":
+            await agent.history.clear("repl", USER_ID, USER_ID)
+            print("[context cleared]\n")
+            continue
+        response = await _run_turn(agent, spinner, text)
+        if response is None:
+            print("\n[interrupted]\n")
+            continue
         if response.text:
             print(f"\n{response.text}\n")
         if getattr(response, "system_notice", None):
