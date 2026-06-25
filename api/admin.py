@@ -792,6 +792,7 @@ def create_admin_app(
         deepseek_api_key = await config_store.get("agent.deepseek_api_key") or ""
         deepseek_base_url = await config_store.get("agent.deepseek_base_url") or ""
         model = await config_store.get("agent.model") or "claude-4-6-sonnet"
+        thinking_level = await config_store.get("agent.thinking_level") or ""
         extraction_provider = await config_store.get("memory.extraction_provider") or "anthropic"
         extraction_model = await config_store.get("memory.extraction_model") or "claude-haiku-4-5"
         consolidation_provider = (
@@ -829,6 +830,7 @@ def create_admin_app(
             deepseek_api_key=deepseek_api_key,
             deepseek_base_url=deepseek_base_url,
             model=model,
+            thinking_level=thinking_level,
             extraction_provider=extraction_provider,
             extraction_model=extraction_model,
             consolidation_provider=consolidation_provider,

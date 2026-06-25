@@ -27,7 +27,8 @@
   {{ default_history_handling|default('', true)|tojson|forceescape }},
   {{ prompt_capture_enabled|default(false, true)|tojson|forceescape }},
   {{ compaction_provider|default('anthropic', true)|tojson|forceescape }},
-  {{ compaction_model|default('claude-haiku-4-5', true)|tojson|forceescape }}
+  {{ compaction_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
+  {{ thinking_level|default('', true)|tojson|forceescape }}
 )">
   <div class="card">
     <h2 class="text-base mb-1">System Prompt Controls</h2>
@@ -175,6 +176,17 @@
         </datalist>
         <p class="text-muted text-xs mt-1">Type any model id, or pick from the list. Use “Fetch models” in the provider card below to load the live list from the API.</p>
       </div>
+
+      <div x-show="modelSupportsThinking(model)">
+        <label class="label">Thinking level</label>
+        <select class="input-sm" style="max-width:500px" x-model="thinkingLevel">
+          <option value="">Off</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+        <p class="text-muted text-xs mt-1">Reasoning effort for models that support thinking. Higher = more reasoning, more tokens.</p>
+      </div>
     </form>
 
     <div class="flex items-center gap-2 mt-4">
@@ -197,7 +209,8 @@
                     'agent.grok_base_url': grokBaseUrl,
                     'agent.deepseek_api_key': deepseekKey,
                     'agent.deepseek_base_url': deepseekBaseUrl,
-                    'agent.model': model
+                    'agent.model': model,
+                    'agent.thinking_level': modelSupportsThinking(model) ? thinkingLevel : ''
                   }})
                 })
                 .then(r => { resultOk = r.ok; return r.json(); })

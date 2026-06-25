@@ -42,7 +42,7 @@
     }
     window.showToast = showToast;
 
-    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel) {
       const currentProvider = provider || 'anthropic';
       return {
         providerOptions: [
@@ -55,6 +55,7 @@
         provider: currentProvider,
         apiKey: apiKey || '',
         model: model || '',
+        thinkingLevel: thinkingLevel || '',
         openaiKey: openaiKey || '',
         openaiBaseUrl: openaiBaseUrl || '',
         googleKey: googleKey || '',
@@ -160,6 +161,14 @@
             return fetched.map(id => ({value: id, label: id}));
           }
           return this.models[prov] || [];
+        },
+        // ponytail: substring heuristic for reasoning-capable models — extend the
+        // list as model ids change; the thinking-level control shows only when true.
+        modelSupportsThinking(modelId) {
+          const id = (modelId || '').toLowerCase();
+          if (!id) return false;
+          return ['opus', 'sonnet', 'thinking', 'pro', 'deep-think', 'reasoner', 'grok-4']
+            .some(pat => id.includes(pat));
         },
         fetchModels(service) {
           const apiKey = this.keyFor(service);

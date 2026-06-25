@@ -48,6 +48,7 @@ class AgentConfig(BaseModel):
     deepseek_api_key: str = ""
     deepseek_base_url: str = ""
     model: str = "claude-4-6-sonnet"
+    thinking_level: str = ""  # "" (off) | "low" | "medium" | "high" — only for reasoning models
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
     skills_db_path: str = "data/skills.db"

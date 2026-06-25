@@ -101,8 +101,16 @@ def _normalize_model(provider: str, model: str) -> str:
 
 
 class LLMClient:
-    def __init__(self, provider: str, api_key: str, base_url: str | None = None):
+    def __init__(
+        self,
+        provider: str,
+        api_key: str,
+        base_url: str | None = None,
+        thinking_level: str = "",
+    ):
         self.provider = _normalize_provider(provider)
+        # "" (off) | "low" | "medium" | "high" — applied only to the main generate() call
+        self.thinking_level = (thinking_level or "").strip().lower()
         self._client: Any
         if self.provider == "anthropic":
             self._client = AsyncAnthropic(api_key=api_key)
@@ -122,33 +130,38 @@ class LLMClient:
     @classmethod
     def from_agent_config(cls, config) -> LLMClient:
         provider = _normalize_provider(getattr(config, "llm_provider", "anthropic"))
+        thinking = getattr(config, "thinking_level", "")
         if provider == "anthropic":
-            return cls(provider, getattr(config, "anthropic_api_key", ""))
+            return cls(provider, getattr(config, "anthropic_api_key", ""), thinking_level=thinking)
         if provider == "openai":
             return cls(
                 provider,
                 getattr(config, "openai_api_key", ""),
                 getattr(config, "openai_base_url", ""),
+                thinking_level=thinking,
             )
         if provider == "google":
             return cls(
                 provider,
                 getattr(config, "google_api_key", ""),
                 getattr(config, "google_base_url", ""),
+                thinking_level=thinking,
             )
         if provider == "grok":
             return cls(
                 provider,
                 getattr(config, "grok_api_key", ""),
                 getattr(config, "grok_base_url", ""),
+                thinking_level=thinking,
             )
         if provider == "deepseek":
             return cls(
                 provider,
                 getattr(config, "deepseek_api_key", ""),
                 getattr(config, "deepseek_base_url", ""),
+                thinking_level=thinking,
             )
-        return cls("anthropic", getattr(config, "anthropic_api_key", ""))
+        return cls("anthropic", getattr(config, "anthropic_api_key", ""), thinking_level=thinking)
 
     async def generate(
         self,
@@ -174,12 +187,19 @@ class LLMClient:
                         "cache_control": {"type": "ephemeral"},
                     }
                 ]
+            extra: dict[str, Any] = {}
+            if self.thinking_level in ("low", "medium", "high"):
+                # Adaptive thinking at the requested effort. Only sent when a level is
+                # set — the UI exposes the control for reasoning models only.
+                extra["thinking"] = {"type": "adaptive"}
+                extra["output_config"] = {"effort": self.thinking_level}
             response = await messages_client.create(
                 model=resolved_model,
                 max_tokens=max_tokens,
                 system=cast(Any, system_param),
                 messages=cast(Any, messages),
                 tools=cast(Any, tools),
+                **extra,
             )
             tool_calls = []
             text_parts = []
@@ -205,11 +225,15 @@ class LLMClient:
         openai_tools = _openai_tools(tools)
         client_any = cast(Any, self._client)
         full_messages = [{"role": "system", "content": system}, *messages]
+        extra = {}
+        if self.thinking_level in ("low", "medium", "high"):
+            extra["reasoning_effort"] = self.thinking_level
         response = await client_any.chat.completions.create(
             model=resolved_model,
             max_tokens=max_tokens,
             messages=cast(Any, full_messages),
             tools=cast(Any, openai_tools),
+            **extra,
         )
         message = response.choices[0].message
         tool_calls = []
