@@ -87,6 +87,21 @@ def _preview_path(name: str) -> Path:
     return _data_dir() / "browser" / "last" / f"{name}.png"
 
 
+def _status_path() -> Path:
+    # Live one-line progress for an in-flight `explore` run. The REPL spinner tails
+    # this so the user sees step-by-step progress during the (multi-minute) loop.
+    return _data_dir() / "browser" / "last" / "explore.status"
+
+
+def _write_status(text: str) -> None:
+    try:
+        p = _status_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    except OSError:
+        pass  # progress display is best-effort; never let it break a run.
+
+
 def _parse_steps(raw: str) -> list[dict]:
     try:
         steps = json.loads(raw)
@@ -520,6 +535,7 @@ def cmd_explore(args) -> dict:
         return "STEPS SO FAR: " + (", ".join(trail) if trail else "(none yet)")
 
     try:
+        _write_status("loading page…")
         with _Session(profile, args.headless) as s:
             s.goto(args.url, args.timeout)
             state, frame_map = _observe(s.page)
@@ -594,8 +610,9 @@ def cmd_explore(args) -> dict:
                         "to scroll, or click a radio/option first)."
                     )
                 )
+                tag = "" if changed else " (no change)"
+                _write_status(f"step {step + 1}/{args.max_steps} · {label}{tag}")
                 if verbose:
-                    tag = "" if changed else " (no change)"
                     print(f"[step {step}] {label}{tag}", file=sys.stderr)
                 messages.append(
                     {
@@ -619,6 +636,10 @@ def cmd_explore(args) -> dict:
             }
     finally:
         aio.close()
+        try:
+            _status_path().unlink(missing_ok=True)  # done — let the spinner revert
+        except OSError:
+            pass
 
 
 def cmd_profiles(_args) -> dict:

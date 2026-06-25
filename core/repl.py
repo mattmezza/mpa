@@ -19,6 +19,7 @@ import mimetypes
 import os
 import sys
 import time
+from pathlib import Path
 
 from core.agent import AgentCore
 from core.config_store import ConfigStore
@@ -80,11 +81,27 @@ class Spinner:
         self._start = 0.0
         self._frame = "⠋"
 
+    # Live progress file written by `tools/browser.py explore` (best-effort tail).
+    _EXPLORE_STATUS = Path("/app/data" if Path("/app/data").exists() else "data") / (
+        "browser/last/explore.status"
+    )
+
     def redraw(self) -> None:
         if self._task is None:  # not running — startup/idle log records mustn't draw it
             return
-        sys.stderr.write(f"\r\033[K\033[2m{self._frame} thinking… {self._elapsed():.0f}s\033[0m")
+        label = self._explore_label() or "thinking…"
+        sys.stderr.write(f"\r\033[K\033[2m{self._frame} {label} {self._elapsed():.0f}s\033[0m")
         sys.stderr.flush()
+
+    def _explore_label(self) -> str | None:
+        """If an `explore` run is updating its status file right now, show that."""
+        try:
+            p = self._EXPLORE_STATUS
+            if time.time() - p.stat().st_mtime < 10:
+                return f"🌐 explore: {p.read_text().strip()[:70]} ·"
+        except OSError:
+            pass
+        return None
 
     def _elapsed(self) -> float:
         return time.monotonic() - self._start
