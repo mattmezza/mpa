@@ -254,6 +254,15 @@ async def main() -> None:
     agent = AgentCore(config)
     agent.channels["repl"] = ReplChannel(agent, spinner)
 
+    if args.persona is not None:
+        # Session mode snapshots the system prompt per chat, so a stale session
+        # would keep the previous identity. Clear it so the persona takes effect
+        # on the first turn instead of after a manual /clear.
+        if agent.history_mode == "session":
+            await agent.history.clear_session("repl", USER_ID, USER_ID)
+        else:
+            await agent.history.clear("repl", USER_ID, USER_ID)
+
     if config.agent.active_persona:
         print(f"[persona: {config.agent.active_persona}]")
     _print_debug_config(config)
