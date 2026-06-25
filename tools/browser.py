@@ -47,6 +47,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _DESKTOP_UA = (
@@ -235,7 +236,9 @@ def cmd_screenshot(args) -> dict:
     if args.output:
         dest = Path(args.output)
     else:
-        dest = _data_dir() / "browser" / "screenshots" / f"{profile}-{int(time.time())}.png"
+        # Default to ~/Downloads with a spottable name so a REPL user can find it.
+        host = urlparse(args.url).netloc or "page"
+        dest = Path.home() / "Downloads" / f"clio-{host}-{int(time.time())}.png"
     with _Session(profile, args.headless) as s:
         s.goto(args.url, args.timeout)
         s.snapshot(dest, full_page=args.full_page)

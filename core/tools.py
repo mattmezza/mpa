@@ -45,7 +45,7 @@ for JS-heavy pages and acting on the user's behalf. Prefer an existing API/CLI
 over the browser whenever one exists — it is a last resort.
 Verbs (always pass `--url`; add `--profile NAME` to reuse a logged-in session):
   python3 tools/browser.py read --url URL                  # readable page text
-  python3 tools/browser.py screenshot --url URL -o shot.png # save a PNG
+  python3 tools/browser.py screenshot --url URL            # save a PNG to ~/Downloads
   python3 tools/browser.py act --url URL --profile P --steps JSON
   python3 tools/browser.py profiles                         # list saved sessions
 `read`/`screenshot` run without asking. `act` changes state (click/fill/submit)
