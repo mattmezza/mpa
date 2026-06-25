@@ -166,6 +166,10 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             val = await config_store.get(key)
             if val:
                 ctx[var] = val
+    elif step == "browser":
+        enabled = await config_store.get("tools.browser.enabled")
+        if enabled is not None:
+            ctx["browser_enabled"] = enabled
     elif step == "calendar":
         raw = await config_store.get("calendar.providers")
         if raw:
