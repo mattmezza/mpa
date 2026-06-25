@@ -107,6 +107,13 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:gh*issue create*": "ASK",
     "run_command:gh*pr create*": "ASK",
     "run_command:gh*release create*": "ASK",
+    # Browser automation — reading is safe, acting (click/fill/submit) asks.
+    # Per-domain rules work because every command carries `--url`, e.g. add
+    # "run_command:*browser.py act*github.com*": "ALWAYS" via the admin UI.
+    "run_command:*browser.py read*": "ALWAYS",
+    "run_command:*browser.py screenshot*": "ALWAYS",
+    "run_command:*browser.py profiles*": "ALWAYS",
+    "run_command:*browser.py act*": "ASK",
     "run_command:git*push*": "ASK",
     "run_command:git*commit*": "ASK",
     "web_search": "ALWAYS",
