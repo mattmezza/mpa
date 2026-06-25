@@ -166,3 +166,104 @@ async def test_session_system_built_once_and_reused(agent, monkeypatch) -> None:
     third = await agent._session_system_prompt("telegram", "u1", "")
     assert third == "SYSTEM-2"
     assert calls["n"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Per-action write state — one write's outcome must not block a different one
+# ---------------------------------------------------------------------------
+
+
+def _job_call(call_id: str, **params):
+    from core.llm import LLMToolCall
+
+    return LLMToolCall(id=call_id, name="manage_jobs", arguments={"action": "create", **params})
+
+
+async def _approve(name, params, channel, user_id):
+    return "approved"
+
+
+async def _ok_manage_jobs(params):
+    return {"ok": True, "job_id": "job_" + params.get("task", ""), "task": params.get("task")}
+
+
+@pytest.mark.asyncio
+async def test_write_signature_distinguishes_distinct_actions(agent) -> None:
+    a = agent._write_signature("manage_jobs", {"action": "create", "task": "A"})
+    b = agent._write_signature("manage_jobs", {"action": "create", "task": "B"})
+    a_again = agent._write_signature("manage_jobs", {"task": "A", "action": "create"})
+    assert a != b  # different params → different signature
+    assert a == a_again  # key order does not matter
+
+
+@pytest.mark.asyncio
+async def test_distinct_writes_are_independent_after_success(agent, monkeypatch) -> None:
+    """A completed write must not block a *different* subsequent write."""
+    monkeypatch.setattr(agent, "_request_approval", _approve)
+    monkeypatch.setattr(agent, "_tool_manage_jobs", _ok_manage_jobs)
+    agent.channels = {"telegram": object()}  # presence so approval path runs
+
+    state = agent._new_request_state()
+    first = await agent._execute_tool(
+        _job_call("1", task="ping mum", run_at="2026-07-01T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    second = await agent._execute_tool(
+        _job_call("2", task="ping dad", run_at="2026-07-02T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    assert first.get("ok") is True
+    assert second.get("ok") is True  # not blocked by "already fulfilled"
+
+
+@pytest.mark.asyncio
+async def test_identical_write_is_deduplicated(agent, monkeypatch) -> None:
+    """An identical repeated write within a turn is still suppressed."""
+    monkeypatch.setattr(agent, "_request_approval", _approve)
+    monkeypatch.setattr(agent, "_tool_manage_jobs", _ok_manage_jobs)
+    agent.channels = {"telegram": object()}
+
+    state = agent._new_request_state()
+    call = _job_call("1", task="ping mum", run_at="2026-07-01T09:00:00")
+    first = await agent._execute_tool(call, "telegram", "u1", state)
+    repeat = await agent._execute_tool(
+        _job_call("2", task="ping mum", run_at="2026-07-01T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    assert first.get("ok") is True
+    assert "already completed" in repeat.get("error", "")
+
+
+@pytest.mark.asyncio
+async def test_skipping_one_write_does_not_block_a_different_one(agent, monkeypatch) -> None:
+    """Skipping a write blocks only that exact action, not other writes."""
+    decisions = {"ping mum": "skipped", "ping dad": "approved"}
+
+    async def fake_approval(name, params, channel, user_id):
+        return decisions.get(params.get("task"), "approved")
+
+    monkeypatch.setattr(agent, "_request_approval", fake_approval)
+    monkeypatch.setattr(agent, "_tool_manage_jobs", _ok_manage_jobs)
+    agent.channels = {"telegram": object()}
+
+    state = agent._new_request_state()
+    skipped = await agent._execute_tool(
+        _job_call("1", task="ping mum", run_at="2026-07-01T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    other = await agent._execute_tool(
+        _job_call("2", task="ping dad", run_at="2026-07-02T09:00:00"),
+        "telegram",
+        "u1",
+        state,
+    )
+    assert "skipped" in skipped.get("error", "")
+    assert other.get("ok") is True  # the skip did not leak onto a different write
