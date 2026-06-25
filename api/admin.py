@@ -126,6 +126,13 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             val = await config_store.get(key)
             if val:
                 ctx[var] = val
+    elif step == "persona":
+        store = await _persona_store_from_config(config_store)
+        # Plain dicts so the wizard template (Jinja) can read emoji/role/name.
+        ctx["personas"] = [  # type: ignore[assignment]
+            {"name": p.name, "role": p.role, "emoji": p.emoji} for p in await store.list_personas()
+        ]
+        ctx["active"] = (await config_store.get("agent.active_persona") or "").strip()
     elif step == "email":
         raw = await config_store.get("email.providers")
         if raw:
@@ -2449,7 +2456,7 @@ def create_admin_app(
         await config_store.set_many(values)
         log.info("Setup identity: saved %d values", len(values))
 
-        next_step = "telegram"
+        next_step = "persona"
         await config_store.set_setup_step(next_step)
         ctx = await _wizard_step_context(next_step, config_store)
         return _render_wizard_step(next_step, SETUP_STEPS, ctx)

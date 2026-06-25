@@ -76,6 +76,7 @@ SETUP_STEPS = [
     "welcome",
     "llm",
     "identity",
+    "persona",
     "telegram",
     "whatsapp",
     "email",
