@@ -156,11 +156,16 @@ def _setup_logging(spinner: Spinner) -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
-def _print_debug_config(config) -> None:
+def _print_debug_config(config, persona=None) -> None:
     a = config.agent
     th = a.thinking_level or "off"
+    if persona:
+        name = persona.agent_name or persona.role or persona.name
+        agent_row = ("agent (persona)", f"{name} (owner {a.owner_name})")
+    else:
+        agent_row = ("agent", f"{a.name} (owner {a.owner_name})")
     rows = [
-        ("agent", f"{a.name} (owner {a.owner_name})"),
+        agent_row,
         ("inference", f"{a.llm_provider} / {a.model}  thinking={th}"),
         ("memory", f"{config.memory.extraction_provider}/{config.memory.extraction_model}"),
         ("history", config.history.mode),
@@ -263,9 +268,9 @@ async def main() -> None:
         else:
             await agent.history.clear("repl", USER_ID, USER_ID)
 
-    if config.agent.active_persona:
-        print(f"[persona: {config.agent.active_persona}]")
-    _print_debug_config(config)
+    active = config.agent.active_persona
+    persona = await agent.personae.get(active) if active else None
+    _print_debug_config(config, persona)
 
     while True:
         try:
