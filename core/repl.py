@@ -156,11 +156,16 @@ def _setup_logging(spinner: Spinner) -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
-def _print_debug_config(config) -> None:
+def _print_debug_config(config, persona=None) -> None:
     a = config.agent
     th = a.thinking_level or "off"
+    if persona:
+        name = persona.agent_name or persona.role or persona.name
+        agent_row = ("agent (persona)", f"{name} (owner {a.owner_name})")
+    else:
+        agent_row = ("agent", f"{a.name} (owner {a.owner_name})")
     rows = [
-        ("agent", f"{a.name} (owner {a.owner_name})"),
+        agent_row,
         ("inference", f"{a.llm_provider} / {a.model}  thinking={th}"),
         ("memory", f"{config.memory.extraction_provider}/{config.memory.extraction_model}"),
         ("history", config.history.mode),
@@ -221,6 +226,17 @@ async def _run_turn(agent: AgentCore, spinner: Spinner, text: str):
 
 
 async def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Chat with the agent from the terminal.")
+    parser.add_argument(
+        "--persona",
+        metavar="NAME",
+        default=None,
+        help="Test with a specific persona active (overrides agent.active_persona).",
+    )
+    args = parser.parse_args()
+
     spinner = Spinner()
     _setup_logging(spinner)
 
@@ -229,10 +245,32 @@ async def main() -> None:
     await store.ensure_admin_password()
     config = await store.export_to_config()
 
+    if args.persona is not None:
+        # Validate against the persona store so a typo fails loudly with options.
+        from core.personae import PersonaStore
+
+        ps = PersonaStore(db_path=config.agent.personae_db_path, seed_dir=config.agent.personae_dir)
+        if not await ps.get(args.persona):
+            names = [p.name for p in await ps.list_personae()]
+            print(f"Unknown persona: {args.persona!r}. Available: {', '.join(names) or '(none)'}")
+            return
+        config.agent.active_persona = args.persona
+
     agent = AgentCore(config)
     agent.channels["repl"] = ReplChannel(agent, spinner)
 
-    _print_debug_config(config)
+    if args.persona is not None:
+        # Session mode snapshots the system prompt per chat, so a stale session
+        # would keep the previous identity. Clear it so the persona takes effect
+        # on the first turn instead of after a manual /clear.
+        if agent.history_mode == "session":
+            await agent.history.clear_session("repl", USER_ID, USER_ID)
+        else:
+            await agent.history.clear("repl", USER_ID, USER_ID)
+
+    active = config.agent.active_persona
+    persona = await agent.personae.get(active) if active else None
+    _print_debug_config(config, persona)
 
     while True:
         try:

@@ -380,8 +380,9 @@ class TestSetupWizard:
         assert store._data.get("agent.timezone") == "Europe/Rome"
         # Should have seeded character
         assert "Alice" in store._data.get("agent.character", "")
-        # Should have advanced to telegram step
-        assert store._step == "telegram"
+        # Should have advanced to the persona step
+        assert store._step == "persona"
+        assert "starting persona" in resp.text.lower()
 
     def test_setup_calendar_step(self):
         store = _ConfigStoreStub(setup_complete=False, step="calendar")
@@ -891,11 +892,9 @@ class TestWizardPrePopulation:
         assert resp.status_code == 200
         assert "sk-ant-initial" in resp.text
 
-    def test_identity_forward_pre_populates_telegram(self):
-        """Submitting identity step should pre-populate telegram with any saved values."""
+    def test_identity_forward_shows_persona_step(self):
+        """Submitting identity should advance to the (skippable) persona step."""
         store = _ConfigStoreStub(setup_complete=False, step="identity")
-        store._data["channels.telegram.bot_token"] = "pre-saved-token"
-        store._data["channels.telegram.allowed_user_ids"] = "111222"
         agent_state = AgentState(agent=None)
         app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
         client = TestClient(app, follow_redirects=False)
@@ -905,8 +904,9 @@ class TestWizardPrePopulation:
             data={"agent_name": "Test", "owner_name": "Owner", "timezone": "UTC"},
         )
         assert resp.status_code == 200
-        assert "pre-saved-token" in resp.text
-        assert "111222" in resp.text
+        # Persona step offers the default + a Skip path.
+        assert "starting persona" in resp.text.lower()
+        assert "Default" in resp.text
 
     def test_calendar_forward_pre_populates_search(self):
         """Submitting calendar step should pre-populate search with any saved values."""

@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}{% if is_new %}New Persona{% else %}Edit Persona{% endif %} — Agent Admin{% endblock %}
+
+{% block body %}
+<div x-data="personaEditor()">
+  <div class="flex items-center justify-between gap-2 mb-4 flex-wrap">
+    <div>
+      <h1 class="text-xl text-accent">{% if is_new %}New Persona{% else %}Edit Persona{% endif %}</h1>
+      <p class="text-muted text-xs mt-1">A persona is a swappable identity: its own character, the skills and tools it may use, and its voice.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1 text-xs">
+        <button class="btn btn-sm" :class="mode === 'guided' && 'btn-primary'" @click="mode = 'guided'">Guided</button>
+        <button class="btn btn-sm" :class="mode === 'raw' && 'btn-primary'" @click="syncRaw(); mode = 'raw'">Raw markdown</button>
+      </div>
+      <a class="btn btn-sm" href="/admin?tab=personae">Back to Personae</a>
+    </div>
+  </div>
+
+  {# ── Guided mode ── #}
+  <div x-show="mode === 'guided'" class="flex gap-4 flex-wrap items-start">
+    <div class="flex-[2] min-w-[280px] space-y-3">
+      <div class="card space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="sm:col-span-2">
+            <label class="label">Name (slug)</label>
+            <input class="input-sm" x-model="name" {% if not is_new %}readonly{% endif %} placeholder="fitness-coach">
+          </div>
+          <div>
+            <label class="label">Emoji</label>
+            <input class="input-sm" x-model="emoji" placeholder="🏋️">
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="label">Role <span class="text-muted">(label)</span></label>
+            <input class="input-sm" x-model="role" placeholder="Fitness coach">
+          </div>
+          <div>
+            <label class="label">Agent name <span class="text-muted">(blank = default)</span></label>
+            <input class="input-sm" x-model="agent_name" placeholder="Forge">
+          </div>
+        </div>
+        <div>
+          <label class="label">Voice <span class="text-muted">(TTS — blank = default)</span></label>
+          <input class="input-sm" x-model="voice" list="voice-options" placeholder="en-US-AvaNeural">
+          <datalist id="voice-options">
+            <option value="en-US-AvaNeural"></option>
+            <option value="en-US-AndrewNeural"></option>
+            <option value="en-US-GuyNeural"></option>
+            <option value="en-GB-SoniaNeural"></option>
+            <option value="en-GB-RyanNeural"></option>
+            <option value="en-AU-NatashaNeural"></option>
+          </datalist>
+        </div>
+      </div>
+
+      <div class="card">
+        <label class="label">Personalia <span class="text-muted">— who the agent is in this persona</span></label>
+        <textarea class="textarea" x-model="personalia" style="min-height:160px; font-size:0.8rem; line-height:1.5"
+                  placeholder="You are a strength &amp; conditioning coach…"></textarea>
+      </div>
+
+      <div class="card">
+        <label class="label">Character <span class="text-muted">— tone & behaviour</span></label>
+        <textarea class="textarea" x-model="character" style="min-height:200px; font-size:0.8rem; line-height:1.5"
+                  placeholder="## Tone&#10;- Direct and motivating…"></textarea>
+      </div>
+    </div>
+
+    {# Scopes #}
+    <div class="flex-1 min-w-[240px] space-y-3">
+      <div class="card">
+        <h3 class="text-xs text-muted uppercase tracking-wider mb-2">Skills allowlist</h3>
+        <p class="text-xs text-muted mb-2">None ticked = all skills allowed.</p>
+        <div class="space-y-1 max-h-56 overflow-y-auto">
+          {% for s in all_skills %}
+          <label class="flex items-center gap-2 text-xs">
+            <input type="checkbox" value="{{ s }}" x-model="skills"> {{ s }}
+          </label>
+          {% else %}
+          <p class="text-xs text-muted">No skills defined yet.</p>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="text-xs text-muted uppercase tracking-wider mb-2">Tool scope</h3>
+        <p class="text-xs text-muted mb-2">None ticked = all tools. <code>load_skill</code> is always available.</p>
+        <div class="space-y-1">
+          {% for t in all_tools %}
+          <label class="flex items-center gap-2 text-xs">
+            <input type="checkbox" value="{{ t }}" x-model="tools"> {{ t }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="text-xs text-muted uppercase tracking-wider mb-2">Secret scope</h3>
+        <p class="text-xs text-muted mb-2">Vault namespaces (one per line). Stored now; enforced once the secrets vault lands.</p>
+        <textarea class="textarea" x-model="secretsText" style="min-height:64px; font-size:0.75rem"
+                  placeholder="persona:fitness-coach:*"></textarea>
+      </div>
+    </div>
+  </div>
+
+  {# ── Raw mode ── #}
+  <div x-show="mode === 'raw'" class="card">
+    <label class="label">Markdown (YAML frontmatter)</label>
+    <textarea class="textarea" x-model="raw" style="min-height:460px; font-size:0.8rem; line-height:1.5; tab-size:2"></textarea>
+    <p class="hint">Saving in raw mode parses this document directly — frontmatter keys (role, emoji, voice, skills, tools, secrets, personalia, character).</p>
+  </div>
+
+  <div class="flex items-center gap-2 mt-3">
+    <button class="btn-primary btn-sm" @click="save()">Save</button>
+    <span class="text-xs" :class="ok ? 'text-accent' : 'text-warn'" x-text="result"></span>
+  </div>
+</div>
+
+<script>
+  function personaEditor() {
+    return {
+      mode: 'guided',
+      name: {{ persona.name|tojson }},
+      agent_name: {{ persona.agent_name|tojson }},
+      role: {{ persona.role|tojson }},
+      emoji: {{ persona.emoji|tojson }},
+      voice: {{ persona.voice|tojson }},
+      personalia: {{ persona.personalia|tojson }},
+      character: {{ persona.character|tojson }},
+      skills: {{ persona.skills|tojson }},
+      tools: {{ persona.tools|tojson }},
+      secretsText: {{ (persona.secrets|join('\n'))|tojson }},
+      raw: {{ raw|tojson }},
+      result: '',
+      ok: false,
+
+      // Regenerate the raw doc from the structured fields before showing it.
+      syncRaw() {
+        const esc = (s) => (s || '').replace(/\n/g, '\n  ');
+        const list = (a) => a && a.length ? '[' + a.join(', ') + ']' : '[]';
+        const secrets = this.secretsText.split('\n').map(s => s.trim()).filter(Boolean);
+        this.raw =
+          '---\n' +
+          'agent_name: ' + (this.agent_name || '') + '\n' +
+          'role: ' + (this.role || '') + '\n' +
+          'emoji: ' + (this.emoji || '') + '\n' +
+          'voice: ' + (this.voice || '') + '\n' +
+          'skills: ' + list(this.skills) + '\n' +
+          'tools: ' + list(this.tools) + '\n' +
+          'secrets: ' + list(secrets) + '\n' +
+          'personalia: |\n  ' + esc(this.personalia) + '\n' +
+          'character: |\n  ' + esc(this.character) + '\n' +
+          '---\n';
+      },
+
+      save() {
+        const name = (this.name || '').trim();
+        if (!name) { this.ok = false; this.result = 'Name is required.'; return; }
+        const body = this.mode === 'raw'
+          ? { name: name, raw: this.raw }
+          : {
+              name: name, agent_name: this.agent_name, role: this.role,
+              emoji: this.emoji, voice: this.voice,
+              personalia: this.personalia, character: this.character,
+              skills: this.skills, tools: this.tools,
+              secrets: this.secretsText.split('\n').map(s => s.trim()).filter(Boolean),
+            };
+        fetch('/personae', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || ''),
+          },
+          body: JSON.stringify(body),
+        })
+        .then(r => { this.ok = r.ok; return r.text().then(t => ({ ok: r.ok, t })); })
+        .then(({ ok, t }) => {
+          this.result = ok ? 'Saved.' : ('Error: ' + t.slice(0, 200));
+          if (ok && window.showToast) window.showToast('Persona saved');
+        })
+        .catch(e => { this.ok = false; this.result = e.message; });
+      },
+    };
+  }
+</script>
+{% endblock %}
