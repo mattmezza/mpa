@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from core.config import Config
 from core.goal_decomposition import DecomposedGoal
+from core.personas import Persona
 from core.tools import active_tool_prompts
 
 DEFAULT_TOOL_USAGE_BLOCK = """For write actions
@@ -107,6 +108,7 @@ def build_prompt_sections(
     memories: str,
     reflections: str,
     decomposed_goal: DecomposedGoal | None,
+    persona: Persona | None = None,
     include_memories: bool = True,
     include_reflections: bool = True,
 ) -> PromptSections:
@@ -128,14 +130,22 @@ def build_prompt_sections(
         getattr(config.prompt, "history_handling_override", ""),
     )
 
+    # When a persona is active it supplies its own identity (personalia +
+    # character); otherwise the configured defaults are used, so first-run
+    # behaviour with no persona is unchanged.
+    personalia_text = persona.personalia if persona else cfg.personalia
+    character_text = persona.character if persona else cfg.character
+
     intro = (
         f"You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.\n\n"
         f"Your timezone is {cfg.timezone}. The current date and time is provided at the "
         f"start of each user message — always use that as 'now'."
     )
+    if persona and persona.role:
+        intro += f"\n\nYou are currently acting as the **{persona.role}** persona."
 
-    personalia = f"<personalia>\n{cfg.personalia}\n</personalia>"
-    character = f"<character>\n{cfg.character}\n</character>"
+    personalia = f"<personalia>\n{personalia_text}\n</personalia>"
+    character = f"<character>\n{character_text}\n</character>"
     about_user = f"<about_user>\n{about_user_block}\n</about_user>" if about_user_block else ""
     tool_usage = f"<tool_usage>\n{tool_usage_text}\n</tool_usage>"
 

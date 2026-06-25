@@ -52,6 +52,9 @@ class AgentConfig(BaseModel):
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
     skills_db_path: str = "data/skills.db"
+    personas_dir: str = "personas/"
+    personas_db_path: str = "data/personas.db"
+    active_persona: str = ""  # empty = default identity (character/personalia below)
     character: str = ""
     personalia: str = ""
 

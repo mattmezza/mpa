@@ -124,8 +124,13 @@ class SkillsEngine:
     def __init__(self, db_path: str = "data/skills.db", seed_dir: str | Path = "skills/"):
         self.store = SkillsStore(db_path=db_path, seed_dir=seed_dir)
 
-    async def get_index_block(self) -> str:
+    async def get_index_block(self, allow: list[str] | None = None) -> str:
+        """Render the skills index. When ``allow`` is given (a persona's
+        allowlist), only those skills are advertised; ``None``/empty = all."""
         skills = await self.store.list_skills()
+        if allow:
+            allowed = set(allow)
+            skills = [s for s in skills if s["name"] in allowed]
         if not skills:
             return ""
         lines = []

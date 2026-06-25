@@ -27,6 +27,7 @@ from core.llm import LLMClient, LLMToolCall
 from core.memory import MemoryStore
 from core.models import AgentResponse, Attachment
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
+from core.personas import Persona, PersonaStore
 from core.prompt_builder import build_prompt_sections
 from core.scheduler import AgentScheduler
 from core.skills import SkillsEngine
@@ -242,6 +243,17 @@ TOOLS = [
 ]
 
 
+def scoped_tools(persona: Persona | None) -> list[dict]:
+    """Filter the function-tool schemas by the active persona's tool scope.
+
+    ``load_skill`` is always retained — it is the core mechanic personas rely on
+    to read their allowlisted skills. An empty scope (or no persona) = all tools.
+    """
+    if persona is None or not persona.tools:
+        return TOOLS
+    return [t for t in TOOLS if persona.allows_tool(t["name"]) or t["name"] == "load_skill"]
+
+
 class AgentCore:
     def __init__(self, config: Config):
         self.config = config
@@ -249,6 +261,10 @@ class AgentCore:
         self.skills = SkillsEngine(
             db_path=config.agent.skills_db_path,
             seed_dir=config.agent.skills_dir,
+        )
+        self.personas = PersonaStore(
+            db_path=config.agent.personas_db_path,
+            seed_dir=config.agent.personas_dir,
         )
         self.executor = ToolExecutor(tool_env=tool_env(config))
         self.history = ConversationHistory(
@@ -331,14 +347,21 @@ class AgentCore:
         # Per-turn preamble: live date/time + (optional) execution plan.
         preamble = self._turn_preamble(decomposed_goal)
 
+        # Resolve the active persona (its identity, skills + tool scope). #14 will
+        # make this per-chat; for now it is the globally selected persona.
+        persona = await self._resolve_persona(channel, user_id, chat_id)
+        tools = scoped_tools(persona)
+
         # Static system prompt. In session mode it is snapshotted once at the
         # start of the session and reused for every turn (so the static content
         # is only built once, not rebuilt and re-sent each turn). In injection
         # mode the prompt is windowed/stateless, so it is rebuilt per call.
         if self.history_mode == "session":
-            system = await self._session_system_prompt(channel, user_id, chat_id, query=message)
+            system = await self._session_system_prompt(
+                channel, user_id, chat_id, query=message, persona=persona
+            )
         else:
-            system = await self._build_system_prompt(query=message)
+            system = await self._build_system_prompt(query=message, persona=persona)
 
         if self.config.admin.capture_prompts:
             self._record_system_prompt(
@@ -350,11 +373,28 @@ class AgentCore:
 
         if self.history_mode == "session":
             return await self._process_session(
-                system, preamble, message, channel, user_id, attachments, chat_id
+                system, preamble, message, channel, user_id, attachments, chat_id, tools, persona
             )
         return await self._process_injection(
-            system, preamble, message, channel, user_id, attachments, chat_id
+            system, preamble, message, channel, user_id, attachments, chat_id, tools, persona
         )
+
+    async def _resolve_persona(self, channel: str, user_id: str, chat_id: str) -> Persona | None:
+        """Resolve the active persona for this request.
+
+        For issue #13 this is the single globally-selected persona
+        (``agent.active_persona``); #14 will extend this to a per-chat binding
+        keyed on ``chat_id``. Returns ``None`` (default identity) when unset or
+        the named persona no longer exists.
+        """
+        name = (self.config.agent.active_persona or "").strip()
+        if not name:
+            return None
+        try:
+            return await self.personas.get(name)
+        except Exception:
+            log.exception("Failed to load active persona %r", name)
+            return None
 
     def _turn_preamble(self, decomposed_goal: DecomposedGoal | None) -> str:
         """Build the per-turn preamble prepended to the current user message.
@@ -377,7 +417,12 @@ class AgentCore:
         return preamble
 
     async def _session_system_prompt(
-        self, channel: str, user_id: str, chat_id: str, query: str | None = None
+        self,
+        channel: str,
+        user_id: str,
+        chat_id: str,
+        query: str | None = None,
+        persona: Persona | None = None,
     ) -> str:
         """Return the session's static system prompt, building it once if needed.
 
@@ -389,7 +434,7 @@ class AgentCore:
         cached = await self.history.get_session_system(channel, user_id, chat_id)
         if cached is not None:
             return cached
-        system = await self._build_system_prompt(query=query)
+        system = await self._build_system_prompt(query=query, persona=persona)
         await self.history.set_session_system(channel, user_id, system, chat_id)
         return system
 
@@ -469,8 +514,11 @@ class AgentCore:
         user_id: str,
         attachments: list[Attachment] | None = None,
         chat_id: str = "",
+        tools: list[dict] | None = None,
+        persona: Persona | None = None,
     ) -> AgentResponse:
         """Injection mode: replay windowed history as native alternating messages."""
+        tools = tools if tools is not None else TOOLS
         history = await self.history.get_messages(channel, user_id, chat_id)
         messages: list[dict] = []
 
@@ -496,11 +544,11 @@ class AgentCore:
             max_tokens=4096,
             system=system,
             messages=messages,
-            tools=cast(Any, TOOLS),
+            tools=cast(Any, tools),
         )
 
         # Agentic loop — keep going while the LLM wants to call tools
-        request_state = self._new_request_state()
+        request_state = self._new_request_state(persona)
         tool_log: list[dict] = []
         while response.tool_calls:
             await self._batch_approve_writes(response.tool_calls, channel, user_id, request_state)
@@ -524,7 +572,7 @@ class AgentCore:
                 max_tokens=4096,
                 system=system,
                 messages=messages,
-                tools=cast(Any, TOOLS),
+                tools=cast(Any, tools),
             )
         final_text = response.text
         log.info("Response: %s", final_text[:200])
@@ -564,6 +612,8 @@ class AgentCore:
         user_id: str,
         attachments: list[Attachment] | None = None,
         chat_id: str = "",
+        tools: list[dict] | None = None,
+        persona: Persona | None = None,
     ) -> AgentResponse:
         """Session mode: sticky session per (channel, user_id, chat_id).
 
@@ -571,6 +621,8 @@ class AgentCore:
         New messages are appended, giving the LLM full conversational
         continuity with a cache-friendly prefix.
         """
+        tools = tools if tools is not None else TOOLS
+
         # Load existing session (from memory cache or DB)
         session = await self.history.get_session(channel, user_id, chat_id)
 
@@ -592,12 +644,12 @@ class AgentCore:
             max_tokens=4096,
             system=system,
             messages=session,
-            tools=cast(Any, TOOLS),
+            tools=cast(Any, tools),
         )
 
         # Agentic loop — keep going while the LLM wants to call tools
         new_messages: list[dict] = []
-        request_state = self._new_request_state()
+        request_state = self._new_request_state(persona)
         tool_log: list[dict] = []
         while response.tool_calls:
             await self._batch_approve_writes(response.tool_calls, channel, user_id, request_state)
@@ -631,7 +683,7 @@ class AgentCore:
                 max_tokens=4096,
                 system=system,
                 messages=session,
-                tools=cast(Any, TOOLS),
+                tools=cast(Any, tools),
             )
 
         # Append the final assistant response to the session
@@ -808,6 +860,9 @@ class AgentCore:
             skill_name = str(params.get("name", "")).strip()
             if not skill_name:
                 return {"error": "Missing skill name."}
+            allowed = (request_state or {}).get("allowed_skills")
+            if allowed and skill_name not in allowed:
+                return {"error": f"Skill '{skill_name}' is not available to the active persona."}
             content = await self.skills.get_skill_content(skill_name)
             if not content:
                 return {"error": f"Skill not found: {skill_name}"}
@@ -823,9 +878,19 @@ class AgentCore:
         return {"error": f"Unknown tool: {name}"}
 
     @staticmethod
-    def _new_request_state() -> dict:
-        """Fresh per-turn state tracking write actions and approval decisions."""
-        return {"executed_writes": set(), "write_decisions": {}, "approvals": {}}
+    def _new_request_state(persona: Persona | None = None) -> dict:
+        """Fresh per-turn state tracking write actions and approval decisions.
+
+        ``allowed_skills`` carries the active persona's skill allowlist so
+        ``load_skill`` can refuse skills outside scope (defence in depth — the
+        index already hides them).
+        """
+        return {
+            "executed_writes": set(),
+            "write_decisions": {},
+            "approvals": {},
+            "allowed_skills": persona.skills if persona else None,
+        }
 
     @staticmethod
     def _write_signature(name: str, params: dict) -> str:
@@ -1344,9 +1409,12 @@ class AgentCore:
             log.exception("Background task reflection failed")
 
     async def _build_system_prompt(
-        self, decomposed_goal: DecomposedGoal | None = None, query: str | None = None
+        self,
+        decomposed_goal: DecomposedGoal | None = None,
+        query: str | None = None,
+        persona: Persona | None = None,
     ) -> str:
-        skills_index = await self.skills.get_index_block()
+        skills_index = await self.skills.get_index_block(allow=persona.skills if persona else None)
         memories = await self.memory.format_for_prompt(query=query)
 
         # Task reflections — lessons learned from past tasks
@@ -1364,6 +1432,7 @@ class AgentCore:
             memories=memories,
             reflections=reflections,
             decomposed_goal=decomposed_goal,
+            persona=persona,
         )
         return sections.full_prompt
 
