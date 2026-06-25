@@ -47,7 +47,12 @@ Verbs (always pass `--url`; add `--profile NAME` to reuse a logged-in session):
   python3 /app/tools/browser.py read --url URL                  # readable page text
   python3 /app/tools/browser.py screenshot --url URL            # save a PNG to ~/Downloads
   python3 /app/tools/browser.py act --url URL --profile P --steps JSON
+  python3 /app/tools/browser.py explore --url URL --task "..."  # self-driving loop
   python3 /app/tools/browser.py profiles                        # list saved sessions
+Use `explore` for open-ended "find X / navigate to Y and tell me Z" tasks: one
+browser stays open and an inner loop clicks/types on its own until done, then
+returns an answer — far cheaper than you re-driving `read`/`act` round by round.
+Use `read`/`screenshot` when you already know the exact URL.
 `read`/`screenshot` run without asking. `act` changes state (click/fill/submit)
 so it asks for approval each time; on chat channels the approval shows a
 screenshot of the page. `--steps` is an ordered JSON array of single-key objects:

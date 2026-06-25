@@ -259,6 +259,224 @@ def cmd_act(args) -> dict:
         return {"url": s.page.url, "title": s.page.title(), "steps": done, "screenshot": str(dest)}
 
 
+# -- explore: one process, one live browser, deepseek drives the loop ---------
+#
+# The other verbs are one-shot: a fresh process re-navigates every call, so an
+# outer agent that wants to "look, decide, click, look again" ping-pongs and
+# re-loads the page each round. `explore` instead keeps ONE browser open and
+# runs an inner LLM loop (the project's own cheap model, vision OFF) that
+# observes the page as indexed elements and issues ONE action per step until it
+# reports `done`. Built for openai-compatible providers (deepseek default).
+
+# JS: tag every visible, enabled interactive element with data-bu-idx and return
+# a compact [{idx, tag, type, label}] list. Selectors are then [data-bu-idx="N"].
+_ENUM_JS = """
+() => {
+  const sel = 'a,button,input,textarea,select,[role=button],[role=link],[onclick]';
+  const out = []; let i = 0;
+  for (const el of document.querySelectorAll(sel)) {
+    if (!el.getClientRects().length) continue;
+    const st = getComputedStyle(el);
+    if (st.visibility === 'hidden' || st.display === 'none') continue;
+    if (el.disabled) continue;
+    el.setAttribute('data-bu-idx', i);
+    const label = (el.innerText || el.value || el.getAttribute('placeholder') ||
+      el.getAttribute('aria-label') || el.name || '').trim().replace(/\\s+/g, ' ').slice(0, 80);
+    out.push({idx: i, tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || '', label});
+    i++;
+  }
+  return out;
+}
+"""
+
+_EXPLORE_SYSTEM = """You are a web-automation agent driving a real browser.
+Each turn you receive the current page: its URL, title, a text excerpt, and a
+numbered list of interactive elements. Achieve the user's TASK by calling
+`browser_action` exactly ONCE per turn.
+Actions: click(index), fill(index,text), select(index,text), goto(url),
+scroll(text="down"|"up"), done(answer).
+Element indices are reassigned after every action — always use the indices from
+the LATEST page state, never an old one. Work efficiently; steps are limited.
+When the task is complete (or you have the answer), call done with the result in
+`answer`."""
+
+_ACTION_TOOL = {
+    "name": "browser_action",
+    "description": "Take exactly one action on the page, or finish with done.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["click", "fill", "select", "goto", "scroll", "done"],
+            },
+            "index": {"type": "integer", "description": "target element index"},
+            "text": {"type": "string", "description": "text to fill / option / scroll dir"},
+            "url": {"type": "string", "description": "url for goto"},
+            "answer": {"type": "string", "description": "final result when action=done"},
+        },
+        "required": ["action"],
+    },
+}
+
+
+def _format_state(url: str, title: str, excerpt: str, elements: list[dict]) -> str:
+    lines = [f"URL: {url}", f"TITLE: {title}", "", "EXCERPT:", excerpt.strip()[:800]]
+    lines += ["", "ELEMENTS:"]
+    for e in elements:
+        t = f"{e['tag']}" + (f"({e['type']})" if e.get("type") else "")
+        lines.append(f"[{e['idx']}] {t} {e.get('label', '')!r}")
+    if not elements:
+        lines.append("(none found)")
+    return "\n".join(lines)
+
+
+def _apply_action(page, action: dict, timeout_ms: int) -> str:
+    """Execute one model action against the live page. Returns a short result note."""
+    verb = action.get("action")
+    idx = action.get("index")
+    sel = f'[data-bu-idx="{idx}"]'
+    if verb == "click":
+        page.click(sel, timeout=timeout_ms)
+        return f"clicked [{idx}]"
+    if verb == "fill":
+        page.fill(sel, action.get("text", ""), timeout=timeout_ms)
+        return f"filled [{idx}]"
+    if verb == "select":
+        page.select_option(sel, action.get("text", ""), timeout=timeout_ms)
+        return f"selected [{idx}]"
+    if verb == "goto":
+        page.goto(action.get("url", ""), timeout=timeout_ms, wait_until="domcontentloaded")
+        return f"went to {action.get('url')}"
+    if verb == "scroll":
+        page.mouse.wheel(0, -800 if action.get("text", "").startswith("up") else 800)
+        return "scrolled"
+    raise ValueError(f"unknown action: {verb!r}")
+
+
+def _load_agent_config():
+    """Pull the agent's LLM config from the same store the app uses."""
+    import asyncio
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from core.config_store import ConfigStore
+
+    store = ConfigStore(str(_data_dir() / "config.db"))
+    return asyncio.run(store.export_to_config()).agent
+
+
+class _Aio:
+    """Run coroutines on a persistent background loop.
+
+    Playwright's sync API holds an event loop on the main thread, so `asyncio.run`
+    there raises "cannot be called from a running event loop". One long-lived loop
+    in its own thread sidesteps that and keeps the AsyncOpenAI client bound to a
+    single loop across calls.
+    """
+
+    def __init__(self):
+        import asyncio
+        import threading
+
+        self.loop = asyncio.new_event_loop()
+        threading.Thread(target=self.loop.run_forever, daemon=True).start()
+
+    def run(self, coro):
+        import asyncio
+
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result()
+
+    def close(self):
+        self.loop.call_soon_threadsafe(self.loop.stop)
+
+
+def cmd_explore(args) -> dict:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from core.llm import LLMClient
+
+    profile = _validate_profile(args.profile)
+    agent_cfg = _load_agent_config()
+    llm = LLMClient.from_agent_config(agent_cfg)
+    model = agent_cfg.model
+    aio = _Aio()
+
+    def observe(page) -> str:
+        elements = page.evaluate(_ENUM_JS)
+        excerpt = page.inner_text("body")
+        return _format_state(page.url, page.title(), excerpt, elements)
+
+    trail: list[str] = []
+    try:
+        with _Session(profile, args.headless) as s:
+            s.goto(args.url, args.timeout)
+            messages: list[dict] = [
+                {"role": "user", "content": f"TASK: {args.task}\n\n{observe(s.page)}"}
+            ]
+            answer = None
+            for _ in range(args.max_steps):
+                resp = aio.run(
+                    llm.generate(
+                        model=model,
+                        system=_EXPLORE_SYSTEM,
+                        messages=messages,
+                        tools=[_ACTION_TOOL],
+                        max_tokens=1024,
+                    )
+                )
+                if not resp.tool_calls:
+                    answer = resp.text  # model answered in prose — treat as done
+                    break
+                call = resp.tool_calls[0]
+                action = call.arguments or {}
+                # openai-compatible assistant turn carrying exactly one tool_call, so
+                # the required tool-result message pairs up cleanly. ponytail: deepseek
+                # path only; anthropic tool threading differs (this verb is deepseek).
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": resp.text or "",
+                        "tool_calls": [
+                            {
+                                "id": call.id,
+                                "type": "function",
+                                "function": {"name": call.name, "arguments": json.dumps(action)},
+                            }
+                        ],
+                    }
+                )
+                if action.get("action") == "done":
+                    answer = action.get("answer", "")
+                    trail.append("done")
+                    break
+                try:
+                    note = _apply_action(s.page, action, args.timeout)
+                except Exception as exc:
+                    note = f"error: {type(exc).__name__}: {exc}"
+                trail.append(note)
+                _settle(s.page, args.timeout)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": f"{note}\n\n{observe(s.page)}",
+                    }
+                )
+
+            host = urlparse(s.page.url).netloc or "page"
+            shot = Path.home() / "Downloads" / f"clio-{host}-{int(time.time())}.png"
+            s.snapshot(shot, full_page=True)
+            return {
+                "task": args.task,
+                "answer": answer,
+                "done": answer is not None,
+                "steps": trail,
+                "url": s.page.url,
+                "screenshot": str(shot),
+            }
+    finally:
+        aio.close()
+
+
 def cmd_profiles(_args) -> dict:
     """List saved profiles with a rough 'authenticated' hint (has a cookies DB)."""
     root = _data_dir() / "browser" / "profiles"
@@ -312,6 +530,12 @@ def main() -> None:
     p_act.add_argument("--profile", default="default")
     p_act.add_argument("--steps", required=True, help="JSON array of single-key step objects")
 
+    p_exp = sub.add_parser("explore", help="LLM-driven loop: one live browser, act until done")
+    p_exp.add_argument("--url", required=True)
+    p_exp.add_argument("--task", required=True, help="what to accomplish on the site")
+    p_exp.add_argument("--profile", default="default")
+    p_exp.add_argument("--max-steps", type=int, default=12, dest="max_steps")
+
     sub.add_parser("profiles", help="List saved profiles + auth hint")
 
     args = parser.parse_args()
@@ -319,6 +543,7 @@ def main() -> None:
         "read": cmd_read,
         "screenshot": cmd_screenshot,
         "act": cmd_act,
+        "explore": cmd_explore,
         "profiles": cmd_profiles,
     }
     try:
