@@ -268,37 +268,84 @@ def cmd_act(args) -> dict:
 # observes the page as indexed elements and issues ONE action per step until it
 # reports `done`. Built for openai-compatible providers (deepseek default).
 
-# JS: tag every visible, enabled interactive element with data-bu-idx and return
-# a compact [{idx, tag, type, label}] list. Selectors are then [data-bu-idx="N"].
+# JS: per-frame, tag every visible/enabled interactive element with data-bu-idx
+# (numbered from `offset` so indices are unique across frames) and return
+# {count, elements}. Selectors are then [data-bu-idx="N"] within that frame.
 _ENUM_JS = """
-() => {
-  const sel = 'a,button,input,textarea,select,[role=button],[role=link],[onclick]';
+(offset) => {
+  const sel = 'a,button,input,textarea,select,[role=button],[role=link],[role=radio],'
+    + '[role=checkbox],[role=tab],[onclick],[contenteditable=true]';
   const out = []; let i = 0;
   for (const el of document.querySelectorAll(sel)) {
     if (!el.getClientRects().length) continue;
     const st = getComputedStyle(el);
     if (st.visibility === 'hidden' || st.display === 'none') continue;
-    if (el.disabled) continue;
-    el.setAttribute('data-bu-idx', i);
-    const label = (el.innerText || el.value || el.getAttribute('placeholder') ||
-      el.getAttribute('aria-label') || el.name || '').trim().replace(/\\s+/g, ' ').slice(0, 80);
-    out.push({idx: i, tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || '', label});
+    const tag = el.tagName.toLowerCase();
+    let label = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
+      el.getAttribute('name') || el.getAttribute('title') || el.value ||
+      '').trim().replace(/\\s+/g, ' ').slice(0, 80);
+    // Skip pure-decoration anchors with no label/href target text.
+    if (!label && tag === 'a') continue;
+    const idx = offset + i;
+    el.setAttribute('data-bu-idx', String(idx));
+    const rec = {idx, tag, type: el.getAttribute('type') || '', label};
+    // Keep disabled controls visible (marked) — a disabled "Next" button tells the
+    // model a prerequisite field is still missing, instead of vanishing silently.
+    if (el.disabled) rec.disabled = true;
+    if (tag === 'input' || tag === 'textarea') rec.value = (el.value || '').slice(0, 40);
+    if (el.type === 'radio' || el.type === 'checkbox') rec.checked = el.checked;
+    if (tag === 'select') {
+      rec.value = el.value;
+      // Show the option VALUE, plus its label in parens only when they differ —
+      // a "value:text" join breaks for values that contain ':' (e.g. times).
+      rec.options = [...el.options].slice(0, 12).map(o => {
+        const v = o.value, t = o.text.trim().slice(0, 24);
+        return v === t ? v : `${v} (${t})`;
+      });
+    }
+    const exp = el.getAttribute('aria-expanded');
+    if (exp !== null) rec.expanded = exp;
+    out.push(rec);
     i++;
   }
-  return out;
+  return {count: i, elements: out};
 }
 """
 
 _EXPLORE_SYSTEM = """You are a web-automation agent driving a real browser.
-Each turn you receive the current page: its URL, title, a text excerpt, and a
-numbered list of interactive elements. Achieve the user's TASK by calling
-`browser_action` exactly ONCE per turn.
+Each turn you receive the current page: URL, title, a text excerpt, a list of
+the actions you took so far, and a numbered list of interactive ELEMENTS
+(across all frames, including embedded widgets and payment iframes). Achieve the
+user's TASK by calling `browser_action` exactly ONCE per turn.
+
 Actions: click(index), fill(index,text), select(index,text), goto(url),
 scroll(text="down"|"up"), done(answer).
-Element indices are reassigned after every action — always use the indices from
-the LATEST page state, never an old one. Work efficiently; steps are limited.
-When the task is complete (or you have the answer), call done with the result in
-`answer`."""
+
+Rules:
+- Element indices are RENUMBERED every turn. Always use indices from the LATEST
+  ELEMENTS list, never an old one.
+- To advance a multi-step flow, click the button that moves forward (e.g.
+  "Next", "Continue", "Book now", "Pay").
+- Fill every required field before clicking the step's continue button.
+- For input(date) fill YYYY-MM-DD (pick a date a few days out); for input(time)
+  fill HH:MM. A dropdown showing options like ["Select date first..."] is
+  DISABLED until the date it depends on is filled — set the date input first,
+  then on the next turn its real options appear and you can select one.
+- A select shows its options inline as options=[value (label), ...]; pass the
+  bare VALUE (the part before any parenthesis) to select(index,value).
+- An input shows its current text as value=...; if it already holds what you
+  need, don't refill it.
+- An element marked DISABLED cannot be clicked yet — it is gated on a missing
+  field. Do not click it; find and complete the missing required field first
+  (an empty value=, an unselected radio/option), which will enable it.
+- If a NOTE says the page did not change, your last action had no effect — do
+  NOT repeat it. Pick a different element (you may need to scroll, set a
+  prerequisite field first, or click a radio/option). Do NOT navigate away with
+  goto to restart — stay in the flow and fix the current step.
+- Payment fields (card number, expiry, CVC) live in iframes but appear in the
+  ELEMENTS list like any other input — fill them normally.
+- Call done(answer) when the task is finished (e.g. a confirmation page shows),
+  describing the outcome. Don't call done prematurely."""
 
 _ACTION_TOOL = {
     "name": "browser_action",
@@ -321,29 +368,87 @@ _ACTION_TOOL = {
 
 
 def _format_state(url: str, title: str, excerpt: str, elements: list[dict]) -> str:
-    lines = [f"URL: {url}", f"TITLE: {title}", "", "EXCERPT:", excerpt.strip()[:800]]
+    lines = [f"URL: {url}", f"TITLE: {title}", "", "EXCERPT:", excerpt.strip()[:1400]]
     lines += ["", "ELEMENTS:"]
+    last_frame = None
     for e in elements:
+        fr = e.get("frame")
+        if fr and fr != last_frame:
+            lines.append(f"-- in frame: {fr} --")
+            last_frame = fr
         t = f"{e['tag']}" + (f"({e['type']})" if e.get("type") else "")
-        lines.append(f"[{e['idx']}] {t} {e.get('label', '')!r}")
+        extra = " DISABLED" if e.get("disabled") else ""
+        if e.get("checked") is not None:
+            extra += " CHECKED" if e["checked"] else ""
+        if e.get("value"):
+            extra += f" value={e['value']!r}"
+        if e.get("expanded") is not None:
+            extra += f" expanded={e['expanded']}"
+        if e.get("options"):
+            extra += f" options={e['options']}"
+        lines.append(f"[{e['idx']}] {t} {e.get('label', '')!r}{extra}")
     if not elements:
         lines.append("(none found)")
     return "\n".join(lines)
 
 
-def _apply_action(page, action: dict, timeout_ms: int) -> str:
-    """Execute one model action against the live page. Returns a short result note."""
+def _observe(page) -> tuple[str, dict]:
+    """Enumerate interactive elements across ALL frames (main + embedded widgets +
+    payment iframes). Returns (state_text, {index: frame}) so actions dispatch into
+    the frame that owns each element."""
+    elements: list[dict] = []
+    frame_map: dict = {}
+    texts: list[str] = []
+    offset = 0
+    for fr in page.frames:
+        try:
+            res = fr.evaluate(_ENUM_JS, offset)
+        except Exception:
+            continue  # frame detached / not ready — skip it this turn
+        items = res.get("elements", [])
+        # Label frames other than the main one so the model sees the widget split.
+        frame_label = "" if fr is page.main_frame else (fr.url.split("//")[-1][:40] or "iframe")
+        for it in items:
+            it["frame"] = frame_label
+            elements.append(it)
+            frame_map[it["idx"]] = fr
+        offset += res.get("count", 0)
+        # The real content often lives in the widget iframe, not the host page —
+        # pull a short text excerpt from each frame that has interactive elements.
+        if items:
+            try:
+                snippet = fr.inner_text("body").strip().replace("\n\n", "\n")[:600]
+            except Exception:
+                snippet = ""
+            if snippet:
+                texts.append((f"[{frame_label}]\n" if frame_label else "") + snippet)
+    excerpt = "\n---\n".join(texts)[:1400]
+    return _format_state(page.url, page.title(), excerpt, elements), frame_map
+
+
+def _apply_action(frame_map: dict, action: dict, timeout_ms: int, page=None) -> str:
+    """Execute one model action in the frame that owns the target element."""
     verb = action.get("action")
     idx = action.get("index")
+    target = frame_map.get(idx)
     sel = f'[data-bu-idx="{idx}"]'
     if verb == "click":
-        page.click(sel, timeout=timeout_ms)
+        # force=True skips Playwright's actionability wait (visibility/stability/
+        # overlay-intercept/in-viewport). Real sites bury the true control under a
+        # label or image and use sr-only radios — without force every click hangs
+        # the full timeout then fails. The JS-level click still fires change events.
+        target.click(sel, timeout=timeout_ms, force=True)
         return f"clicked [{idx}]"
     if verb == "fill":
-        page.fill(sel, action.get("text", ""), timeout=timeout_ms)
+        target.fill(sel, action.get("text", ""), timeout=timeout_ms)
         return f"filled [{idx}]"
     if verb == "select":
-        page.select_option(sel, action.get("text", ""), timeout=timeout_ms)
+        val = action.get("text", "")
+        try:
+            target.select_option(sel, value=val, timeout=timeout_ms)
+        except Exception:
+            # Model may have passed the visible label rather than the option value.
+            target.select_option(sel, label=val, timeout=timeout_ms)
         return f"selected [{idx}]"
     if verb == "goto":
         page.goto(action.get("url", ""), timeout=timeout_ms, wait_until="domcontentloaded")
@@ -399,21 +504,23 @@ def cmd_explore(args) -> dict:
     llm = LLMClient.from_agent_config(agent_cfg)
     model = agent_cfg.model
     aio = _Aio()
-
-    def observe(page) -> str:
-        elements = page.evaluate(_ENUM_JS)
-        excerpt = page.inner_text("body")
-        return _format_state(page.url, page.title(), excerpt, elements)
+    verbose = bool(os.environ.get("BROWSER_EXPLORE_VERBOSE"))
 
     trail: list[str] = []
+
+    def trail_block() -> str:
+        return "STEPS SO FAR: " + (", ".join(trail) if trail else "(none yet)")
+
     try:
         with _Session(profile, args.headless) as s:
             s.goto(args.url, args.timeout)
+            state, frame_map = _observe(s.page)
             messages: list[dict] = [
-                {"role": "user", "content": f"TASK: {args.task}\n\n{observe(s.page)}"}
+                {"role": "user", "content": f"TASK: {args.task}\n\n{trail_block()}\n\n{state}"}
             ]
             answer = None
-            for _ in range(args.max_steps):
+            prev_state = state
+            for step in range(args.max_steps):
                 resp = aio.run(
                     llm.generate(
                         model=model,
@@ -448,17 +555,45 @@ def cmd_explore(args) -> dict:
                     answer = action.get("answer", "")
                     trail.append("done")
                     break
+                # Short per-action timeout: a buried/wrong element should fail in
+                # seconds so the model can recover, not burn the whole budget on one
+                # 30s actionability wait. Navigation keeps the full timeout.
+                act_timeout = args.timeout if action.get("action") == "goto" else 6000
                 try:
-                    note = _apply_action(s.page, action, args.timeout)
+                    note = _apply_action(frame_map, action, act_timeout, page=s.page)
                 except Exception as exc:
-                    note = f"error: {type(exc).__name__}: {exc}"
-                trail.append(note)
-                _settle(s.page, args.timeout)
+                    msg = str(exc).split("\nCall log:")[0]  # drop Playwright's verbose log
+                    note = f"error: {type(exc).__name__}: {msg}"
+                if note.startswith("error"):
+                    label = note
+                elif action.get("action") in ("goto", "scroll"):
+                    label = note
+                else:
+                    label = f"{action.get('action')}[{action.get('index')}]"
+                trail.append(label)
+                _settle(s.page, 3500)
+                state, frame_map = _observe(s.page)
+                # No-progress guard: if the page looks identical, tell the model so
+                # it stops hammering the same dead element.
+                changed = state != prev_state
+                prev_state = state
+                hint = (
+                    ""
+                    if changed
+                    else (
+                        "\nNOTE: the page did NOT change after your action — it had no "
+                        "effect. Do not repeat it; try a different element (you may need "
+                        "to scroll, or click a radio/option first)."
+                    )
+                )
+                if verbose:
+                    tag = "" if changed else " (no change)"
+                    print(f"[step {step}] {label}{tag}", file=sys.stderr)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
-                        "content": f"{note}\n\n{observe(s.page)}",
+                        "content": f"{note}\n\n{trail_block()}{hint}\n\n{state}",
                     }
                 )
 

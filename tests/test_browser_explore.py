@@ -24,20 +24,32 @@ class _FakePage:
     def __init__(self):
         self.calls = []
 
-    def click(self, sel, timeout=None):
+    def click(self, sel, timeout=None, force=False):
         self.calls.append(("click", sel))
 
     def fill(self, sel, text, timeout=None):
         self.calls.append(("fill", sel, text))
 
 
-def test_apply_action_dispatches_to_indexed_selector():
-    page = _FakePage()
-    note = _apply_action(page, {"action": "click", "index": 3}, 1000)
-    assert page.calls == [("click", '[data-bu-idx="3"]')]
+def test_apply_action_dispatches_into_owning_frame():
+    frame = _FakePage()
+    # frame_map routes index 3 to its owning frame; selector is frame-local.
+    note = _apply_action({3: frame}, {"action": "click", "index": 3}, 1000)
+    assert frame.calls == [("click", '[data-bu-idx="3"]')]
     assert note == "clicked [3]"
 
 
 def test_apply_action_rejects_unknown_verb():
     with pytest.raises(ValueError):
-        _apply_action(_FakePage(), {"action": "teleport"}, 1000)
+        _apply_action({0: _FakePage()}, {"action": "teleport", "index": 0}, 1000)
+
+
+def test_format_state_marks_frames():
+    out = _format_state(
+        "u",
+        "t",
+        "x",
+        [{"idx": 5, "tag": "input", "type": "text", "label": "Card", "frame": "js.stripe.com"}],
+    )
+    assert "in frame: js.stripe.com" in out
+    assert "[5] input(text) 'Card'" in out
