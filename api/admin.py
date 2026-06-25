@@ -792,6 +792,7 @@ def create_admin_app(
         deepseek_api_key = await config_store.get("agent.deepseek_api_key") or ""
         deepseek_base_url = await config_store.get("agent.deepseek_base_url") or ""
         model = await config_store.get("agent.model") or "claude-4-6-sonnet"
+        thinking_level = await config_store.get("agent.thinking_level") or ""
         extraction_provider = await config_store.get("memory.extraction_provider") or "anthropic"
         extraction_model = await config_store.get("memory.extraction_model") or "claude-haiku-4-5"
         consolidation_provider = (
@@ -799,6 +800,10 @@ def create_admin_app(
         )
         consolidation_model = (
             await config_store.get("memory.consolidation_model") or "claude-haiku-4-5"
+        )
+        extraction_thinking_level = await config_store.get("memory.extraction_thinking_level") or ""
+        consolidation_thinking_level = (
+            await config_store.get("memory.consolidation_thinking_level") or ""
         )
         gd_enabled = await config_store.get("goal_decomposition.enabled")
         gd_enabled = gd_enabled if gd_enabled is not None else "true"
@@ -808,8 +813,11 @@ def create_admin_app(
         tr_enabled = tr_enabled if tr_enabled is not None else "true"
         tr_provider = await config_store.get("task_reflection.provider") or "anthropic"
         tr_model = await config_store.get("task_reflection.model") or "claude-haiku-4-5"
+        gd_thinking_level = await config_store.get("goal_decomposition.thinking_level") or ""
+        tr_thinking_level = await config_store.get("task_reflection.thinking_level") or ""
         compaction_provider = await config_store.get("compaction.provider") or "anthropic"
         compaction_model = await config_store.get("compaction.model") or "claude-haiku-4-5"
+        compaction_thinking_level = await config_store.get("compaction.thinking_level") or ""
         prompt_tool_usage_override = await config_store.get("prompt.tool_usage_override") or ""
         prompt_history_override = await config_store.get("prompt.history_handling_override") or ""
         prompt_capture_enabled = await config_store.get("admin.capture_prompts")
@@ -829,18 +837,24 @@ def create_admin_app(
             deepseek_api_key=deepseek_api_key,
             deepseek_base_url=deepseek_base_url,
             model=model,
+            thinking_level=thinking_level,
             extraction_provider=extraction_provider,
             extraction_model=extraction_model,
+            extraction_thinking_level=extraction_thinking_level,
             consolidation_provider=consolidation_provider,
             consolidation_model=consolidation_model,
+            consolidation_thinking_level=consolidation_thinking_level,
             gd_enabled=gd_enabled,
             gd_provider=gd_provider,
             gd_model=gd_model,
+            gd_thinking_level=gd_thinking_level,
             tr_enabled=tr_enabled,
             tr_provider=tr_provider,
             tr_model=tr_model,
+            tr_thinking_level=tr_thinking_level,
             compaction_provider=compaction_provider,
             compaction_model=compaction_model,
+            compaction_thinking_level=compaction_thinking_level,
             prompt_tool_usage_override=prompt_tool_usage_override,
             prompt_history_override=prompt_history_override,
             default_tool_usage=DEFAULT_TOOL_USAGE_BLOCK,
@@ -2398,6 +2412,25 @@ def create_admin_app(
             return await _list_models_openai(api_key, base_url)
         return {"ok": False, "error": f"Unknown service: {service}"}
 
+    @app.post("/setup/thinking-levels")
+    async def thinking_levels(request: Request) -> dict:
+        """Autodiscover supported reasoning-effort levels for a model.
+
+        Only Anthropic exposes this via the Models API; other providers must be
+        configured by typing the effort value (see the docs link in the UI).
+        """
+        payload = await request.json()
+        service = payload.get("service", "")
+        api_key = payload.get("api_key", "")
+        model = payload.get("model", "")
+        if service == "anthropic":
+            return await _thinking_levels_anthropic(api_key, model)
+        return {
+            "ok": False,
+            "error": "Autodiscovery is only available for Anthropic — "
+            "enter the effort value manually for this provider.",
+        }
+
     return app, auth
 
 
@@ -2452,6 +2485,33 @@ async def _test_openai(api_key: str, base_url: str | None, model: str = "gpt-4o-
         )
         text = response.choices[0].message.content or ""
         return {"ok": True, "response": text}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _thinking_levels_anthropic(api_key: str, model: str) -> dict:
+    if not api_key:
+        return {"ok": False, "error": "API key is empty"}
+    if not model:
+        return {"ok": False, "error": "Enter a model id first"}
+    try:
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(api_key=api_key)
+        m = await client.models.retrieve(model)
+        caps = getattr(m, "capabilities", None)
+        if caps is not None and not isinstance(caps, dict):
+            caps = getattr(caps, "model_dump", lambda: {})() or {}
+        caps = caps or {}
+        effort = caps.get("effort") or {}
+        levels = [
+            lvl
+            for lvl in ("low", "medium", "high", "xhigh", "max")
+            if isinstance(effort.get(lvl), dict) and effort[lvl].get("supported")
+        ]
+        thinking = caps.get("thinking") or {}
+        supported = bool(thinking.get("supported")) or bool(levels)
+        return {"ok": True, "supported": supported, "levels": levels}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 

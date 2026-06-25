@@ -1,4 +1,31 @@
 {# LLM tab partial #}
+{#- Reusable thinking-level control. `bg` adds the "shared config" badge for
+    background inference kinds that point at the same provider+model as main. -#}
+{% macro think(level, prov, model, lid, bg=false) -%}
+      <div class="mt-2">
+        <label class="label">Thinking level{% if bg %}<span class="text-muted text-xs font-normal" x-show="sameAsMain({{ prov }}, {{ model }})"> · same config as Main inference</span>{% endif %}</label>
+        <div class="flex items-center gap-2">
+          <input type="text" class="input-sm" style="max-width:300px" x-model="{{ level }}"
+                 list="{{ lid }}" placeholder="off — type or pick low / medium / high">
+          <datalist id="{{ lid }}">
+            <option value=""></option>
+            <template x-for="lvl in levelOptions({{ prov }})" :key="'{{ lid }}-' + lvl">
+              <option :value="lvl"></option>
+            </template>
+          </datalist>
+          <button type="button" class="btn-secondary btn-sm" x-show="{{ prov }} === 'anthropic'"
+                  @click="fetchThinkingLevels({{ prov }}, {{ model }})" :disabled="fetchingLevels[{{ prov }}]">
+            <span x-show="!fetchingLevels[{{ prov }}]">Fetch levels</span>
+            <span x-show="fetchingLevels[{{ prov }}]">…</span>
+          </button>
+          <a class="text-xs text-muted underline" x-show="{{ prov }} !== 'anthropic'"
+             :href="providerDocsUrl({{ prov }})" target="_blank" rel="noopener">effort docs ↗</a>
+        </div>
+        <p class="text-muted text-xs mt-1" x-show="fetchLevelsResult[{{ prov }}]" x-text="fetchLevelsResult[{{ prov }}]"></p>
+        <p class="text-muted text-xs mt-1">Leave <strong>Off</strong> for non-reasoning models. Higher = more reasoning, more tokens. Anthropic: “Fetch levels” autodiscovers supported values; other providers: see the docs link and type the value.</p>
+        <p class="text-amber-600 text-xs mt-1" x-show="{{ level }} && !modelSupportsThinking({{ model }})">Heads up: “<span x-text="{{ model }}"></span>” isn't a recognized reasoning model — only set a level if you know it supports thinking, or the inference call may error.</p>
+      </div>
+{%- endmacro %}
 <div class="space-y-6" x-data="llmTab(
   {{ provider|default('anthropic', true)|tojson|forceescape }},
   {{ anthropic_api_key|default('', true)|tojson|forceescape }},
@@ -27,7 +54,13 @@
   {{ default_history_handling|default('', true)|tojson|forceescape }},
   {{ prompt_capture_enabled|default(false, true)|tojson|forceescape }},
   {{ compaction_provider|default('anthropic', true)|tojson|forceescape }},
-  {{ compaction_model|default('claude-haiku-4-5', true)|tojson|forceescape }}
+  {{ compaction_model|default('claude-haiku-4-5', true)|tojson|forceescape }},
+  {{ thinking_level|default('', true)|tojson|forceescape }},
+  {{ extraction_thinking_level|default('', true)|tojson|forceescape }},
+  {{ consolidation_thinking_level|default('', true)|tojson|forceescape }},
+  {{ gd_thinking_level|default('', true)|tojson|forceescape }},
+  {{ tr_thinking_level|default('', true)|tojson|forceescape }},
+  {{ compaction_thinking_level|default('', true)|tojson|forceescape }}
 )">
   <div class="card">
     <h2 class="text-base mb-1">System Prompt Controls</h2>
@@ -175,6 +208,8 @@
         </datalist>
         <p class="text-muted text-xs mt-1">Type any model id, or pick from the list. Use “Fetch models” in the provider card below to load the live list from the API.</p>
       </div>
+
+{{ think('thinkingLevel', 'provider', 'model', 'dl-think-main') }}
     </form>
 
     <div class="flex items-center gap-2 mt-4">
@@ -197,7 +232,8 @@
                     'agent.grok_base_url': grokBaseUrl,
                     'agent.deepseek_api_key': deepseekKey,
                     'agent.deepseek_base_url': deepseekBaseUrl,
-                    'agent.model': model
+                    'agent.model': model,
+                    'agent.thinking_level': thinkingLevel
                   }})
                 })
                 .then(r => { resultOk = r.ok; return r.json(); })
@@ -240,6 +276,7 @@
         </datalist>
         <p class="text-muted text-xs mt-1">Model used to extract memories from conversations.</p>
       </div>
+{{ think('extractionThinkingLevel', 'extractionProvider', 'extractionModel', 'dl-think-ext', true) }}
 
       <hr class="border-border">
 
@@ -262,6 +299,7 @@
         </datalist>
         <p class="text-muted text-xs mt-1">Model used to consolidate and merge duplicate memories.</p>
       </div>
+{{ think('consolidationThinkingLevel', 'consolidationProvider', 'consolidationModel', 'dl-think-con', true) }}
     </form>
 
     <div class="flex items-center gap-2 mt-4">
@@ -276,8 +314,10 @@
                   body: JSON.stringify({values: {
                     'memory.extraction_provider': extractionProvider,
                     'memory.extraction_model': extractionModel,
+                    'memory.extraction_thinking_level': extractionThinkingLevel,
                     'memory.consolidation_provider': consolidationProvider,
-                    'memory.consolidation_model': consolidationModel
+                    'memory.consolidation_model': consolidationModel,
+                    'memory.consolidation_thinking_level': consolidationThinkingLevel
                   }})
                 })
                 .then(r => { memoryResultOk = r.ok; return r.json(); })
@@ -324,6 +364,7 @@
         </datalist>
         <p class="text-muted text-xs mt-1">Model used to classify message complexity and decompose goals.</p>
       </div>
+{{ think('gdThinkingLevel', 'gdProvider', 'gdModel', 'dl-think-gd', true) }}
     </form>
 
     <div class="flex items-center gap-2 mt-4">
@@ -338,7 +379,8 @@
                   body: JSON.stringify({values: {
                     'goal_decomposition.enabled': gdEnabled ? 'true' : 'false',
                     'goal_decomposition.provider': gdProvider,
-                    'goal_decomposition.model': gdModel
+                    'goal_decomposition.model': gdModel,
+                    'goal_decomposition.thinking_level': gdThinkingLevel
                   }})
                 })
                 .then(r => { gdResultOk = r.ok; return r.json(); })
@@ -385,6 +427,7 @@
         </datalist>
         <p class="text-muted text-xs mt-1">Model used to reflect on completed tasks and extract lessons.</p>
       </div>
+{{ think('trThinkingLevel', 'trProvider', 'trModel', 'dl-think-tr', true) }}
     </form>
 
     <div class="flex items-center gap-2 mt-4">
@@ -399,7 +442,8 @@
                   body: JSON.stringify({values: {
                     'task_reflection.enabled': trEnabled ? 'true' : 'false',
                     'task_reflection.provider': trProvider,
-                    'task_reflection.model': trModel
+                    'task_reflection.model': trModel,
+                    'task_reflection.thinking_level': trThinkingLevel
                   }})
                 })
                 .then(r => { trResultOk = r.ok; return r.json(); })
@@ -441,6 +485,7 @@
         </datalist>
         <p class="text-muted text-xs mt-1">A small, fast model is recommended (summarization is cheap).</p>
       </div>
+{{ think('compactionThinkingLevel', 'compactionProvider', 'compactionModel', 'dl-think-cp', true) }}
     </form>
 
     <div class="flex items-center gap-2 mt-4">
@@ -454,7 +499,8 @@
                   },
                   body: JSON.stringify({values: {
                     'compaction.provider': compactionProvider,
-                    'compaction.model': compactionModel
+                    'compaction.model': compactionModel,
+                    'compaction.thinking_level': compactionThinkingLevel
                   }})
                 })
                 .then(r => { compactionResultOk = r.ok; return r.json(); })

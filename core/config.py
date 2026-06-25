@@ -48,6 +48,7 @@ class AgentConfig(BaseModel):
     deepseek_api_key: str = ""
     deepseek_base_url: str = ""
     model: str = "claude-4-6-sonnet"
+    thinking_level: str = ""  # "" (off) | "low" | "medium" | "high" — only for reasoning models
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
     skills_db_path: str = "data/skills.db"
@@ -158,6 +159,8 @@ class MemoryConfig(BaseModel):
     extraction_model: str = "claude-haiku-4-5"
     consolidation_provider: str = "anthropic"
     consolidation_model: str = "claude-haiku-4-5"
+    extraction_thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
+    consolidation_thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     extraction_cooldown_seconds: int = 120  # minimum seconds between extractions
 
     embedding: EmbeddingConfig = EmbeddingConfig()
@@ -177,12 +180,14 @@ class GoalDecompositionConfig(BaseModel):
     enabled: bool = True
     provider: str = "anthropic"
     model: str = "claude-haiku-4-5"
+    thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
 
 
 class TaskReflectionConfig(BaseModel):
     enabled: bool = True
     provider: str = "anthropic"
     model: str = "claude-haiku-4-5"
+    thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     db_path: str = "data/reflections.db"
     max_reflections: int = 50  # max reflections to keep for prompt injection
 
@@ -197,6 +202,7 @@ class CompactionConfig(BaseModel):
     enabled: bool = True
     provider: str = "anthropic"
     model: str = "claude-haiku-4-5"
+    thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     threshold_type: str = "percent"  # "percent" (of context window) or "tokens" (absolute)
     threshold_percent: int = 80  # trigger at this % of the model's context window
     threshold_tokens: int = 150000  # absolute trigger when threshold_type == "tokens"

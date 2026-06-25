@@ -101,8 +101,16 @@ def _normalize_model(provider: str, model: str) -> str:
 
 
 class LLMClient:
-    def __init__(self, provider: str, api_key: str, base_url: str | None = None):
+    def __init__(
+        self,
+        provider: str,
+        api_key: str,
+        base_url: str | None = None,
+        thinking_level: str = "",
+    ):
         self.provider = _normalize_provider(provider)
+        # "" (off) | "low" | "medium" | "high" — applied only to the main generate() call
+        self.thinking_level = (thinking_level or "").strip().lower()
         self._client: Any
         if self.provider == "anthropic":
             self._client = AsyncAnthropic(api_key=api_key)
@@ -119,36 +127,53 @@ class LLMClient:
             }
             self._client = cast(Any, client_class)(**client_kwargs)  # type: ignore[call-arg]
 
+    def _reasoning_kwargs(self) -> dict[str, Any]:
+        """Provider-specific request kwargs for the configured thinking level.
+
+        Empty when no level is set, so non-reasoning calls are untouched.
+        """
+        level = self.thinking_level
+        if level not in ("low", "medium", "high"):
+            return {}
+        if self.provider == "anthropic":
+            return {"thinking": {"type": "adaptive"}, "output_config": {"effort": level}}
+        return {"reasoning_effort": level}
+
     @classmethod
     def from_agent_config(cls, config) -> LLMClient:
         provider = _normalize_provider(getattr(config, "llm_provider", "anthropic"))
+        thinking = getattr(config, "thinking_level", "")
         if provider == "anthropic":
-            return cls(provider, getattr(config, "anthropic_api_key", ""))
+            return cls(provider, getattr(config, "anthropic_api_key", ""), thinking_level=thinking)
         if provider == "openai":
             return cls(
                 provider,
                 getattr(config, "openai_api_key", ""),
                 getattr(config, "openai_base_url", ""),
+                thinking_level=thinking,
             )
         if provider == "google":
             return cls(
                 provider,
                 getattr(config, "google_api_key", ""),
                 getattr(config, "google_base_url", ""),
+                thinking_level=thinking,
             )
         if provider == "grok":
             return cls(
                 provider,
                 getattr(config, "grok_api_key", ""),
                 getattr(config, "grok_base_url", ""),
+                thinking_level=thinking,
             )
         if provider == "deepseek":
             return cls(
                 provider,
                 getattr(config, "deepseek_api_key", ""),
                 getattr(config, "deepseek_base_url", ""),
+                thinking_level=thinking,
             )
-        return cls("anthropic", getattr(config, "anthropic_api_key", ""))
+        return cls("anthropic", getattr(config, "anthropic_api_key", ""), thinking_level=thinking)
 
     async def generate(
         self,
@@ -180,6 +205,7 @@ class LLMClient:
                 system=cast(Any, system_param),
                 messages=cast(Any, messages),
                 tools=cast(Any, tools),
+                **self._reasoning_kwargs(),
             )
             tool_calls = []
             text_parts = []
@@ -210,6 +236,7 @@ class LLMClient:
             max_tokens=max_tokens,
             messages=cast(Any, full_messages),
             tools=cast(Any, openai_tools),
+            **self._reasoning_kwargs(),
         )
         message = response.choices[0].message
         tool_calls = []
@@ -267,6 +294,7 @@ class LLMClient:
                 model=resolved_model,
                 max_tokens=max_tokens,
                 messages=cast(Any, [{"role": "user", "content": prompt}]),
+                **self._reasoning_kwargs(),
             )
             for block in response.content:
                 block_any = cast(Any, block)
@@ -279,5 +307,6 @@ class LLMClient:
             model=resolved_model,
             max_tokens=max_tokens,
             messages=cast(Any, [{"role": "user", "content": prompt}]),
+            **self._reasoning_kwargs(),
         )
         return (response.choices[0].message.content or "").strip()
