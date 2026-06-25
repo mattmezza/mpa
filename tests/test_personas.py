@@ -86,10 +86,15 @@ def test_gateable_tools_in_sync_with_tools() -> None:
 
 def test_prompt_uses_persona_identity() -> None:
     cfg = Config()
+    cfg.agent.name = "Clio"
     cfg.agent.personalia = "DEFAULT-PERSONALIA"
     cfg.agent.character = "DEFAULT-CHARACTER"
     persona = Persona(
-        name="coach", role="Fitness coach", personalia="PERSONA-ID", character="PERSONA-CH"
+        name="coach",
+        agent_name="Forge",
+        role="Fitness coach",
+        personalia="PERSONA-ID",
+        character="PERSONA-CH",
     )
     sections = build_prompt_sections(
         config=cfg,
@@ -104,6 +109,8 @@ def test_prompt_uses_persona_identity() -> None:
     assert "PERSONA-ID" in full and "PERSONA-CH" in full
     assert "DEFAULT-PERSONALIA" not in full and "DEFAULT-CHARACTER" not in full
     assert "Fitness coach" in full  # active-role line
+    assert "You are Forge" in full  # persona agent_name overrides global name
+    assert "You are Clio" not in full
 
     # No persona → configured identity, unchanged behaviour.
     default = build_prompt_sections(

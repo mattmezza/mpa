@@ -25,6 +25,7 @@ import yaml
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS personas (
     name TEXT PRIMARY KEY,
+    agent_name TEXT DEFAULT '',
     role TEXT DEFAULT '',
     emoji TEXT DEFAULT '',
     voice TEXT DEFAULT '',
@@ -43,7 +44,8 @@ CREATE TABLE IF NOT EXISTS personas (
 class Persona:
     """A swappable agent identity + its scopes."""
 
-    name: str
+    name: str  # slug / identifier (PK)
+    agent_name: str = ""  # name the assistant goes by when active; empty = global agent.name
     role: str = ""
     emoji: str = ""
     voice: str = ""  # TTS voice override; empty = configured default
@@ -106,6 +108,7 @@ def parse_markdown(text: str, *, name: str) -> Persona:
 
     return Persona(
         name=name,
+        agent_name=str(fm.get("agent_name", "") or ""),
         role=str(fm.get("role", "") or ""),
         emoji=str(fm.get("emoji", "") or ""),
         voice=str(fm.get("voice", "") or ""),
@@ -120,6 +123,7 @@ def parse_markdown(text: str, *, name: str) -> Persona:
 def to_markdown(p: Persona) -> str:
     """Serialise a persona back to frontmatter markdown (the raw power-user view)."""
     fm = {
+        "agent_name": p.agent_name,
         "role": p.role,
         "emoji": p.emoji,
         "voice": p.voice,
@@ -171,15 +175,16 @@ class PersonaStore:
     async def _upsert(db: aiosqlite.Connection, p: Persona) -> None:
         await db.execute(
             "INSERT INTO personas "
-            "(name, role, emoji, voice, personalia, character, skills, tools, secrets) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "(name, agent_name, role, emoji, voice, personalia, character, skills, tools, secrets) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(name) DO UPDATE SET "
-            "role=excluded.role, emoji=excluded.emoji, voice=excluded.voice, "
-            "personalia=excluded.personalia, character=excluded.character, "
+            "agent_name=excluded.agent_name, role=excluded.role, emoji=excluded.emoji, "
+            "voice=excluded.voice, personalia=excluded.personalia, character=excluded.character, "
             "skills=excluded.skills, tools=excluded.tools, "
             "secrets=excluded.secrets, updated_at=datetime('now')",
             (
                 p.name,
+                p.agent_name,
                 p.role,
                 p.emoji,
                 p.voice,
@@ -195,6 +200,7 @@ class PersonaStore:
     def _row_to_persona(row: aiosqlite.Row) -> Persona:
         return Persona(
             name=row["name"],
+            agent_name=row["agent_name"] or "",
             role=row["role"] or "",
             emoji=row["emoji"] or "",
             voice=row["voice"] or "",
@@ -237,6 +243,7 @@ class PersonaStore:
 if __name__ == "__main__":
     # ponytail: one runnable check covering the parse/serialise round-trip + scopes.
     md = """---
+agent_name: Forge
 role: Fitness coach
 emoji: "🏋️"
 skills: [scheduling, memory]
@@ -252,6 +259,7 @@ character: |
 Extra prose in the body.
 """
     p = parse_markdown(md, name="fitness-coach")
+    assert p.agent_name == "Forge", p.agent_name
     assert p.role == "Fitness coach", p.role
     assert p.emoji == "🏋️"
     assert p.skills == ["scheduling", "memory"], p.skills
@@ -267,6 +275,6 @@ Extra prose in the body.
 
     # Round-trip through markdown preserves the structured fields.
     p2 = parse_markdown(to_markdown(p), name="fitness-coach")
-    assert p2.skills == p.skills and p2.tools == p.tools
+    assert p2.agent_name == p.agent_name and p2.skills == p.skills and p2.tools == p.tools
     assert p2.personalia.strip() == p.personalia.strip()
     print("personas.py self-check OK")

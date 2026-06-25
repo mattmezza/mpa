@@ -31,9 +31,15 @@
             <input class="input-sm" x-model="emoji" placeholder="🏋️">
           </div>
         </div>
-        <div>
-          <label class="label">Role</label>
-          <input class="input-sm" x-model="role" placeholder="Fitness coach">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="label">Role <span class="text-muted">(label)</span></label>
+            <input class="input-sm" x-model="role" placeholder="Fitness coach">
+          </div>
+          <div>
+            <label class="label">Agent name <span class="text-muted">(blank = default)</span></label>
+            <input class="input-sm" x-model="agent_name" placeholder="Forge">
+          </div>
         </div>
         <div>
           <label class="label">Voice <span class="text-muted">(TTS — blank = default)</span></label>
@@ -117,6 +123,7 @@
     return {
       mode: 'guided',
       name: {{ persona.name|tojson }},
+      agent_name: {{ persona.agent_name|tojson }},
       role: {{ persona.role|tojson }},
       emoji: {{ persona.emoji|tojson }},
       voice: {{ persona.voice|tojson }},
@@ -136,6 +143,7 @@
         const secrets = this.secretsText.split('\n').map(s => s.trim()).filter(Boolean);
         this.raw =
           '---\n' +
+          'agent_name: ' + (this.agent_name || '') + '\n' +
           'role: ' + (this.role || '') + '\n' +
           'emoji: ' + (this.emoji || '') + '\n' +
           'voice: ' + (this.voice || '') + '\n' +
@@ -153,7 +161,8 @@
         const body = this.mode === 'raw'
           ? { name: name, raw: this.raw }
           : {
-              name: name, role: this.role, emoji: this.emoji, voice: this.voice,
+              name: name, agent_name: this.agent_name, role: this.role,
+              emoji: this.emoji, voice: this.voice,
               personalia: this.personalia, character: this.character,
               skills: this.skills, tools: this.tools,
               secrets: this.secretsText.split('\n').map(s => s.trim()).filter(Boolean),

@@ -424,6 +424,7 @@ class SkillUpsertIn(BaseModel):
 
 class PersonaUpsertIn(BaseModel):
     name: str
+    agent_name: str = ""
     role: str = ""
     emoji: str = ""
     voice: str = ""
@@ -2048,6 +2049,7 @@ def create_admin_app(
         else:
             persona = Persona(
                 name=name,
+                agent_name=body.agent_name.strip(),
                 role=body.role.strip(),
                 emoji=body.emoji.strip(),
                 voice=body.voice.strip(),

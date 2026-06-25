@@ -1,4 +1,5 @@
 ---
+agent_name: Atlas
 role: Travel planner
 emoji: "✈️"
 skills: [caldav-calendar, weather, memory, contacts]

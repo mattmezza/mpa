@@ -1,4 +1,5 @@
 ---
+agent_name: Quill
 role: Writing editor
 emoji: "✍️"
 skills: [memory, himalaya-email]

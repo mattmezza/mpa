@@ -1,4 +1,5 @@
 ---
+agent_name: Fin
 role: Personal finance assistant
 emoji: "💰"
 skills: [memory, scheduling, jq, himalaya-email]

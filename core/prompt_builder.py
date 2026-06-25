@@ -135,9 +135,11 @@ def build_prompt_sections(
     # behaviour with no persona is unchanged.
     personalia_text = persona.personalia if persona else cfg.personalia
     character_text = persona.character if persona else cfg.character
+    # A persona may go by its own name; otherwise the globally-configured name.
+    agent_name = persona.agent_name if persona and persona.agent_name else cfg.name
 
     intro = (
-        f"You are {cfg.name}, a personal AI assistant for {cfg.owner_name}.\n\n"
+        f"You are {agent_name}, a personal AI assistant for {cfg.owner_name}.\n\n"
         f"Your timezone is {cfg.timezone}. The current date and time is provided at the "
         f"start of each user message — always use that as 'now'."
     )
