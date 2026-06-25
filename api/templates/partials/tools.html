@@ -99,6 +99,155 @@
       <div :class="testResult.startsWith('Authenticated') ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResult"></div>
     </template>
   </div>
+
+  {# Browser automation #}
+  <div class="card" x-data="browserTab(
+    {{ browser_enabled|default('false', true)|tojson|forceescape }},
+    {{ browser_headless|default('true', true)|tojson|forceescape }},
+    {{ browser_cdp|default('', true)|tojson|forceescape }},
+    {{ browser_profiles|default([], true)|tojson|forceescape }},
+    {{ browser_rules|default([], true)|tojson|forceescape }}
+  )">
+    <div class="flex items-center justify-between gap-3 mb-1">
+      <h3 class="text-sm text-accent">Browser automation</h3>
+      <div class="flex items-center gap-2">
+        <label class="label mb-0">Enabled</label>
+        <input type="checkbox" x-model="enabled">
+      </div>
+    </div>
+    <p class="text-muted text-xs mb-3">
+      Let the agent read JS-heavy pages and act on sites via a headless browser
+      (Playwright/Chromium). Reading runs without asking; actions (click/fill/submit)
+      ask for approval each time — on Telegram the approval shows a screenshot so you
+      can follow along and approve from your phone.
+    </p>
+    <div class="alert-info text-xs mb-4">
+      <strong>What works:</strong> most sites, including logged-in sessions you set up
+      once. <strong>May be blocked:</strong> sites behind strong bot-management or
+      interactive challenges. Prefer an official API/CLI when one exists.
+    </div>
+
+    {# Settings #}
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label class="flex items-center gap-2">
+        <input type="checkbox" x-model="headless">
+        <span class="label mb-0">Headless (no visible window)</span>
+      </label>
+      <div>
+        <label class="label">Sidecar CDP URL <span class="text-muted">(optional)</span></label>
+        <input type="text" class="input-sm" style="max-width:100%" x-model="cdp"
+               placeholder="ws://browser:9222 — empty = run locally">
+        <p class="text-muted text-xs mt-1">
+          Empty launches Chromium locally (works in the REPL). Set to connect to a
+          sidecar Chromium and keep the main image lean.
+        </p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 mt-4">
+      <button class="btn-primary btn-sm" @click="save()">Save</button>
+    </div>
+    <template x-if="result">
+      <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
+    </template>
+
+    {# Test #}
+    <div class="mt-5 pt-4 border-t border-[var(--color-border)]">
+      <h4 class="text-xs text-muted mb-2">Test</h4>
+      <div class="flex flex-wrap items-end gap-2">
+        <div class="grow" style="min-width:200px">
+          <label class="label">URL</label>
+          <input type="text" class="input-sm" style="max-width:100%" x-model="testUrl"
+                 placeholder="https://example.com">
+        </div>
+        <div style="width:140px">
+          <label class="label">Profile</label>
+          <input type="text" class="input-sm" style="max-width:100%" x-model="testProfile"
+                 placeholder="default">
+        </div>
+        <button class="btn btn-sm" :disabled="testing" @click="test()">
+          <span x-show="!testing">Load page</span>
+          <span x-show="testing">Loading…</span>
+        </button>
+      </div>
+      <template x-if="testResult">
+        <div :class="testOk ? 'alert-success' : 'alert-error'" class="mt-2 text-xs" x-text="testResult"></div>
+      </template>
+    </div>
+
+    {# Saved profiles #}
+    <div class="mt-5 pt-4 border-t border-[var(--color-border)]">
+      <h4 class="text-xs text-muted mb-2">Saved profiles</h4>
+      <p class="text-muted text-xs mb-2">
+        Each profile keeps its own cookies/session. To log in the first time, ask the
+        agent to open the site — it screenshots the login, you provide credentials and
+        approve, and the session is saved here for reuse.
+      </p>
+      <div class="overflow-x-auto">
+        <table class="table">
+          <thead><tr><th>Profile</th><th>Status</th><th>Updated</th></tr></thead>
+          <tbody>
+            <template x-for="p in profiles" :key="p.name">
+              <tr>
+                <td class="text-xs" x-text="p.name"></td>
+                <td class="text-xs">
+                  <span x-show="p.authenticated" class="badge-ok">Logged in</span>
+                  <span x-show="!p.authenticated" class="badge-off">No session</span>
+                </td>
+                <td class="text-xs text-muted" x-text="new Date(p.updated*1000).toLocaleString()"></td>
+              </tr>
+            </template>
+            <template x-if="profiles.length === 0">
+              <tr><td colspan="3" class="text-xs text-muted">No profiles yet.</td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# Per-domain action rules #}
+    <div class="mt-5 pt-4 border-t border-[var(--color-border)]">
+      <h4 class="text-xs text-muted mb-2">Per-domain action rules</h4>
+      <p class="text-muted text-xs mb-2">
+        Actions ask for approval by default. Pre-approve (Allow) or Block a domain here.
+      </p>
+      <div class="overflow-x-auto">
+        <table class="table">
+          <thead><tr><th>Domain</th><th>Action</th><th class="w-16"></th></tr></thead>
+          <tbody>
+            <template x-for="r in rules" :key="r.pattern">
+              <tr>
+                <td class="text-xs" x-text="r.domain"></td>
+                <td class="text-xs" x-text="r.level"></td>
+                <td><button class="btn-danger btn-sm" @click="delRule(r.pattern)">Remove</button></td>
+              </tr>
+            </template>
+            <template x-if="rules.length === 0">
+              <tr><td colspan="3" class="text-xs text-muted">No per-domain rules.</td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex flex-wrap items-end gap-2 mt-2">
+        <div class="grow" style="min-width:180px">
+          <label class="label">Domain</label>
+          <input type="text" class="input-sm" style="max-width:100%" x-model="newDomain"
+                 placeholder="github.com">
+        </div>
+        <div style="width:140px">
+          <label class="label">Action</label>
+          <select class="select input-sm" style="max-width:100%" x-model="newLevel">
+            <option value="ALWAYS">Allow</option>
+            <option value="ASK">Ask</option>
+            <option value="NEVER">Block</option>
+          </select>
+        </div>
+        <button class="btn btn-sm" @click="addRule()">Add</button>
+      </div>
+      <template x-if="ruleResult">
+        <div class="alert-error mt-2 text-xs" x-text="ruleResult"></div>
+      </template>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -110,6 +259,69 @@
       resultOk: false,
       testing: false,
       testResult: ''
+    };
+  }
+
+  function browserTab(enabled, headless, cdp, profiles, rules) {
+    const truthy = (v) => v === true || v === 'true';
+    return {
+      enabled: truthy(enabled),
+      headless: truthy(headless),
+      cdp: cdp || '',
+      profiles: profiles || [],
+      rules: rules || [],
+      result: '', resultOk: false,
+      testUrl: 'https://example.com', testProfile: 'default',
+      testing: false, testResult: '', testOk: false,
+      newDomain: '', newLevel: 'ALWAYS', ruleResult: '',
+      _hdr() {
+        return {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+        };
+      },
+      save() {
+        const vals = {
+          'tools.browser.enabled': String(this.enabled),
+          'tools.browser.headless': String(this.headless),
+          'tools.browser.cdp_url': this.cdp
+        };
+        fetch('/config', { method: 'PATCH', headers: this._hdr(), body: JSON.stringify({values: vals}) })
+          .then(r => { this.resultOk = r.ok; return r.json(); })
+          .then(d => {
+            this.result = this.resultOk ? 'Browser settings saved' : (d.detail || 'Error');
+            if (this.resultOk && window.showToast) { window.showToast('Browser settings saved'); }
+          })
+          .catch(e => { this.resultOk = false; this.result = e.message; });
+      },
+      test() {
+        this.testing = true; this.testResult = '';
+        fetch('/tools/browser/test', { method: 'POST', headers: this._hdr(),
+          body: JSON.stringify({ url: this.testUrl, profile: this.testProfile }) })
+          .then(r => r.json())
+          .then(d => {
+            this.testOk = !!d.ok;
+            this.testResult = d.ok ? ('Loaded: ' + (d.title || d.url || 'ok')) : ('Failed: ' + (d.error || 'unknown'));
+          })
+          .catch(e => { this.testOk = false; this.testResult = 'Error: ' + e.message; })
+          .finally(() => { this.testing = false; });
+      },
+      addRule() {
+        if (!this.newDomain) { this.ruleResult = 'Domain is required'; return; }
+        this.ruleResult = '';
+        fetch('/tools/browser/rules', { method: 'POST', headers: this._hdr(),
+          body: JSON.stringify({ domain: this.newDomain, level: this.newLevel }) })
+          .then(r => r.json())
+          .then(d => { if (d.ok) { this.rules = d.rules; this.newDomain = ''; } else { this.ruleResult = d.error || 'Error'; } })
+          .catch(e => { this.ruleResult = e.message; });
+      },
+      delRule(pattern) {
+        fetch('/tools/browser/rules/delete', { method: 'POST', headers: this._hdr(),
+          body: JSON.stringify({ pattern }) })
+          .then(r => r.json())
+          .then(d => { if (d.ok) { this.rules = d.rules; } })
+          .catch(() => {});
+      }
     };
   }
 </script>

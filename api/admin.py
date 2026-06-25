@@ -13,7 +13,9 @@ import collections
 import hashlib
 import json
 import logging
+import os
 import secrets
+import sys
 import urllib.parse
 from base64 import urlsafe_b64encode
 from contextlib import asynccontextmanager
@@ -940,17 +942,51 @@ def create_admin_app(
             prompt_capture_enabled=prompt_capture_enabled,
         )
 
+    def _browser_rules() -> list[dict]:
+        """Per-domain browser `act` rules (excludes the generic default rule)."""
+        agent = agent_state.agent
+        if not agent:
+            return []
+        marker = "browser.py act*"
+        out: list[dict] = []
+        for pattern, level in agent.permissions.rules.items():
+            if marker not in pattern:
+                continue
+            domain = pattern.split(marker, 1)[1].rstrip("*")
+            if not domain:
+                continue  # the generic "ask for all acts" default, not a per-domain rule
+            out.append({"domain": domain, "pattern": pattern, "level": level})
+        return out
+
     @app.get("/partials/tools", dependencies=[Depends(auth)])
     async def partial_tools() -> HTMLResponse:
-        """Tools tab partial — manage optional external CLI tools (e.g. gh)."""
+        """Tools tab partial — manage optional external CLI tools (gh, browser)."""
         gh_enabled = await config_store.get("tools.gh.enabled")
         gh_enabled = gh_enabled if gh_enabled is not None else "false"
         gh_token = await config_store.get("tools.gh.token") or ""
+
+        browser_enabled = await config_store.get("tools.browser.enabled")
+        browser_enabled = browser_enabled if browser_enabled is not None else "false"
+        browser_headless = await config_store.get("tools.browser.headless")
+        browser_headless = browser_headless if browser_headless is not None else "true"
+        browser_cdp = await config_store.get("tools.browser.cdp_url") or ""
+        try:
+            from tools.browser import cmd_profiles
+
+            browser_profiles = cmd_profiles(None).get("profiles", [])
+        except Exception:
+            browser_profiles = []
+
         return _render_partial(
             "partials/tools.html",
             tools=tool_registry(),
             gh_enabled=gh_enabled,
             gh_token=gh_token,
+            browser_enabled=browser_enabled,
+            browser_headless=browser_headless,
+            browser_cdp=browser_cdp,
+            browser_profiles=browser_profiles,
+            browser_rules=_browser_rules(),
         )
 
     @app.post("/tools/gh/test", dependencies=[Depends(auth)])
@@ -982,6 +1018,68 @@ def create_admin_app(
                 "error": "Token rejected by GitHub (invalid or insufficient scope).",
             }
         return {"ok": False, "error": f"GitHub returned HTTP {resp.status_code}."}
+
+    @app.post("/tools/browser/test", dependencies=[Depends(auth)])
+    async def test_browser_tool(request: Request) -> dict:
+        """Load a page via the browser CLI to confirm Chromium works (and a profile)."""
+        body = await request.json()
+        url = str(body.get("url", "")).strip() or "https://example.com"
+        profile = str(body.get("profile", "")).strip() or "default"
+        root = Path(__file__).resolve().parent.parent
+        # Subprocess, not in-process: the sync Playwright API can't run in this event loop.
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "tools/browser.py",
+                "read",
+                "--url",
+                url,
+                "--profile",
+                profile,
+                cwd=str(root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "BROWSER_HEADLESS": "1"},
+            )
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=60)
+        except TimeoutError:
+            return {"ok": False, "error": "Browser test timed out (60s)."}
+        except Exception as exc:  # noqa: BLE001 — surface any error to the UI
+            return {"ok": False, "error": str(exc)}
+        try:
+            data = json.loads(out.decode() or "{}")
+        except json.JSONDecodeError:
+            return {"ok": False, "error": (err.decode() or "no output")[:300]}
+        if data.get("error"):
+            return {"ok": False, "error": data["error"]}
+        return {"ok": True, "title": data.get("title", ""), "url": data.get("url", "")}
+
+    @app.post("/tools/browser/rules", dependencies=[Depends(auth)])
+    async def add_browser_rule(request: Request) -> dict:
+        """Pre-approve/ask/block browser actions on a domain (a permission rule)."""
+        agent = agent_state.agent
+        if not agent:
+            raise HTTPException(503, "Agent not running")
+        body = await request.json()
+        domain = str(body.get("domain", "")).strip()
+        level = str(body.get("level", "ALWAYS")).strip().upper()
+        if not domain:
+            return {"ok": False, "error": "Domain is required."}
+        if level not in ("ALWAYS", "ASK", "NEVER"):
+            level = "ASK"
+        agent.permissions.add_rule(f"run_command:*browser.py act*{domain}*", level)
+        return {"ok": True, "rules": _browser_rules()}
+
+    @app.post("/tools/browser/rules/delete", dependencies=[Depends(auth)])
+    async def delete_browser_rule(request: Request) -> dict:
+        agent = agent_state.agent
+        if not agent:
+            raise HTTPException(503, "Agent not running")
+        body = await request.json()
+        pattern = str(body.get("pattern", ""))
+        if pattern:
+            agent.permissions.remove_rule(pattern)
+        return {"ok": True, "rules": _browser_rules()}
 
     @app.get("/partials/search", dependencies=[Depends(auth)])
     async def partial_search() -> HTMLResponse:
