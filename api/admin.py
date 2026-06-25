@@ -419,6 +419,7 @@ class PersonaUpsertIn(BaseModel):
     name: str
     role: str = ""
     emoji: str = ""
+    voice: str = ""
     personalia: str = ""
     character: str = ""
     skills: list[str] = []
@@ -2002,6 +2003,8 @@ def create_admin_app(
 
     @app.get("/personas", dependencies=[Depends(auth)])
     async def list_personas() -> dict:
+        from dataclasses import asdict
+
         from core.personas import to_markdown
 
         store = await _persona_store_from_config(config_store)
@@ -2010,18 +2013,20 @@ def create_admin_app(
         return {
             "count": len(personas),
             "active": active,
-            "personas": [{**vars(p), "markdown": to_markdown(p)} for p in personas],
+            "personas": [{**asdict(p), "markdown": to_markdown(p)} for p in personas],
         }
 
     @app.get("/personas/{name}", dependencies=[Depends(auth)])
     async def get_persona(name: str) -> dict:
+        from dataclasses import asdict
+
         from core.personas import to_markdown
 
         store = await _persona_store_from_config(config_store)
         persona = await store.get(name)
         if not persona:
             raise HTTPException(404, f"Persona not found: {name}")
-        return {**vars(persona), "markdown": to_markdown(persona)}
+        return {**asdict(persona), "markdown": to_markdown(persona)}
 
     @app.post("/personas", dependencies=[Depends(auth)])
     async def upsert_persona(body: PersonaUpsertIn) -> HTMLResponse:

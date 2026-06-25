@@ -60,6 +60,10 @@
             @click="select('you')">
       You
     </button>
+    <button class="tab-link" :class="tab === 'personas' && 'tab-link-active'"
+            @click="select('personas')">
+      Personas
+    </button>
     <button class="tab-link" :class="tab === 'llm' && 'tab-link-active'"
             @click="select('llm')">
       LLM
@@ -678,6 +682,7 @@
     const tabs = {
       identity: '/partials/identity',
       you: '/partials/you',
+      personas: '/partials/personas',
       llm: '/partials/llm',
       memory: '/partials/memory',
       history: '/partials/history',
