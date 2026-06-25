@@ -216,8 +216,14 @@ class TelegramChannel:
                 return
             raise
 
-    async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
-        """Send a permission approval prompt with Approve/Deny inline buttons."""
+    async def send_approval_request(
+        self, user_id: str, request_id: str, description: str, image_path: str | None = None
+    ) -> None:
+        """Send a permission approval prompt with Approve/Deny inline buttons.
+
+        When ``image_path`` is given (e.g. a browser screenshot), send it as a
+        photo with the buttons so the user can watch and approve from their phone.
+        """
         target_id = int(user_id)
         chat_id = self._last_chat_for_user.get(target_id, target_id)
         keyboard = InlineKeyboardMarkup(
@@ -231,11 +237,18 @@ class TelegramChannel:
                 ]
             ]
         )
-        await self.app.bot.send_message(
-            chat_id,
-            f"Permission request:\n\n{description}",
-            reply_markup=keyboard,
-        )
+        text = f"Permission request:\n\n{description}"
+        if image_path:
+            try:
+                with open(image_path, "rb") as photo:
+                    # Telegram caption hard limit is 1024 chars.
+                    await self.app.bot.send_photo(
+                        chat_id, photo, caption=text[:1024], reply_markup=keyboard
+                    )
+                return
+            except Exception:
+                log.exception("Failed to send approval screenshot; falling back to text")
+        await self.app.bot.send_message(chat_id, text, reply_markup=keyboard)
 
     # -- Helpers -------------------------------------------------------------
 

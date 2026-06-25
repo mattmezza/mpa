@@ -42,7 +42,11 @@ class WhatsAppChannel:
             error = res.get("error", "Unknown wacli error")
             raise RuntimeError(f"wacli send failed: {error}")
 
-    async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
+    async def send_approval_request(
+        self, user_id: str, request_id: str, description: str, image_path: str | None = None
+    ) -> None:
+        # ponytail: WhatsApp media send not wired — the screenshot path is in the
+        # description. Add bot media upload here if mobile WhatsApp follow matters.
         message = (
             f"Permission request:\n\n{description}\n\n"
             f"Reply with:\n"

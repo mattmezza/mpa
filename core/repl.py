@@ -125,14 +125,18 @@ class ReplChannel:
     async def send(self, chat_id, text: str) -> None:
         print(f"\n{text}\n")
 
-    async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
+    async def send_approval_request(
+        self, user_id: str, request_id: str, description: str, image_path: str | None = None
+    ) -> None:
         await self.spinner.stop()  # don't fight the prompt for the line
         if self.pause_keys:
             self.pause_keys()
         hist_len = readline.get_current_history_length() if readline else 0
+        # No inline images in a terminal — print the path so you can open it.
+        shot = f"\n[screenshot] {image_path}" if image_path else ""
         try:
             ans = await asyncio.to_thread(
-                input, f"\n[approval] {description}\nApprove? Always|Yes|[No] "
+                input, f"\n[approval] {description}{shot}\nApprove? Always|Yes|[No] "
             )
         finally:
             if self.resume_keys:

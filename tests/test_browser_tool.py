@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from core.config import Config
@@ -110,3 +112,28 @@ def test_parse_steps() -> None:
     for bad in ["{}", "[]", "not json", '[{"a":1,"b":2}]']:
         with pytest.raises(ValueError):
             _parse_steps(bad)
+
+
+# ---------------------------------------------------------------------------
+# Approval screenshot — browser `act` surfaces the per-profile preview
+# ---------------------------------------------------------------------------
+
+
+def test_approval_image_for_browser_act(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    from core.agent import AgentCore
+
+    agent = AgentCore(Config())
+    preview = tmp_path / "data" / "browser" / "last" / "acme.png"
+    preview.parent.mkdir(parents=True, exist_ok=True)
+    preview.write_bytes(b"\x89PNG")
+
+    act_cmd = {"command": "python3 tools/browser.py act --url https://x --profile acme --steps []"}
+    got = agent._approval_image("run_command", act_cmd)
+    assert got is not None and Path(got).resolve() == preview.resolve()
+    # No preview file -> None; read command -> None; non-run_command -> None.
+    other = {"command": "python3 tools/browser.py act --url https://x --profile ghost --steps []"}
+    assert agent._approval_image("run_command", other) is None
+    read_cmd = {"command": "python3 tools/browser.py read --url https://x"}
+    assert agent._approval_image("run_command", read_cmd) is None
+    assert agent._approval_image("send_email", {"to": "a"}) is None
