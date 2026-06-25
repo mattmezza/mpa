@@ -39,6 +39,7 @@ except ImportError:  # pragma: no cover - non-POSIX
 log = logging.getLogger(__name__)
 
 USER_ID = "repl"
+_PROMPT = "> "
 
 # Loggers whose INFO output is the agent's "chain of thought" / activity trail.
 _THOUGHT_LOGGERS = ("core.agent", "core.executor", "core.llm.reasoning")
@@ -67,6 +68,11 @@ class _SpinnerHandler(logging.Handler):
         color = _DIM if record.name == "core.llm.reasoning" else _CYAN
         line = f"  {color}· {record.getMessage()}{_RESET}"
         sys.stderr.write("\r\033[K" + line + "\n")
+        # A background task (memory/reflection) can log AFTER the input prompt is
+        # drawn; the \r\033[K above wiped it, so redraw the prompt + any typed text.
+        if self.spinner.awaiting_input:
+            buf = readline.get_line_buffer() if readline else ""
+            sys.stderr.write(_PROMPT + buf)
         sys.stderr.flush()
         self.spinner.redraw()
 
@@ -80,6 +86,9 @@ class Spinner:
         self._task: asyncio.Task | None = None
         self._start = 0.0
         self._frame = "⠋"
+        # True while the main loop blocks on input(), so a late background log line
+        # knows to redraw the prompt it clobbered.
+        self.awaiting_input = False
 
     # Live progress file written by `tools/browser.py explore` (best-effort tail).
     _EXPLORE_STATUS = Path("/app/data" if Path("/app/data").exists() else "data") / (
@@ -330,10 +339,13 @@ async def main() -> None:
     _print_debug_config(config, persona)
 
     while True:
+        spinner.awaiting_input = True
         try:
-            text = await asyncio.to_thread(input, "> ")
+            text = await asyncio.to_thread(input, _PROMPT)
         except EOFError:
             break
+        finally:
+            spinner.awaiting_input = False
         text = text.strip()
         if not text:
             continue
