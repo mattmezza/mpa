@@ -44,3 +44,26 @@ async def test_anthropic_generate_omits_effort_when_off() -> None:
     kwargs = create.await_args.kwargs
     assert "thinking" not in kwargs
     assert "output_config" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_anthropic_generate_text_sends_effort_when_set() -> None:
+    """Background tasks (memory/reflection/etc.) honor the client's level too."""
+    client = LLMClient("anthropic", "x", thinking_level="low")
+    create = AsyncMock(return_value=type("R", (), {"content": []})())
+    client._client = type("C", (), {"messages": type("M", (), {"create": create})()})()
+
+    await client.generate_text(model="claude-4-6-opus", prompt="hi")
+
+    kwargs = create.await_args.kwargs
+    assert kwargs["thinking"] == {"type": "adaptive"}
+    assert kwargs["output_config"] == {"effort": "low"}
+
+
+def test_reasoning_kwargs_per_provider() -> None:
+    assert LLMClient("openai", "x", thinking_level="high")._reasoning_kwargs() == {
+        "reasoning_effort": "high"
+    }
+    assert LLMClient("anthropic", "x")._reasoning_kwargs() == {}
+    # unknown level value is ignored (off)
+    assert LLMClient("anthropic", "x", thinking_level="bogus")._reasoning_kwargs() == {}
