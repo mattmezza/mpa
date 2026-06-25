@@ -2,7 +2,7 @@
 {#- Reusable thinking-level control. `bg` adds the "shared config" badge for
     background inference kinds that point at the same provider+model as main. -#}
 {% macro think(level, prov, model, lid, bg=false) -%}
-      <div x-show="modelSupportsThinking({{ model }})" class="mt-2">
+      <div class="mt-2">
         <label class="label">Thinking level{% if bg %}<span class="text-muted text-xs font-normal" x-show="sameAsMain({{ prov }}, {{ model }})"> · same config as Main inference</span>{% endif %}</label>
         <div class="flex items-center gap-2">
           <input type="text" class="input-sm" style="max-width:300px" x-model="{{ level }}"
@@ -22,7 +22,8 @@
              :href="providerDocsUrl({{ prov }})" target="_blank" rel="noopener">effort docs ↗</a>
         </div>
         <p class="text-muted text-xs mt-1" x-show="fetchLevelsResult[{{ prov }}]" x-text="fetchLevelsResult[{{ prov }}]"></p>
-        <p class="text-muted text-xs mt-1">Reasoning effort — higher = more reasoning, more tokens. Anthropic: “Fetch levels” autodiscovers supported values; other providers: see the docs link and type the value.</p>
+        <p class="text-muted text-xs mt-1">Leave <strong>Off</strong> for non-reasoning models. Higher = more reasoning, more tokens. Anthropic: “Fetch levels” autodiscovers supported values; other providers: see the docs link and type the value.</p>
+        <p class="text-amber-600 text-xs mt-1" x-show="{{ level }} && !modelSupportsThinking({{ model }})">Heads up: “<span x-text="{{ model }}"></span>” isn't a recognized reasoning model — only set a level if you know it supports thinking, or the inference call may error.</p>
       </div>
 {%- endmacro %}
 <div class="space-y-6" x-data="llmTab(
@@ -232,7 +233,7 @@
                     'agent.deepseek_api_key': deepseekKey,
                     'agent.deepseek_base_url': deepseekBaseUrl,
                     'agent.model': model,
-                    'agent.thinking_level': modelSupportsThinking(model) ? thinkingLevel : ''
+                    'agent.thinking_level': thinkingLevel
                   }})
                 })
                 .then(r => { resultOk = r.ok; return r.json(); })
@@ -313,10 +314,10 @@
                   body: JSON.stringify({values: {
                     'memory.extraction_provider': extractionProvider,
                     'memory.extraction_model': extractionModel,
-                    'memory.extraction_thinking_level': modelSupportsThinking(extractionModel) ? extractionThinkingLevel : '',
+                    'memory.extraction_thinking_level': extractionThinkingLevel,
                     'memory.consolidation_provider': consolidationProvider,
                     'memory.consolidation_model': consolidationModel,
-                    'memory.consolidation_thinking_level': modelSupportsThinking(consolidationModel) ? consolidationThinkingLevel : ''
+                    'memory.consolidation_thinking_level': consolidationThinkingLevel
                   }})
                 })
                 .then(r => { memoryResultOk = r.ok; return r.json(); })
@@ -379,7 +380,7 @@
                     'goal_decomposition.enabled': gdEnabled ? 'true' : 'false',
                     'goal_decomposition.provider': gdProvider,
                     'goal_decomposition.model': gdModel,
-                    'goal_decomposition.thinking_level': modelSupportsThinking(gdModel) ? gdThinkingLevel : ''
+                    'goal_decomposition.thinking_level': gdThinkingLevel
                   }})
                 })
                 .then(r => { gdResultOk = r.ok; return r.json(); })
@@ -442,7 +443,7 @@
                     'task_reflection.enabled': trEnabled ? 'true' : 'false',
                     'task_reflection.provider': trProvider,
                     'task_reflection.model': trModel,
-                    'task_reflection.thinking_level': modelSupportsThinking(trModel) ? trThinkingLevel : ''
+                    'task_reflection.thinking_level': trThinkingLevel
                   }})
                 })
                 .then(r => { trResultOk = r.ok; return r.json(); })
@@ -499,7 +500,7 @@
                   body: JSON.stringify({values: {
                     'compaction.provider': compactionProvider,
                     'compaction.model': compactionModel,
-                    'compaction.thinking_level': modelSupportsThinking(compactionModel) ? compactionThinkingLevel : ''
+                    'compaction.thinking_level': compactionThinkingLevel
                   }})
                 })
                 .then(r => { compactionResultOk = r.ok; return r.json(); })
