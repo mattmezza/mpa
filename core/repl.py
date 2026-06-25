@@ -54,6 +54,8 @@ class _SpinnerHandler(logging.Handler):
         self.spinner = spinner
 
     def emit(self, record: logging.LogRecord) -> None:
+        if record.getMessage().startswith("Processing message"):
+            return  # redundant in a REPL — you just typed it (and it shows "repl/repl/repl")
         color = _DIM if record.name == "core.llm.reasoning" else _CYAN
         line = f"  {color}· {record.getMessage()}{_RESET}"
         sys.stderr.write("\r\033[K" + line + "\n")
