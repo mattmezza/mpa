@@ -562,15 +562,17 @@ class AgentCore:
         """Caption a single image via the vision model. Task-aware: the user's
         message steers what to extract (e.g. OCR vs. scene description)."""
         block = att.to_anthropic_block() if llm.provider == "anthropic" else att.to_openai_block()
-        ask = (
-            "Describe this image so someone who cannot see it understands it. "
-            "Transcribe any visible text verbatim (OCR). Be concise but complete."
+        system = (
+            "You caption images for a model that cannot see them. "
+            "Describe the image so the reader understands it, and transcribe any "
+            "visible text verbatim (OCR). Be concise but complete."
         )
+        ask = "Describe this image."
         if user_text.strip():
-            ask += f'\n\nThe user sent it with this message: "{user_text.strip()}" — '
+            ask += f' The user sent it with this message: "{user_text.strip()}" — '
             ask += "focus on what is relevant to that."
         messages = [{"role": "user", "content": [block, {"type": "text", "text": ask}]}]
-        response = await llm.generate(model=model, system="", messages=messages, tools=[])
+        response = await llm.generate(model=model, system=system, messages=messages, tools=[])
         return response.text.strip() or "(no description available)"
 
     def _vision_llm(self, provider: str) -> LLMClient:
