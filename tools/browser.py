@@ -338,6 +338,10 @@ Rules:
 - An element marked DISABLED cannot be clicked yet — it is gated on a missing
   field. Do not click it; find and complete the missing required field first
   (an empty value=, an unselected radio/option), which will enable it.
+- If a total/price stays 0 or reads "will be calculated"/"unavailable" after you
+  filled the fields, your CHOICE is invalid (e.g. that date range or duration is
+  not available), not the form — change the selection (try a shorter or
+  different date/time range) until a real price appears and the button enables.
 - If a NOTE says the page did not change, your last action had no effect — do
   NOT repeat it. Pick a different element (you may need to scroll, set a
   prerequisite field first, or click a radio/option). Do NOT navigate away with
