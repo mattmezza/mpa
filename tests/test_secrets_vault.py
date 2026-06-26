@@ -305,11 +305,20 @@ async def test_request_secret_creates_request_and_link(agent: AgentCore) -> None
     assert req and req["name"] == "ACME_LOGIN" and req["persona"] == "finance"
 
 
-async def test_prompt_lists_secret_names_not_values(agent: AgentCore) -> None:
+async def test_prompt_points_to_tool_not_secret_names(agent: AgentCore) -> None:
+    # Discovery is via the list_secrets tool — the prompt must NOT dump secret
+    # names (context pollution) or values, just a static pointer + usage rule.
     prompt = await agent._build_system_prompt(persona=None)
-    assert "TOKEN" in prompt  # discoverable name
-    assert "SUPERSECRET" not in prompt  # value never injected
+    assert "list_secrets" in prompt  # tells the model how to discover on demand
     assert "{{secret:NAME}}" in prompt  # usage instruction present
+    assert "TOKEN" not in prompt  # the specific secret NAME is not injected
+    assert "SUPERSECRET" not in prompt  # value never injected
+
+
+async def test_no_secrets_block_without_vault() -> None:
+    agent = AgentCore(Config(), secret_store=None)
+    prompt = await agent._build_system_prompt(persona=None)
+    assert "list_secrets" not in prompt  # no vault configured -> no secrets block
 
 
 # ── Admin UI ───────────────────────────────────────────────────────────────

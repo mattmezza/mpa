@@ -1603,6 +1603,7 @@ def create_admin_app(
             memories=memories,
             reflections=reflections,
             decomposed_goal=decomposed_goal,
+            secrets_available=secret_store is not None,
             include_memories=body.include_memories,
             include_reflections=body.include_reflections,
         )

@@ -1660,17 +1660,6 @@ class AgentCore:
         skills_index = await self.skills.get_index_block(allow=persona.skills if persona else None)
         memories = await self.memory.format_for_prompt(query=query)
 
-        # Secret discoverability (issue #19): the NAMES in scope, never values.
-        secret_names: list[tuple[str, str]] = []
-        if self.secret_store is not None:
-            try:
-                allowed = set(persona.secrets) if persona else set()
-                allowed |= await self.secret_store.shared_names()
-                meta = await self.secret_store.list_secret_meta(allowed=allowed)
-                secret_names = [(m["name"], m["description"]) for m in meta]
-            except Exception:
-                log.exception("Failed to load secret names for prompt")
-
         # Task reflections — lessons learned from past tasks
         reflections = ""
         if self.config.task_reflection.enabled:
@@ -1687,7 +1676,7 @@ class AgentCore:
             reflections=reflections,
             decomposed_goal=decomposed_goal,
             persona=persona,
-            secrets=secret_names,
+            secrets_available=self.secret_store is not None,
         )
         return sections.full_prompt
 

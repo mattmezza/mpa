@@ -113,7 +113,7 @@ def build_prompt_sections(
     reflections: str,
     decomposed_goal: DecomposedGoal | None,
     persona: Persona | None = None,
-    secrets: list[tuple[str, str]] | None = None,
+    secrets_available: bool = False,
     include_memories: bool = True,
     include_reflections: bool = True,
 ) -> PromptSections:
@@ -161,19 +161,21 @@ def build_prompt_sections(
     if tool_blocks:
         tools_section = "<tools>\n" + "\n\n".join(tool_blocks) + "\n</tools>"
 
-    # Secret discoverability: list the NAMES the active scope may use (never values).
+    # Secret discoverability: a short, static pointer to the `list_secrets` tool —
+    # NOT the secret names themselves, to keep the cacheable prompt small and avoid
+    # polluting context with the whole vault. The model discovers names on demand.
     secrets_section = ""
-    if secrets:
-        lines = "\n".join(f"- {name}" + (f" — {desc}" if desc else "") for name, desc in secrets)
+    if secrets_available:
         secrets_section = (
             "<secrets>\n"
-            "You may use these stored secrets BY REFERENCE inside `run_command` only, "
-            "as {{secret:NAME}} (or {{secret:NAME.field}} for a structured secret). "
-            "NEVER print, echo, or place a secret value or a {{secret:...}} placeholder "
-            "in a message, email, calendar event, or any other output — substitution "
-            "happens only inside `run_command`. If you need a secret that is not listed, "
-            "call `request_secret` to ask the owner for it.\n"
-            f"{lines}\n"
+            "An encrypted secrets vault is available. Before logging into a site or calling "
+            "an authenticated API, call the `list_secrets` tool to see which secrets you may "
+            "use (it returns names + descriptions only, never values). Use a secret BY "
+            "REFERENCE inside `run_command` as {{secret:NAME}} (or {{secret:NAME.field}} for a "
+            "structured login). If the secret you need isn't listed, call `request_secret` to "
+            "ask the owner for it. NEVER print, echo, or place a secret value or a "
+            "{{secret:...}} placeholder in a message, email, calendar event, or any other "
+            "output — substitution happens only inside `run_command`.\n"
             "</secrets>"
         )
     memory_instruction = (

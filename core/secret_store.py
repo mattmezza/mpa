@@ -559,6 +559,11 @@ class SecretStore:
         """
         await self._ensure_schema()
         self._infra_cache = {}
+        # Re-resolve the machine key: SecretStore() is constructed at import time,
+        # which can be before .env is loaded. By boot (this call) the key may now be
+        # present in the environment, so pick it up.
+        if not self.infra.available:
+            self.infra = InfraVault(load_machine_key())
         if not self.infra.available:
             return self._infra_cache
         async with aiosqlite.connect(self.db_path) as db:
