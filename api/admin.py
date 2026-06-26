@@ -1495,6 +1495,10 @@ def create_admin_app(
 
     @app.patch("/config", dependencies=[Depends(auth)])
     async def patch_config(body: ConfigPatchIn) -> dict:
+        # Which keys actually changed — so restart_required only fires when a
+        # restart-bound value really moved. A form may re-send unchanged keys
+        # (e.g. History saves both mode (hot-applied) and max_turns every time).
+        changed = {k: v for k, v in body.values.items() if str(await config_store.get(k)) != str(v)}
         await config_store.set_many(body.values)
         agent = agent_state.agent
         if agent:
@@ -1527,7 +1531,7 @@ def create_admin_app(
                 log.exception("Failed to apply updated config to running agent")
         return {
             "updated": list(body.values.keys()),
-            "restart_required": _config_requires_restart(body.values),
+            "restart_required": _config_requires_restart(changed),
         }
 
     @app.post("/debug/system-prompt/preview", dependencies=[Depends(auth)])

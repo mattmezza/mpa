@@ -71,7 +71,7 @@
         .then(r => r.json().catch(() => ({})))
         .then(data => {
           const ok = data.status === 'restarted';
-          if (window.showToast) showToast(ok ? 'Agent restarted' : (data.error || 'Restart failed'), ok);
+          if (window.showToast) showToast(ok ? 'Agent restarted' : (data.error || data.detail || 'Restart failed'), ok);
           if (ok) dismissRestartBanner();
         })
         .catch(() => { if (window.showToast) showToast('Restart failed', false); })

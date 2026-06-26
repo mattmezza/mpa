@@ -38,6 +38,9 @@ class _Store:
     async def set(self, key: str, value: str) -> None:
         self._data[key] = value
 
+    async def set_many(self, values: dict) -> None:
+        self._data.update(values)
+
     async def verify_admin_password(self, password: str) -> bool:
         return password == "secret"
 
@@ -140,3 +143,24 @@ def test_config_requires_restart_flags_startup_only_keys() -> None:
     assert _config_requires_restart({"memory.long_term_limit": "50"}) is False
     assert _config_requires_restart({"agent.model": "x", "agent.thinking_level": "high"}) is False
     assert _config_requires_restart({}) is False
+
+
+def test_patch_config_restart_required_only_on_real_change(tmp_path) -> None:
+    store = _Store(tmp_path)
+    store._data["history.max_turns"] = "10"
+    store._data["history.mode"] = "injection"
+    app, _ = create_admin_app(AgentState(agent=None), cast(ConfigStore, store))
+    client = TestClient(app)
+
+    def patch(values):
+        return client.patch("/config", json={"values": values}, headers=AUTH).json()
+
+    # Mode flips (hot-applied) but max_turns unchanged → no restart, even though the
+    # form re-sends max_turns.
+    res = patch({"history.mode": "session", "history.max_turns": "10"})
+    assert res["restart_required"] is False
+    # max_turns actually changes → restart.
+    assert patch({"history.max_turns": "20"})["restart_required"] is True
+    # voice change → restart; hot-applied key → no restart.
+    assert patch({"voice.tts_voice": "en-US-AvaNeural"})["restart_required"] is True
+    assert patch({"memory.long_term_limit": "99"})["restart_required"] is False
