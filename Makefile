@@ -26,6 +26,7 @@ help:
 	@echo "  Development:"
 	@echo "    make repl         Chat with the agent from the terminal (no Telegram)"
 	@echo "                      (make repl PERSONA=fitness-coach to test a persona)"
+	@echo "                      (make repl YOLO=1 to auto-approve all permissions)"
 	@echo "    make dev          Show instructions for running dev services"
 	@echo "    make dev-agent    Run agent with auto-reload"
 	@echo "    make dev-css      Run Tailwind CSS watcher"
@@ -91,7 +92,7 @@ run:
 
 # Local REPL — chat with the agent from the terminal (no Telegram)
 repl:
-	$(PYTHON) -m core.repl $(if $(PERSONA),--persona $(PERSONA),)
+	$(PYTHON) -m core.repl $(if $(PERSONA),--persona $(PERSONA),) $(if $(YOLO),--yolo,)
 
 # Run in dev mode: instructions for running services in separate shells
 dev:
