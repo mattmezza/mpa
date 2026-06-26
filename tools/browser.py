@@ -93,6 +93,36 @@ def _status_path() -> Path:
     return _data_dir() / "browser" / "last" / "explore.status"
 
 
+def _shot_dir() -> Path:
+    """Where saved screenshots go.
+
+    Local dev/REPL: ~/Downloads so you can open the file. Server/Docker (/app/data
+    present): the data volume instead — nobody browses the container's home, and
+    Downloads isn't mounted, so a Downloads default would just bloat the container
+    layer invisibly.
+    """
+    downloads = Path.home() / "Downloads"
+    if not Path("/app/data").exists() and downloads.is_dir():
+        return downloads
+    return _data_dir() / "browser" / "screenshots"
+
+
+def _prune_old_shots(max_age_h: int = 24) -> None:
+    """Delete data-dir screenshots older than max_age_h so a long-running server
+    doesn't accumulate PNGs forever. Best-effort; only touches our own dir, never
+    a user's ~/Downloads."""
+    cutoff = time.time() - max_age_h * 3600
+    d = _data_dir() / "browser" / "screenshots"
+    if not d.is_dir():
+        return
+    for p in d.glob("*.png"):
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            pass
+
+
 def _write_status(text: str) -> None:
     try:
         p = _status_path()
@@ -260,12 +290,14 @@ def cmd_read(args) -> dict:
 
 def cmd_screenshot(args) -> dict:
     profile = _validate_profile(args.profile)
+    _prune_old_shots()
     if args.output:
         dest = Path(args.output)
     else:
-        # Default to ~/Downloads with a spottable name so a REPL user can find it.
+        # Spottable name in the env-appropriate dir (~/Downloads locally, the data
+        # volume on a server — see _shot_dir).
         host = urlparse(args.url).netloc or "page"
-        dest = Path.home() / "Downloads" / f"clio-{host}-{int(time.time())}.png"
+        dest = _shot_dir() / f"clio-{host}-{int(time.time())}.png"
     with _Session(profile, args.headless) as s:
         s.goto(args.url, args.timeout)
         s.snapshot(dest, full_page=args.full_page)
@@ -274,6 +306,7 @@ def cmd_screenshot(args) -> dict:
 
 def cmd_act(args) -> dict:
     profile = _validate_profile(args.profile)
+    _prune_old_shots()
     steps = _parse_steps(args.steps)
     done: list[str] = []
     with _Session(profile, args.headless) as s:
@@ -549,6 +582,7 @@ def cmd_explore(args) -> dict:
     from core.llm import LLMClient
 
     profile = _validate_profile(args.profile)
+    _prune_old_shots()
     agent_cfg = _load_agent_config()
     llm = LLMClient.from_agent_config(agent_cfg)
     # Each step is a small mechanical action pick over rich state — high "thinking"
@@ -669,7 +703,7 @@ def cmd_explore(args) -> dict:
                     break
 
             host = urlparse(s.page.url).netloc or "page"
-            shot = Path.home() / "Downloads" / f"clio-{host}-{int(time.time())}.png"
+            shot = _shot_dir() / f"clio-{host}-{int(time.time())}.png"
             s.snapshot(shot, full_page=True)
             # Return only what the calling agent needs — the full step trail is
             # debugging noise in its context (use BROWSER_EXPLORE_VERBOSE to see it).
