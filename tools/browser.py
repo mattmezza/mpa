@@ -304,7 +304,8 @@ _ENUM_JS = """
     + '[role=checkbox],[role=tab],[onclick],[contenteditable=true]';
   const out = []; let i = 0;
   for (const el of document.querySelectorAll(sel)) {
-    if (!el.getClientRects().length) continue;
+    const rects = el.getClientRects();
+    if (!rects.length) continue;
     const st = getComputedStyle(el);
     if (st.visibility === 'hidden' || st.display === 'none') continue;
     const tag = el.tagName.toLowerCase();
@@ -332,6 +333,13 @@ _ENUM_JS = """
     }
     const exp = el.getAttribute('aria-expanded');
     if (exp !== null) rec.expanded = exp;
+    // Spatial signal (cheap stand-in for vision): on-screen position + whether the
+    // element is scrolled out of view + whether it currently has focus. Lets the
+    // model reason about "top-right", "scroll down to it", "which field is active".
+    const r = rects[0];
+    rec.rect = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+    if (r.bottom <= 0 || r.top >= innerHeight) rec.offscreen = true;
+    if (document.activeElement === el) rec.focused = true;
     out.push(rec);
     i++;
   }
@@ -362,6 +370,10 @@ Rules:
   bare VALUE (the part before any parenthesis) to select(index,value).
 - An input shows its current text as value=...; if it already holds what you
   need, don't refill it.
+- Each element may show its on-screen position as @x,y, FOCUSED if it currently
+  has focus, and off-screen if it is scrolled out of view. Use these for spatial
+  choices ("the button on the right" = larger x) and scroll toward off-screen
+  targets before acting on them.
 - An element marked DISABLED cannot be clicked yet — it is gated on a missing
   field. Do not click it; find and complete the missing required field first
   (an empty value=, an unselected radio/option), which will enable it.
@@ -417,6 +429,12 @@ def _format_state(url: str, title: str, excerpt: str, elements: list[dict]) -> s
             extra += f" expanded={e['expanded']}"
         if e.get("options"):
             extra += f" options={e['options']}"
+        if e.get("focused"):
+            extra += " FOCUSED"
+        if e.get("offscreen"):
+            extra += " off-screen"
+        if e.get("rect"):
+            extra += f" @{e['rect'][0]},{e['rect'][1]}"
         lines.append(f"[{e['idx']}] {t} {e.get('label', '')!r}{extra}")
     if not elements:
         lines.append("(none found)")
@@ -555,7 +573,10 @@ def cmd_explore(args) -> dict:
                 {"role": "user", "content": f"TASK: {args.task}\n\n{trail_block()}\n\n{state}"}
             ]
             answer = None
+            reason = None
             prev_state = state
+            stuck = 0  # consecutive steps with no page change → bail out (see below)
+            STUCK_LIMIT = 5
             for step in range(args.max_steps):
                 resp = aio.run(
                     llm.generate(
@@ -633,19 +654,40 @@ def cmd_explore(args) -> dict:
                         "content": f"{note}\n\n{trail_block()}{hint}\n\n{state}",
                     }
                 )
+                # Feasibility guard: if nothing the model tries changes the page for
+                # STUCK_LIMIT steps in a row, the flow is wedged (element not found,
+                # gated step, dead end). Bail with a reason instead of burning the
+                # whole budget — an impossible task must fail fast and cheap.
+                stuck = stuck + 1 if not changed else 0
+                if stuck >= STUCK_LIMIT:
+                    reason = (
+                        f"Stopped after {stuck} consecutive steps with no effect on the "
+                        f"page — the flow appears stuck (last actions: "
+                        f"{', '.join(trail[-stuck:])}). The task may not be completable "
+                        f"as described, or a required control could not be found."
+                    )
+                    break
 
             host = urlparse(s.page.url).netloc or "page"
             shot = Path.home() / "Downloads" / f"clio-{host}-{int(time.time())}.png"
             s.snapshot(shot, full_page=True)
             # Return only what the calling agent needs — the full step trail is
             # debugging noise in its context (use BROWSER_EXPLORE_VERBOSE to see it).
-            return {
+            result = {
                 "answer": answer,
                 "done": answer is not None,
                 "steps_taken": len(trail),
                 "url": s.page.url,
                 "screenshot": str(shot),
             }
+            if reason:  # stuck-abort verdict, or hit the step cap without finishing
+                result["reason"] = reason
+            elif answer is None:
+                result["reason"] = (
+                    f"Ran out of steps ({args.max_steps}) before the task reported "
+                    f"completion. Increase --max-steps or simplify the task."
+                )
+            return result
     finally:
         aio.close()
         try:

@@ -78,6 +78,10 @@ How to use it well:
 - Quote its returned `answer` (and screenshot path) back to the user. If it
   reports a pending/awaiting-approval status, say so — don't upgrade it to
   "confirmed".
+- If the result has `done:false` and a `reason`, the flow could NOT be completed
+  (stuck, control not found, dead end). Tell the user what blocked it and share
+  the screenshot — do NOT claim success and do NOT blindly re-run the same task;
+  the loop already gave up on purpose to avoid wasting effort.
 `read`/`screenshot` run without asking. `act` changes state (click/fill/submit)
 so it asks for approval each time; on chat channels the approval shows a
 screenshot of the page. `--steps` is an ordered JSON array of single-key objects:
