@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import requests as http_requests
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
@@ -609,21 +609,30 @@ def create_admin_app(
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     # ── Agent web artifacts (public; the random id is the only secret) ──
-    @app.get("/artifacts/{artifact_id}", response_class=HTMLResponse)
-    async def serve_artifact(artifact_id: str) -> HTMLResponse:
-        """Serve an agent-crafted HTML page. No auth — the unguessable id gates it.
+    @app.get("/artifacts/{artifact_id}", response_model=None)
+    async def artifact_root(artifact_id: str) -> Response:
+        # Redirect to the trailing-slash form so relative links inside the
+        # artifact (href="style.css", "img/logo.png") resolve under /artifacts/<id>/.
+        return RedirectResponse(f"/artifacts/{artifact_id}/", status_code=307)
 
-        Single path segment only (no `:path`), and the id is validated, so the
-        route cannot be listed or traversed. The CSP sandbox keeps the page's JS
-        off the admin origin's localStorage.
+    @app.get("/artifacts/{artifact_id}/{file_path:path}", response_model=None)
+    async def serve_artifact(artifact_id: str, file_path: str = "") -> Response:
+        """Serve a file from an artifact dir. No auth — the unguessable id gates it.
+
+        ``resolve`` validates the id, blocks traversal/dotfiles/symlinks/hardlinks
+        and anything outside the artifact dir. The CSP sandbox keeps artifact JS
+        off the admin origin's localStorage; nosniff stops MIME-sniffing.
         """
         store = await store_from_config(config_store)
-        path = store.path_for(artifact_id) if store.enabled else None
-        if path is None or not path.exists():
+        target = store.resolve(artifact_id, file_path) if store.enabled else None
+        if target is None:
             return HTMLResponse(NOT_FOUND_HTML, status_code=404)
-        return HTMLResponse(
-            path.read_text(encoding="utf-8"),
-            headers={"Content-Security-Policy": ARTIFACT_CSP},
+        return FileResponse(
+            target,
+            headers={
+                "Content-Security-Policy": ARTIFACT_CSP,
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     auth = _make_auth_dependency(config_store, secret_store)

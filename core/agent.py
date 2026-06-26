@@ -284,34 +284,72 @@ TOOLS = [
     {
         "name": "write_artifact",
         "description": (
-            "Publish a self-contained HTML page and get back a shareable link "
-            "(e.g. https://host/artifacts/AbC123xy). Use this whenever the answer "
-            "is richer than chat can show: reports, dashboards, charts, comparison "
-            "tables, interactive checklists/trackers, or any 'give me a mini-site "
-            "for X'. The page is ONE standalone HTML document — inline all CSS in "
-            "<style> and all JS in <script>; there is no server, build step, or "
-            "second file. Climb only as high as the request needs: plain semantic "
-            "HTML for a quick report; add a classless CSS framework (e.g. MVP.css "
-            "or Water.css via CDN) for clean docs; custom CSS or TailwindCSS v4 "
-            "(its browser CDN build: <script src='https://cdn.jsdelivr.net/npm/"
-            "@tailwindcss/browser@4'></script>) for designed/branded pages; add "
-            "JS, or Alpine.js (CDN), only when it must be interactive. After "
-            "writing, give the returned link to "
-            "the user — it expires after the configured TTL."
+            "Publish a web artifact and get back a shareable link (e.g. "
+            "https://host/artifacts/AbC123xy/). Use this whenever the answer is "
+            "richer than chat can show: reports, dashboards, charts, comparison "
+            "tables, interactive checklists/trackers, slide decks, or any 'give "
+            "me a mini-site / document for X'. The link serves a whole directory.\n"
+            "Provide EXACTLY ONE of:\n"
+            "- 'html': a full standalone HTML document (becomes index.html). Best "
+            "for a single page. Inline CSS in <style> and JS in <script>. Climb "
+            "only as high as needed: plain semantic HTML for a quick report; a "
+            "classless CSS framework (MVP.css / Water.css via CDN) for clean docs; "
+            "custom CSS or TailwindCSS v4 (browser build "
+            "<script src='https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4'>"
+            "</script>) for designed pages; JS or Alpine.js (CDN) only when "
+            "interactive.\n"
+            "- 'files': a {relative_path: text} map for a MULTI-FILE site — e.g. "
+            "{'index.html': '…', 'style.css': '…', 'app.js': '…'}. Link them with "
+            "relative URLs (href='style.css'). Must include index.html (or set "
+            "'entrypoint').\n"
+            "- 'source_path': an absolute path to a file or directory you already "
+            "produced on disk — a PDF, image, slides, doc, or a prebuilt site dir. "
+            "Use this for binary/generated outputs (e.g. write a PDF with pandoc to "
+            "/tmp, then publish it). Publishing an on-disk file asks the owner for "
+            "approval first.\n"
+            "Pick 'ttl_hours' to fit the content: a small number for things that go "
+            "stale fast (a daily report), a large number or 0 (keep forever) for "
+            "lasting references. Omit to use the configured default. After writing, "
+            "give the returned link to the user."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "html": {
                     "type": "string",
-                    "description": "The complete HTML document (a full <!doctype html> … page).",
+                    "description": "A complete HTML document; published as index.html.",
+                },
+                "files": {
+                    "type": "object",
+                    "description": (
+                        "Map of relative filename → text content for a multi-file "
+                        "artifact (e.g. index.html + style.css + app.js)."
+                    ),
+                    "additionalProperties": {"type": "string"},
+                },
+                "source_path": {
+                    "type": "string",
+                    "description": (
+                        "Absolute path to a file or directory to copy in (PDF, "
+                        "image, slides, doc, or a prebuilt site). Asks for approval."
+                    ),
+                },
+                "entrypoint": {
+                    "type": "string",
+                    "description": "File served at the root URL. Default 'index.html'.",
+                },
+                "ttl_hours": {
+                    "type": "integer",
+                    "description": (
+                        "How long to keep this artifact, in hours. 0 = forever. "
+                        "Omit for the configured default."
+                    ),
                 },
                 "title": {
                     "type": "string",
-                    "description": "Optional short title, for your own reference and the logs.",
+                    "description": "Optional short title, for your reference and the logs.",
                 },
             },
-            "required": ["html"],
         },
     },
 ]
@@ -1240,21 +1278,46 @@ class AgentCore:
         return os.getenv("MPA_BASE_URL", f"http://localhost:{self.config.admin.port}")
 
     def _tool_write_artifact(self, params: dict) -> dict:
-        """Persist a self-contained HTML artifact; return its shareable URL."""
+        """Publish a web artifact (page, multi-file site, or file); return its URL."""
         from core.artifacts import ArtifactStore
 
         cfg = self.config.artifacts
         if not cfg.enabled:
             return {"error": "Web artifacts are disabled in config (artifacts.enabled)."}
-        html = str(params.get("html") or "")
-        if not html.strip():
-            return {"error": "Missing 'html' content."}
+
+        files = params.get("files") or None
+        if files is not None and not isinstance(files, dict):
+            return {"error": "'files' must be a map of filename → text content."}
+        html = params.get("html")
+        if html and not files:
+            files = {"index.html": str(html)}
+        source_path = params.get("source_path") or None
+        if not files and not source_path:
+            return {"error": "Provide one of 'html', 'files', or 'source_path'."}
+        if files and source_path:
+            return {"error": "Provide only one of 'html'/'files' or 'source_path'."}
+
+        entrypoint = str(params.get("entrypoint") or "index.html")
+        ttl_hours = params.get("ttl_hours")
+        if ttl_hours is not None:
+            try:
+                ttl_hours = int(ttl_hours)
+            except TypeError, ValueError:
+                return {"error": "'ttl_hours' must be an integer (0 = keep forever)."}
         title = str(params.get("title", "")).strip()
+
+        store = ArtifactStore(cfg.directory, cfg.ttl_hours)
         try:
-            art_id = ArtifactStore(cfg.directory, cfg.ttl_hours).write(html, title=title)
-        except ValueError as exc:
+            art_id = store.create(
+                files=files,
+                source_path=source_path,
+                entrypoint=entrypoint,
+                ttl_hours=ttl_hours,
+                title=title,
+            )
+        except (ValueError, OSError) as exc:
             return {"error": str(exc)}
-        url = f"{self._base_url()}/artifacts/{art_id}"
+        url = f"{self._base_url()}/artifacts/{art_id}/"
         log.info("Tool call: write_artifact — %s (%s)", url, title or "untitled")
         return {"ok": True, "url": url, "title": title}
 

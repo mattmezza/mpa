@@ -1,26 +1,34 @@
 ---
 title: Web artifacts
-description: The agent publishes self-contained HTML pages — reports, dashboards, charts, mini-tools — served as shareable links at /artifacts/<id>.
+description: The agent publishes pages, multi-file sites, or documents (PDF, image, slides) as shareable links at /artifacts/<id>.
 ---
 
 # Web artifacts
 
 When an answer is richer than a chat bubble can show — a monthly expense dashboard,
 a chart comparing two options, an interactive checklist, a visual summary of GitHub
-activity — the agent can publish it as a **web artifact**: one self-contained HTML
-page served at `/artifacts/<id>` on the admin app, handed back to you as a link.
+activity, a generated PDF report — the agent can publish it as a **web artifact**:
+a small site served at `/artifacts/<id>/` on the admin app, handed back to you as a link.
 
-It is the agent's "give me a mini-site for X" capability. No nginx, no build step,
-no second file — just a URL you can open on any device.
+It is the agent's "give me a mini-site / document for X" capability. No nginx, no build
+step — just a URL you can open on any device.
 
 ## How it works
 
-The agent calls the `write_artifact` tool with a complete HTML document. The page is
-saved under `artifacts.directory` (default `data/artifacts/`) with a random,
-unguessable id, and the agent replies with the link:
+An artifact is a **directory** served at `/artifacts/<id>/` under a random, unguessable
+id. The agent calls the `write_artifact` tool one of three ways:
+
+- **A single page** — pass `html`, a complete HTML document. Becomes `index.html`.
+- **A multi-file site** — pass `files`, a map of `{ "index.html": …, "style.css": …,
+  "app.js": … }`. Files link each other with relative URLs (`href="style.css"`).
+- **A file the agent generated** — pass `source_path`, an absolute path to a file or
+  directory already on disk (a PDF from `pandoc`, an image, slides, a doc, or a prebuilt
+  site). It is copied into the artifact.
+
+The agent gets back the link and shares it:
 
 ```
-http://your-host:8000/artifacts/AbC123xy
+http://your-host:8000/artifacts/AbC123xy/
 ```
 
 Set [`MPA_BASE_URL`](/docs/configuration) to your reachable admin URL so the links
@@ -28,8 +36,7 @@ work from your phone, not just `localhost`.
 
 ### The complexity ladder
 
-One artifact is **one standalone HTML file**, so the agent inlines everything and
-climbs only as high as the request needs:
+For HTML, the agent climbs only as high as the request needs:
 
 | Need | What the agent reaches for |
 |---|---|
@@ -38,35 +45,46 @@ climbs only as high as the request needs:
 | Branded / designed page | Custom CSS in `<style>`, or TailwindCSS v4 via its browser CDN build (`@tailwindcss/browser@4`) |
 | Interactivity | Inline JS, or Alpine.js via CDN |
 
-CSS goes inline in `<style>`, JS inline in `<script>`, and richer libraries load from
-a CDN — so a single file covers every rung without a server or bundler.
+### Lifetime
+
+The agent picks each artifact's TTL to fit the content — a short one for things that go
+stale fast (a daily report), a long one or `0` (keep forever) for lasting references. If
+it doesn't choose, the configured `ttl_hours` default applies. A background sweep deletes
+artifacts once their TTL passes.
 
 ## Security & hygiene
 
 - **Unguessable links.** Each artifact gets a random id (`secrets.token_urlsafe`), so
   the route can't be listed or walked. There is no index — an unknown id returns a 404.
-- **No path traversal.** Ids are validated against `[A-Za-z0-9_-]`, so `/`, `.` and `\`
-  never reach the filesystem.
-- **Sandboxed pages.** Every artifact is served with a `Content-Security-Policy: sandbox`
-  header, putting it in a unique opaque origin. Its (agent-authored) JavaScript therefore
-  **cannot read the admin origin's `localStorage`** — where the admin API key lives — or
-  its cookies. CDN scripts, inline scripts, forms and popups still work.
-- **Automatic expiry.** A background sweep deletes artifacts older than `ttl_hours`
-  (default 168 = 7 days; set `0` to keep them forever).
+- **No traversal or link escape.** Ids and file paths are validated; symlinks, hardlinks,
+  dotfiles (including the internal `.meta.json`), and anything resolving outside the
+  artifact dir are refused — so the public route can't be tricked into serving e.g.
+  `data/master.key`.
+- **Sandboxed pages.** Every artifact is served with `Content-Security-Policy: sandbox`
+  (and `X-Content-Type-Options: nosniff`), putting it in a unique opaque origin. Its
+  (agent-authored) JavaScript therefore **cannot read the admin origin's `localStorage`** —
+  where the admin API key lives — or its cookies. CDN scripts, inline scripts, forms and
+  popups still work.
+- **Publishing a file asks first.** Inline content (`html` / `files`) the agent authored is
+  written without a prompt. Copying an on-disk file (`source_path`) to a public URL can
+  expose data the agent didn't author, so that variant requires your approval each time.
+- **Size cap.** A single artifact is capped (25 MiB) as a backstop against a runaway loop.
+- **Automatic expiry** via the TTL sweep.
 - **Per-persona scope.** `write_artifact` is a [gateable tool](/docs/personae) — a persona
   with a restricted tool scope can be denied the ability to publish artifacts.
 
 Artifacts are served **without authentication** by design — anyone with the link can
-open the page. The unguessable id is the access control. Don't put secrets in an artifact.
+open it. The unguessable id is the access control. Don't put secrets in an artifact.
 
 ## Configuration
 
 ```yaml
 artifacts:
   enabled: true
-  directory: "data/artifacts"  # where the HTML files live
-  ttl_hours: 168               # auto-delete after this many hours (0 = keep forever)
+  directory: "data/artifacts"  # where artifacts live
+  ttl_hours: 168               # default lifetime; agent may override per artifact (0 = forever)
 ```
 
 Set `enabled: false` to turn the feature off entirely: the tool refuses to write and the
-`/artifacts/<id>` route returns 404 for everything.
+`/artifacts/<id>/` route returns 404 for everything. These keys are editable from the admin
+**Config** tab, and `write_artifact` can be allowed/denied per persona in the persona editor.

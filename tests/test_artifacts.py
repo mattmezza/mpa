@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from types import SimpleNamespace
@@ -13,83 +14,130 @@ from fastapi.testclient import TestClient
 
 import core.artifacts as artifacts_mod
 from api.admin import AgentState, create_admin_app
-from core.artifacts import MAX_ARTIFACT_BYTES, ArtifactStore, cleanup_loop
+from core.artifacts import ArtifactStore, cleanup_loop
 from core.config_store import ConfigStore
+from core.permissions import PermissionEngine, PermissionLevel
 
-# -- ArtifactStore unit tests -------------------------------------------------
+# -- ArtifactStore: create + resolve ------------------------------------------
 
 
-def test_write_and_resolve_round_trip(tmp_path) -> None:
+def test_create_html_single_page(tmp_path) -> None:
     store = ArtifactStore(tmp_path)
-    art_id = store.write("<p>hello</p>", title="greeting")
-    path = store.path_for(art_id)
-    assert path is not None
-    assert path.read_text(encoding="utf-8") == "<p>hello</p>"
+    art_id = store.create(files={"index.html": "<h1>hello</h1>"}, title="greeting")
+    served = store.resolve(art_id)  # empty path → entrypoint
+    assert served is not None
+    assert served.read_text(encoding="utf-8") == "<h1>hello</h1>"
+    assert served.name == "index.html"
 
 
-def test_path_for_rejects_traversal_and_malformed(tmp_path) -> None:
+def test_create_multi_file_and_resolve_each(tmp_path) -> None:
     store = ArtifactStore(tmp_path)
-    for bad in ["../etc/passwd", "a/b", "a.b", "", "x" * 65, "foo bar", "..", "a%2fb"]:
-        assert store.path_for(bad) is None, bad
-    # A well-formed id resolves (file need not exist yet).
-    assert store.path_for("AbC-123_xy") is not None
+    art_id = store.create(
+        files={"index.html": "<link href='style.css'>", "style.css": "body{}", "js/app.js": "1"}
+    )
+    assert store.resolve(art_id, "style.css").read_text() == "body{}"
+    assert store.resolve(art_id, "js/app.js").read_text() == "1"
+    assert store.resolve(art_id).name == "index.html"  # default entrypoint
 
 
-def test_cleanup_removes_expired_keeps_fresh(tmp_path) -> None:
-    store = ArtifactStore(tmp_path, ttl_hours=1)
-    old_id = store.write("<p>old</p>")
-    old_path = store.path_for(old_id)
-    assert old_path is not None
-    backdated = time.time() - 2 * 3600  # 2h ago, past the 1h TTL
-    os.utime(old_path, (backdated, backdated))
-    fresh_id = store.write("<p>new</p>")
-
-    assert store.cleanup() == 1
-    assert not old_path.exists()
-    fresh_path = store.path_for(fresh_id)
-    assert fresh_path is not None and fresh_path.exists()
+def test_create_source_path_file_sets_entrypoint(tmp_path) -> None:
+    src = tmp_path / "report.pdf"
+    src.write_bytes(b"%PDF-1.4 fake")
+    store = ArtifactStore(tmp_path / "store")
+    art_id = store.create(source_path=str(src))
+    served = store.resolve(art_id)  # entrypoint became report.pdf
+    assert served is not None and served.name == "report.pdf"
+    assert served.read_bytes() == b"%PDF-1.4 fake"
 
 
-def test_cleanup_ttl_zero_is_noop(tmp_path) -> None:
-    store = ArtifactStore(tmp_path, ttl_hours=0)
-    art_id = store.write("<p>x</p>")
-    path = store.path_for(art_id)
-    assert path is not None
-    os.utime(path, (0, 0))  # ancient mtime
-    assert store.cleanup() == 0
-    assert path.exists()
+def test_create_source_path_directory(tmp_path) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text("<h1>site</h1>")
+    (site / "a.css").write_text("x{}")
+    store = ArtifactStore(tmp_path / "store")
+    art_id = store.create(source_path=str(site))
+    assert store.resolve(art_id).read_text() == "<h1>site</h1>"
+    assert store.resolve(art_id, "a.css").read_text() == "x{}"
 
 
-def test_write_rejects_oversized(tmp_path) -> None:
+def test_create_requires_exactly_one_source(tmp_path) -> None:
+    store = ArtifactStore(tmp_path)
+    with pytest.raises(ValueError):
+        store.create()  # neither
+    with pytest.raises(ValueError):
+        store.create(files={"index.html": "x"}, source_path=str(tmp_path))  # both
+
+
+def test_create_rejects_oversized_and_cleans_up(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(artifacts_mod, "MAX_ARTIFACT_BYTES", 16)
     store = ArtifactStore(tmp_path)
     with pytest.raises(ValueError, match="too large"):
-        store.write("x" * (MAX_ARTIFACT_BYTES + 1))
+        store.create(files={"index.html": "x" * 64})
+    # The partial directory must not linger.
+    assert list(tmp_path.iterdir()) == []
 
 
-def test_path_for_rejects_symlink_escape(tmp_path) -> None:
-    # A planted symlink whose target escapes the dir must not resolve — it would
-    # otherwise let the public route read e.g. a secret keyfile.
+# -- resolve: containment / safety --------------------------------------------
+
+
+def test_resolve_rejects_traversal_and_dotfiles(tmp_path) -> None:
+    store = ArtifactStore(tmp_path)
+    art_id = store.create(files={"index.html": "<h1>x</h1>"})
+    for bad in ["../../etc/passwd", "..", ".meta.json", "a/../../b", "x" * 80]:
+        assert store.resolve(art_id, bad) is None, bad
+    assert store.resolve("bad id!", "index.html") is None  # malformed id
+    assert store.resolve(art_id, "missing.css") is None  # absent file
+
+
+def test_resolve_rejects_symlink_escape(tmp_path) -> None:
     outside = tmp_path / "secret.txt"
     outside.write_text("top secret")
-    store_dir = tmp_path / "artifacts"
-    store_dir.mkdir()
-    link = store_dir / "abcdef12.html"
-    link.symlink_to(outside)
-    assert ArtifactStore(store_dir).path_for("abcdef12") is None
+    store = ArtifactStore(tmp_path / "store")
+    art_id = store.create(files={"index.html": "<h1>x</h1>"})
+    (store.dir / art_id / "leak.html").symlink_to(outside)
+    assert store.resolve(art_id, "leak.html") is None
 
 
-def test_path_for_rejects_hardlink_escape(tmp_path) -> None:
-    # A hardlink to a file outside the dir is not a symlink and resolves inside
-    # the dir, so only the st_nlink check catches it.
+def test_resolve_rejects_hardlink_escape(tmp_path) -> None:
     outside = tmp_path / "secret.txt"
     outside.write_text("top secret")
-    store_dir = tmp_path / "artifacts"
-    store_dir.mkdir()
-    os.link(outside, store_dir / "abcdef34.html")
-    assert ArtifactStore(store_dir).path_for("abcdef34") is None
+    store = ArtifactStore(tmp_path / "store")
+    art_id = store.create(files={"index.html": "<h1>x</h1>"})
+    os.link(outside, store.dir / art_id / "leak.html")
+    assert store.resolve(art_id, "leak.html") is None
 
 
-# -- /artifacts route tests ---------------------------------------------------
+# -- cleanup: per-artifact TTL ------------------------------------------------
+
+
+def test_cleanup_respects_per_artifact_ttl(tmp_path) -> None:
+    store = ArtifactStore(tmp_path, ttl_hours=168)
+    keep = store.create(files={"index.html": "a"}, ttl_hours=0)  # forever
+    expire = store.create(files={"index.html": "b"}, ttl_hours=1)
+    # Backdate the expiring artifact's stored expiry into the past.
+    meta_path = tmp_path / expire / ".meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta["expires_at"] = time.time() - 10
+    meta_path.write_text(json.dumps(meta))
+
+    assert store.cleanup() == 1
+    assert (tmp_path / keep).exists()
+    assert not (tmp_path / expire).exists()
+
+
+def test_cleanup_falls_back_to_mtime_without_meta(tmp_path) -> None:
+    store = ArtifactStore(tmp_path, ttl_hours=1)
+    orphan = tmp_path / "orphan"
+    orphan.mkdir()
+    (orphan / "index.html").write_text("x")  # no .meta.json
+    old = time.time() - 2 * 3600
+    os.utime(orphan, (old, old))
+    assert store.cleanup() == 1
+    assert not orphan.exists()
+
+
+# -- /artifacts route ---------------------------------------------------------
 
 
 class _Store:
@@ -114,40 +162,53 @@ def _client(store: _Store) -> TestClient:
     return TestClient(app)
 
 
-def test_serve_artifact_round_trip(tmp_path) -> None:
-    art_id = ArtifactStore(tmp_path).write("<h1>dashboard</h1>")
-    resp = _client(_Store(tmp_path)).get(f"/artifacts/{art_id}")
-    assert resp.status_code == 200
-    assert "<h1>dashboard</h1>" in resp.text
-    # CSP sandbox keeps artifact JS off the admin origin's localStorage — the
-    # protection is the *absence* of allow-same-origin, so assert that too.
-    csp = resp.headers["content-security-policy"]
-    assert "sandbox" in csp
-    assert "allow-same-origin" not in csp
+def test_serve_index_and_subfile_with_content_types(tmp_path) -> None:
+    art_id = ArtifactStore(tmp_path).create(
+        files={"index.html": "<h1>dash</h1>", "data.json": "{}"}
+    )
+    client = _client(_Store(tmp_path))
+
+    root = client.get(f"/artifacts/{art_id}/")
+    assert root.status_code == 200
+    assert "<h1>dash</h1>" in root.text
+    assert "text/html" in root.headers["content-type"]
+    # CSP sandbox + nosniff on every artifact response; absence of allow-same-origin
+    # is the actual protection for the admin localStorage.
+    assert "sandbox" in root.headers["content-security-policy"]
+    assert "allow-same-origin" not in root.headers["content-security-policy"]
+    assert root.headers["x-content-type-options"] == "nosniff"
+
+    sub = client.get(f"/artifacts/{art_id}/data.json")
+    assert sub.status_code == 200
+    assert "json" in sub.headers["content-type"]
 
 
-def test_serve_missing_artifact_404(tmp_path) -> None:
-    resp = _client(_Store(tmp_path)).get("/artifacts/doesnotexist123")
-    assert resp.status_code == 404
+def test_no_slash_redirects_to_slash(tmp_path) -> None:
+    art_id = ArtifactStore(tmp_path).create(files={"index.html": "<h1>x</h1>"})
+    client = _client(_Store(tmp_path))
+    r = client.get(f"/artifacts/{art_id}", follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == f"/artifacts/{art_id}/"
+    assert client.get(f"/artifacts/{art_id}", follow_redirects=True).status_code == 200
 
 
-def test_serve_rejects_encoded_traversal(tmp_path) -> None:
-    # Guards the real HTTP boundary against a future {artifact_id:path} regression.
-    resp = _client(_Store(tmp_path)).get("/artifacts/..%2f..%2fetc%2fpasswd")
-    assert resp.status_code == 404
+def test_meta_and_traversal_not_served(tmp_path) -> None:
+    art_id = ArtifactStore(tmp_path).create(files={"index.html": "<h1>x</h1>"})
+    client = _client(_Store(tmp_path))
+    assert client.get(f"/artifacts/{art_id}/.meta.json").status_code == 404
+    assert client.get("/artifacts/anything/..%2f..%2fetc%2fpasswd").status_code == 404
 
 
-def test_serve_when_disabled_404(tmp_path) -> None:
-    art_id = ArtifactStore(tmp_path).write("<h1>x</h1>")
-    resp = _client(_Store(tmp_path, enabled=False)).get(f"/artifacts/{art_id}")
-    assert resp.status_code == 404
+def test_serve_missing_and_disabled(tmp_path) -> None:
+    art_id = ArtifactStore(tmp_path).create(files={"index.html": "<h1>x</h1>"})
+    assert _client(_Store(tmp_path)).get("/artifacts/nope/").status_code == 404
+    assert _client(_Store(tmp_path, enabled=False)).get(f"/artifacts/{art_id}/").status_code == 404
 
 
 def test_serve_route_is_public(tmp_path) -> None:
     # No Authorization header — artifacts are gated by the unguessable id, not auth.
-    art_id = ArtifactStore(tmp_path).write("<h1>x</h1>")
-    resp = _client(_Store(tmp_path)).get(f"/artifacts/{art_id}")
-    assert resp.status_code == 200
+    art_id = ArtifactStore(tmp_path).create(files={"index.html": "<h1>x</h1>"})
+    assert _client(_Store(tmp_path)).get(f"/artifacts/{art_id}/").status_code == 200
 
 
 # -- cleanup_loop (the scheduled async task) ----------------------------------
@@ -156,20 +217,19 @@ def test_serve_route_is_public(tmp_path) -> None:
 async def test_cleanup_loop_sweeps_then_cancels(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(artifacts_mod, "_CLEANUP_INTERVAL_S", 0.01)
     store = ArtifactStore(tmp_path, ttl_hours=1)
-    art_id = store.write("<p>old</p>")
-    path = store.path_for(art_id)
-    assert path is not None
-    backdated = time.time() - 2 * 3600
-    os.utime(path, (backdated, backdated))
+    art_id = store.create(files={"index.html": "old"}, ttl_hours=1)
+    meta_path = tmp_path / art_id / ".meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta["expires_at"] = time.time() - 10
+    meta_path.write_text(json.dumps(meta))
 
     task = asyncio.create_task(cleanup_loop(_Store(tmp_path, ttl_hours=1)))
-    for _ in range(100):  # let at least one sweep run
+    for _ in range(100):
         await asyncio.sleep(0.01)
-        if not path.exists():
+        if not (tmp_path / art_id).exists():
             break
-    assert not path.exists()
+    assert not (tmp_path / art_id).exists()
 
-    # Cancellation must propagate (graceful shutdown relies on it).
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -178,28 +238,56 @@ async def test_cleanup_loop_sweeps_then_cancels(tmp_path, monkeypatch) -> None:
 # -- write_artifact tool handler ----------------------------------------------
 
 
-def test_tool_write_artifact(tmp_path) -> None:
-    from core.agent import AgentCore
+def _fake_agent(tmp_path):
     from core.config import ArtifactsConfig
 
-    fake = SimpleNamespace(
+    return SimpleNamespace(
         config=SimpleNamespace(artifacts=ArtifactsConfig(directory=str(tmp_path))),
         _base_url=lambda: "http://host:8000",
     )
 
+
+def test_tool_write_artifact_html_and_files(tmp_path) -> None:
+    from core.agent import AgentCore
+
+    fake = _fake_agent(tmp_path)
     res = AgentCore._tool_write_artifact(fake, {"html": "<h1>hi</h1>", "title": "t"})
     assert res["ok"] is True
     assert res["url"].startswith("http://host:8000/artifacts/")
-    art_id = res["url"].rsplit("/", 1)[1]
-    assert (tmp_path / f"{art_id}.html").read_text(encoding="utf-8") == "<h1>hi</h1>"
+    assert res["url"].endswith("/")  # trailing slash so relative links resolve
 
-    # Empty content is rejected.
-    assert "error" in AgentCore._tool_write_artifact(fake, {"html": "   "})
+    multi = AgentCore._tool_write_artifact(
+        fake, {"files": {"index.html": "<h1>m</h1>", "a.css": "x"}}
+    )
+    assert multi["ok"] is True
 
-    # Oversized content is rejected (ValueError → error result).
-    oversized = AgentCore._tool_write_artifact(fake, {"html": "x" * (MAX_ARTIFACT_BYTES + 1)})
-    assert "error" in oversized and "too large" in oversized["error"]
 
-    # Disabled feature is rejected.
+def test_tool_write_artifact_validation(tmp_path) -> None:
+    from core.agent import AgentCore
+
+    fake = _fake_agent(tmp_path)
+    assert "error" in AgentCore._tool_write_artifact(fake, {})  # nothing
+    assert "error" in AgentCore._tool_write_artifact(fake, {"files": "notadict"})
+    assert "error" in AgentCore._tool_write_artifact(
+        fake, {"html": "<p>x</p>", "source_path": str(tmp_path)}
+    )  # both
+    assert "error" in AgentCore._tool_write_artifact(fake, {"html": "x", "ttl_hours": "soon"})
+
     fake.config.artifacts.enabled = False
     assert "error" in AgentCore._tool_write_artifact(fake, {"html": "<p>x</p>"})
+
+
+# -- permissions: inline ALWAYS, source_path ASK ------------------------------
+
+
+def test_publishing_file_requires_approval(tmp_path) -> None:
+    engine = PermissionEngine(db_path=str(tmp_path / "config.db"))
+
+    inline = {"html": "<h1>x</h1>"}
+    publish = {"source_path": "/tmp/report.pdf"}
+
+    assert engine.check("write_artifact", inline) == PermissionLevel.ALWAYS
+    assert engine.is_write_action("write_artifact", inline) is False
+
+    assert engine.check("write_artifact", publish) == PermissionLevel.ASK
+    assert engine.is_write_action("write_artifact", publish) is True

@@ -14,7 +14,7 @@ A self-hosted personal AI agent that runs in a single Docker container. MPA acts
 - **Voice** — Speech-to-text (faster-whisper) and text-to-speech (edge-tts)
 - **Web search** — Tavily integration for real-time information
 - **Browser automation** — Optional headless browser (Playwright) to read JS-heavy pages and act on sites, with persistent logged-in profiles and per-domain approval (off by default)
-- **Web artifacts** — The agent publishes self-contained HTML pages (reports, dashboards, charts, interactive trackers) as shareable links at `/artifacts/<id>`, with unguessable ids, a sandbox CSP, and automatic TTL cleanup
+- **Web artifacts** — The agent publishes pages, multi-file sites, or documents (PDF, image, slides) as shareable links at `/artifacts/<id>/`, with unguessable ids, a sandbox CSP, agent-chosen TTL cleanup, and approval before publishing an on-disk file
 - **Secrets vault** — Encrypted, two-tier secrets store: infrastructure keys (machine-key sealed, served into config via `${vault:NAME}`) and per-persona login/agent secrets (admin-password sealed, used by reference as `{{secret:NAME}}` in commands — values never enter the model's context). Bitwarden import + secure-link credential requests
 - **Permissions** — Glob-pattern rules (ALWAYS/ASK/NEVER) with interactive Telegram approval for write actions
 - **Admin UI** — Web dashboard for configuration, persona & per-chat binding, skills editing, memory inspection, job management, and agent lifecycle control
