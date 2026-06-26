@@ -162,9 +162,6 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             val = await config_store.get(key)
             if val:
                 ctx[var] = val
-        ctx["topics_enabled"] = (
-            str(await config_store.get("channels.telegram.topics_enabled")).lower() == "true"
-        )
     elif step == "whatsapp":
         for key, var in (("channels.whatsapp.allowed_numbers", "allowed_numbers"),):
             val = await config_store.get(key)
@@ -301,6 +298,9 @@ async def _channel_wizard_context(
             ctx["bot_token"] = bot_token
         if user_ids:
             ctx["user_ids"] = user_ids
+        ctx["topics_enabled"] = (
+            str(await config_store.get("channels.telegram.topics_enabled")).lower() == "true"
+        )
     if channel == "whatsapp":
         enabled_raw = await config_store.get("channels.whatsapp.enabled")
         enabled = str(enabled_raw).lower() != "false"

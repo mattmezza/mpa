@@ -24,6 +24,7 @@ channels:
     enabled: true
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
+    topics_enabled: false   # opt-in: one persona-bound context per forum topic
 ```
 
 ### Features
@@ -32,6 +33,7 @@ channels:
 - **Voice messages** — automatically transcribed via Whisper, agent can respond with synthesized voice
 - **Inline keyboards** — used for permission approval flow (Approve / Edit / Deny)
 - **User ID whitelist** — only allowed users can interact with the bot
+- **Forum topics** (opt-in) — with `topics_enabled`, each topic in a group becomes its own context with its own bound persona; see [Per-chat personae](/docs/personae#per-chat-personae)
 
 ### Permission approvals
 

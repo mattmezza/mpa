@@ -107,3 +107,23 @@ def test_bind_unknown_persona_404(tmp_path) -> None:
     )
     assert r.status_code == 404
     assert _binding(tmp_path) is None
+
+
+def _wizard(tmp_path, **preset) -> str:
+    store = _Store(tmp_path)
+    store._data.update(preset)
+    app, _ = create_admin_app(AgentState(agent=None), cast(ConfigStore, store))
+    r = TestClient(app).get("/channels/wizard", params={"channel": "telegram"}, headers=AUTH)
+    assert r.status_code == 200
+    return r.text
+
+
+def test_topics_checkbox_reflects_stored_value(tmp_path) -> None:
+    # Regression: the Channels-tab Telegram editor must prefill topics_enabled from
+    # the stored value, else re-saving the channel silently disables topic mode.
+    on = _wizard(tmp_path, **{"channels.telegram.topics_enabled": "true"})
+    assert 'id="ch-tg-topics" checked' in on
+
+    off = _wizard(tmp_path)  # key absent → unchecked
+    assert 'id="ch-tg-topics" checked' not in off
+    assert "ch-tg-topics" in off  # the checkbox itself is present
