@@ -396,8 +396,8 @@ class AgentCore:
         # Per-turn preamble: live date/time + (optional) execution plan.
         preamble = self._turn_preamble(decomposed_goal)
 
-        # Resolve the active persona (its identity, skills + tool scope). #14 will
-        # make this per-chat; for now it is the globally selected persona.
+        # Resolve the active persona (its identity, skills + tool scope) — a
+        # per-chat binding wins over the globally selected persona (#14).
         persona = await self._resolve_persona(channel, user_id, chat_id)
         tools = scoped_tools(persona)
         if self.secret_store is None:
@@ -431,21 +431,81 @@ class AgentCore:
         )
 
     async def _resolve_persona(self, channel: str, user_id: str, chat_id: str) -> Persona | None:
-        """Resolve the active persona for this request.
+        """Resolve the active persona for this request, in precedence order:
 
-        For issue #13 this is the single globally-selected persona
-        (``agent.active_persona``); #14 will extend this to a per-chat binding
-        keyed on ``chat_id``. Returns ``None`` (default identity) when unset or
-        the named persona no longer exists.
+        1. the per-chat binding for ``(channel, user_id, chat_id)`` (#14),
+        2. the globally-selected persona (``config.agent.active_persona``, #13),
+        3. the default identity (``None``).
+
+        A future per-persona bot (#29) will add a rung above (1): a
+        ``"telegram:<name>"`` channel would resolve straight to that persona.
+        Not wired here — no such channel exists yet.
         """
+        # 1. Per-chat binding.
+        bound = await self.history.get_chat_persona(channel, user_id, chat_id)
+        if bound:
+            persona = await self._load_persona(bound)
+            if persona:
+                return persona
+
+        # 2. Globally-selected persona.
         name = (self.config.agent.active_persona or "").strip()
-        if not name:
-            return None
+        if name:
+            return await self._load_persona(name)
+
+        # 3. Default identity.
+        return None
+
+    async def _load_persona(self, name: str) -> Persona | None:
+        """Load a persona by name, returning ``None`` if it is missing/broken."""
         try:
             return await self.personae.get(name)
         except Exception:
-            log.exception("Failed to load active persona %r", name)
+            log.exception("Failed to load persona %r", name)
             return None
+
+    async def bind_chat_persona(
+        self, channel: str, user_id: str, chat_id: str, persona_name: str
+    ) -> None:
+        """Bind (or, with an empty name, unbind) a chat to a persona.
+
+        Drops the snapshotted session system prompt so the new identity takes
+        effect on the next turn without wiping the conversation (in injection
+        mode the prompt is rebuilt per turn, so this is a harmless no-op).
+        """
+        name = (persona_name or "").strip()
+        if name:
+            await self.history.set_chat_persona(channel, user_id, name, chat_id)
+        else:
+            await self.history.clear_chat_persona(channel, user_id, chat_id)
+        await self.history.clear_session_system(channel, user_id, chat_id)
+
+    async def bind_chat_persona_by_label(
+        self, channel: str, user_id: str, chat_id: str, label: str
+    ) -> str | None:
+        """Auto-bind a chat to the persona matching ``label`` (case-insensitive).
+
+        Matches the label against each persona's ``name``, ``agent_name`` and
+        ``role``. Only binds when the chat is not already bound, so a manual
+        rebind is never clobbered. Returns the bound persona name, or ``None``.
+        """
+        label = (label or "").strip()
+        if not label:
+            return None
+        if await self.history.get_chat_persona(channel, user_id, chat_id):
+            return None  # already bound — don't override a manual choice
+        target = label.lower()
+        try:
+            personae = await self.personae.list_personae()
+        except Exception:
+            log.exception("Failed to list personae for topic auto-bind")
+            return None
+        for p in personae:
+            labels = {p.name.lower(), (p.agent_name or "").lower(), (p.role or "").lower()}
+            if target in labels - {""}:
+                await self.bind_chat_persona(channel, user_id, chat_id, p.name)
+                return p.name
+        return None
 
     def _turn_preamble(self, decomposed_goal: DecomposedGoal | None) -> str:
         """Build the per-turn preamble prepended to the current user message.
