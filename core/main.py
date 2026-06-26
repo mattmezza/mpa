@@ -46,6 +46,7 @@ async def _start_agent(config_store: ConfigStore):
     from channels.telegram import TelegramChannel
     from channels.whatsapp import WhatsAppChannel
     from core.agent import AgentCore
+    from core.config import TelegramConfig
     from voice.pipeline import VoicePipeline
 
     # Decrypt infra secrets into memory so ${vault:NAME} resolves at config load
@@ -85,16 +86,35 @@ async def _start_agent(config_store: ConfigStore):
         agent.voice = voice
 
     # -- Telegram --
-    if config.channels.telegram.enabled and config.channels.telegram.bot_token:
-        tg = TelegramChannel(config.channels.telegram, agent, voice=voice)
-        agent.channels["telegram"] = tg
-        log.info("Starting Telegram bot…")
-
+    async def _start_tg(tg: TelegramChannel, name: str) -> None:
+        agent.channels[name] = tg
+        log.info("Starting Telegram bot (%s)…", name)
         await tg.app.initialize()
         await tg.app.start()
-        updater = tg.app.updater
-        if updater is not None:
-            await updater.start_polling()
+        if tg.app.updater is not None:
+            await tg.app.updater.start_polling()
+
+    tg_global = config.channels.telegram
+    if tg_global.enabled and tg_global.bot_token:
+        await _start_tg(TelegramChannel(tg_global, agent, voice=voice), "telegram")
+
+    # -- Per-persona Telegram bots (#29): each persona with its own token is its
+    # own contact. Channel name "telegram:<persona>" silos history and resolves
+    # straight to that persona. ACL inherits the global allowlist when unset.
+    for persona in await agent.personae.list_personae():
+        token = (persona.bot_token or "").strip()
+        if not token or token == tg_global.bot_token:
+            continue  # no token, or shares the default bot's token — skip
+        pconf = TelegramConfig(
+            enabled=True,
+            bot_token=token,
+            allowed_user_ids=persona.allowed_user_ids or tg_global.allowed_user_ids,
+            topics_enabled=tg_global.topics_enabled,
+        )
+        await _start_tg(
+            TelegramChannel(pconf, agent, voice=voice, channel_name=f"telegram:{persona.name}"),
+            f"telegram:{persona.name}",
+        )
 
     # -- WhatsApp --
     if config.channels.whatsapp.enabled:
@@ -121,11 +141,12 @@ async def _stop_agent(agent) -> None:
 
     set_agent_context(None)
 
-    if "telegram" in agent.channels:
-        tg = agent.channels["telegram"]
-        await tg.app.updater.stop()
-        await tg.app.stop()
-        await tg.app.shutdown()
+    # Stop the default bot and every per-persona bot ("telegram:<persona>", #29).
+    for name, ch in list(agent.channels.items()):
+        if name == "telegram" or name.startswith("telegram:"):
+            await ch.app.updater.stop()
+            await ch.app.stop()
+            await ch.app.shutdown()
 
 
 # ---------------------------------------------------------------------------
