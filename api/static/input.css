@@ -178,6 +178,11 @@
     font-family: var(--font-mono);
   }
 
+  /* Model chain-of-thought lines, set apart from regular log output */
+  .log-thinking {
+    @apply block border-l-2 border-accent pl-2 my-0.5 text-muted italic;
+  }
+
   /* Hint text */
   .hint {
     @apply text-xs text-muted mt-0.5;

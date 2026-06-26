@@ -404,6 +404,10 @@ _LOG_BUFFER: collections.deque[str] = collections.deque(maxlen=500)
 _LOG_INCLUDE_PREFIXES = ("core.", "channels.", "voice.", "tools.")
 _LOG_INCLUDE_NAMES = {"core", "channels", "voice", "tools"}
 
+# Model chain-of-thought logger (see core/llm.py). The admin log viewer styles
+# lines from this logger distinctly; the template detects them by this name.
+_REASONING_LOGGER = "core.llm.reasoning"
+
 
 def _should_capture_log_record(record: logging.LogRecord) -> bool:
     """Return True when a record should be visible in the admin log viewer."""
@@ -426,10 +430,25 @@ class _BufferHandler(logging.Handler):
 
 
 def install_log_buffer() -> None:
-    """Attach the ring-buffer handler to the root logger."""
-    handler = _BufferHandler()
+    """Attach the ring-buffer handler to the root logger.
+
+    Also surface model chain-of-thought in the viewer: the reasoning logger is
+    silent (WARNING) by default so it never spams server stdout, but the admin
+    UI wants it. Bump it to INFO so its records reach the buffer, and filter it
+    off the pre-existing console handlers so server logs stay clean.
+    """
+    root = logging.getLogger()
+    logging.getLogger(_REASONING_LOGGER).setLevel(logging.INFO)
+
+    def _drop_reasoning(record: logging.LogRecord) -> bool:
+        return record.name != _REASONING_LOGGER
+
+    for existing in root.handlers:  # console handler(s) from basicConfig
+        existing.addFilter(_drop_reasoning)
+
+    handler = _BufferHandler()  # added after, so it keeps the reasoning records
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(name)s — %(message)s"))
-    logging.getLogger().addHandler(handler)
+    root.addHandler(handler)
 
 
 # ---------------------------------------------------------------------------

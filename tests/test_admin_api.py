@@ -116,3 +116,41 @@ def test_agent_status_reports_channels_and_jobs() -> None:
         "channels": ["telegram"],
         "scheduler_jobs": 2,
     }
+
+
+def test_install_log_buffer_routes_reasoning_to_buffer_not_console() -> None:
+    """Model CoT reaches the admin viewer buffer but stays off the console."""
+    import logging
+
+    from api.admin import _LOG_BUFFER, _REASONING_LOGGER, install_log_buffer
+
+    root = logging.getLogger()
+    saved_handlers, saved_level = root.handlers[:], root.level
+    reasoning_logger = logging.getLogger(_REASONING_LOGGER)
+    agent_logger = logging.getLogger("core.agent")
+    saved_reasoning_level = reasoning_logger.level
+
+    console_seen: list[str] = []
+    console = logging.Handler()
+    console.emit = lambda record: console_seen.append(record.name)  # type: ignore[method-assign]
+
+    try:
+        root.handlers = [console]
+        root.setLevel(logging.INFO)
+        agent_logger.setLevel(logging.INFO)
+        _LOG_BUFFER.clear()
+
+        install_log_buffer()
+        reasoning_logger.info("secret chain of thought")
+        agent_logger.info("ordinary log line")
+
+        buffered = "\n".join(_LOG_BUFFER)
+        assert "secret chain of thought" in buffered  # CoT surfaced in admin UI
+        assert "ordinary log line" in buffered
+        assert _REASONING_LOGGER not in console_seen  # but kept off the console
+        assert "core.agent" in console_seen
+    finally:
+        root.handlers = saved_handlers
+        root.setLevel(saved_level)
+        reasoning_logger.setLevel(saved_reasoning_level)
+        _LOG_BUFFER.clear()
