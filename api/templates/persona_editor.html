@@ -55,6 +55,19 @@
         </div>
       </div>
 
+      <div class="card space-y-3">
+        <h3 class="text-xs text-muted uppercase tracking-wider">Own Telegram bot <span class="text-muted normal-case tracking-normal">— optional</span></h3>
+        <p class="text-xs text-muted">Give this persona its own bot token and it becomes a separate Telegram contact. Leave blank to keep it reachable only via the default bot. Restart the agent after changing.</p>
+        <div>
+          <label class="label">Bot token <span class="text-muted">(from @BotFather)</span></label>
+          <input class="input-sm" type="password" x-model="bot_token" autocomplete="off" placeholder="123456:ABC-DEF…">
+        </div>
+        <div>
+          <label class="label">Allowed user IDs <span class="text-muted">(comma-separated; blank = inherit global)</span></label>
+          <input class="input-sm" x-model="allowedUserIds" placeholder="111111111, 222222222">
+        </div>
+      </div>
+
       <div class="card">
         <label class="label">Personalia <span class="text-muted">— who the agent is in this persona</span></label>
         <textarea class="textarea" x-model="personalia" style="min-height:160px; font-size:0.8rem; line-height:1.5"
@@ -109,7 +122,7 @@
   <div x-show="mode === 'raw'" class="card">
     <label class="label">Markdown (YAML frontmatter)</label>
     <textarea class="textarea" x-model="raw" style="min-height:460px; font-size:0.8rem; line-height:1.5; tab-size:2"></textarea>
-    <p class="hint">Saving in raw mode parses this document directly — frontmatter keys (role, emoji, voice, skills, tools, secrets, personalia, character).</p>
+    <p class="hint">Saving in raw mode parses this document directly — frontmatter keys (role, emoji, voice, bot_token, allowed_user_ids, skills, tools, secrets, personalia, character).</p>
   </div>
 
   <div class="flex items-center gap-2 mt-3">
@@ -127,6 +140,8 @@
       role: {{ persona.role|tojson }},
       emoji: {{ persona.emoji|tojson }},
       voice: {{ persona.voice|tojson }},
+      bot_token: {{ persona.bot_token|tojson }},
+      allowedUserIds: {{ (persona.allowed_user_ids|join(', '))|tojson }},
       personalia: {{ persona.personalia|tojson }},
       character: {{ persona.character|tojson }},
       skills: {{ persona.skills|tojson }},
@@ -141,12 +156,15 @@
         const esc = (s) => (s || '').replace(/\n/g, '\n  ');
         const list = (a) => a && a.length ? '[' + a.join(', ') + ']' : '[]';
         const secrets = this.secretsText.split('\n').map(s => s.trim()).filter(Boolean);
+        const userIds = this.allowedUserIds.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
         this.raw =
           '---\n' +
           'agent_name: ' + (this.agent_name || '') + '\n' +
           'role: ' + (this.role || '') + '\n' +
           'emoji: ' + (this.emoji || '') + '\n' +
           'voice: ' + (this.voice || '') + '\n' +
+          'bot_token: ' + JSON.stringify(this.bot_token || '') + '\n' +
+          'allowed_user_ids: ' + list(userIds) + '\n' +
           'skills: ' + list(this.skills) + '\n' +
           'tools: ' + list(this.tools) + '\n' +
           'secrets: ' + list(secrets) + '\n' +
@@ -166,6 +184,7 @@
               personalia: this.personalia, character: this.character,
               skills: this.skills, tools: this.tools,
               secrets: this.secretsText.split('\n').map(s => s.trim()).filter(Boolean),
+              bot_token: this.bot_token, allowed_user_ids: this.allowedUserIds,
             };
         fetch('/personae', {
           method: 'POST',
