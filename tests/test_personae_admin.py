@@ -107,8 +107,9 @@ def test_persona_raw_markdown_upsert(tmp_path) -> None:
 
 
 def test_persona_bot_fields_persist(tmp_path) -> None:
-    # Per-persona Telegram bot (#29): token + ACL survive the round-trip and the
-    # ACL is parsed from a comma-separated string into ints.
+    # Per-persona Telegram bot (#29): token + ACL survive the round-trip; the ACL
+    # is parsed from a comma-separated string into ints; the token is REDACTED on
+    # read (a secret, like the global Telegram token) but stored in full.
     client, _ = _client(tmp_path)
     r = client.post(
         "/personae",
@@ -122,7 +123,11 @@ def test_persona_bot_fields_persist(tmp_path) -> None:
     )
     assert r.status_code == 200
     got = client.get("/personae/coach", headers=AUTH).json()
-    assert got["bot_token"] == "123456:ABC-DEF"
+    # Redacted on read, but head/tail prove the full value reached storage.
+    assert "***" in got["bot_token"]
+    assert got["bot_token"].startswith("1234") and got["bot_token"].endswith("-DEF")
+    assert got["bot_token"] != "123456:ABC-DEF"
+    assert "123456:ABC-DEF" not in got["markdown"]  # not leaked via the raw view either
     assert got["allowed_user_ids"] == [111, 222]
 
 

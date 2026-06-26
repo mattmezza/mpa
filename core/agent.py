@@ -448,6 +448,7 @@ class AgentCore:
         user_id: str,
         attachments: list[Attachment] | None = None,
         chat_id: str = "",
+        persona_name: str | None = None,
     ) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop.
 
@@ -455,6 +456,11 @@ class AgentCore:
         a private Telegram chat vs. a group chat).  Each unique
         (channel, user_id, chat_id) triple gets its own conversation history,
         preventing context leakage across chats.
+
+        ``persona_name`` forces the identity instead of resolving it from the
+        channel/binding ladder — used by the scheduler so a ``telegram:<persona>``
+        job is generated *as* that persona while keeping the ``system`` execution
+        mode (auto-approved writes, no memory/reflection) (#29).
         """
 
         # Handle /new (alias /clear) command — clear conversational context.
@@ -482,8 +488,12 @@ class AgentCore:
         preamble = self._turn_preamble(decomposed_goal)
 
         # Resolve the active persona (its identity, skills + tool scope) — a
-        # per-chat binding wins over the globally selected persona (#14).
-        persona = await self._resolve_persona(channel, user_id, chat_id)
+        # per-chat binding wins over the globally selected persona (#14). An
+        # explicit override (scheduler) skips the ladder (#29).
+        if persona_name:
+            persona = await self._load_persona(persona_name)
+        else:
+            persona = await self._resolve_persona(channel, user_id, chat_id)
         tools = apply_feature_gates(
             scoped_tools(persona),
             secrets_available=self.secret_store is not None,

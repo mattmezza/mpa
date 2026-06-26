@@ -85,52 +85,87 @@ async def _start_agent(config_store: ConfigStore):
         )
         agent.voice = voice
 
-    # -- Telegram --
-    async def _start_tg(tg: TelegramChannel, name: str) -> None:
-        agent.channels[name] = tg
-        log.info("Starting Telegram bot (%s)…", name)
-        await tg.app.initialize()
-        await tg.app.start()
-        if tg.app.updater is not None:
-            await tg.app.updater.start_polling()
+    # -- Telegram: the default bot plus one bot per persona that carries a token (#29).
+    # A single bad/revoked token must never abort the others, WhatsApp, or the
+    # scheduler — each bot is brought up independently and failures are isolated.
+    async def _start_tg(conf, name: str, channel_name: str = "telegram") -> None:
+        try:
+            tg = TelegramChannel(conf, agent, voice=voice, channel_name=channel_name)
+            await tg.app.initialize()
+            await tg.app.start()
+            if tg.app.updater is not None:
+                await tg.app.updater.start_polling()
+            agent.channels[name] = tg  # registered only once it is actually polling
+            log.info("Telegram bot started (%s)", name)
+        except Exception:
+            log.exception("Failed to start Telegram bot %s — skipping", name)
 
-    tg_global = config.channels.telegram
-    if tg_global.enabled and tg_global.bot_token:
-        await _start_tg(TelegramChannel(tg_global, agent, voice=voice), "telegram")
+    try:
+        tg_global = config.channels.telegram
+        seen_tokens: set[str] = set()
+        if tg_global.enabled and tg_global.bot_token:
+            seen_tokens.add(tg_global.bot_token)
+            await _start_tg(tg_global, "telegram")
 
-    # -- Per-persona Telegram bots (#29): each persona with its own token is its
-    # own contact. Channel name "telegram:<persona>" silos history and resolves
-    # straight to that persona. ACL inherits the global allowlist when unset.
-    for persona in await agent.personae.list_personae():
-        token = (persona.bot_token or "").strip()
-        if not token or token == tg_global.bot_token:
-            continue  # no token, or shares the default bot's token — skip
-        pconf = TelegramConfig(
-            enabled=True,
-            bot_token=token,
-            allowed_user_ids=persona.allowed_user_ids or tg_global.allowed_user_ids,
-            topics_enabled=tg_global.topics_enabled,
-        )
-        await _start_tg(
-            TelegramChannel(pconf, agent, voice=voice, channel_name=f"telegram:{persona.name}"),
-            f"telegram:{persona.name}",
-        )
+        for persona in await agent.personae.list_personae():
+            token = (persona.bot_token or "").strip()
+            if not token:
+                continue  # no own bot — reachable only via the default bot
+            if token in seen_tokens:
+                log.warning(
+                    "Persona %s shares a bot token with another bot — skipping its bot "
+                    "(one token can only be polled once)",
+                    persona.name,
+                )
+                continue
+            seen_tokens.add(token)
+            pconf = TelegramConfig(
+                enabled=True,
+                bot_token=token,
+                allowed_user_ids=persona.allowed_user_ids or tg_global.allowed_user_ids,
+                topics_enabled=tg_global.topics_enabled,
+            )
+            await _start_tg(pconf, f"telegram:{persona.name}", f"telegram:{persona.name}")
 
-    # -- WhatsApp --
-    if config.channels.whatsapp.enabled:
-        from core.wacli import WacliManager
+        # -- WhatsApp --
+        if config.channels.whatsapp.enabled:
+            from core.wacli import WacliManager
 
-        wacli = WacliManager()
-        wa = WhatsAppChannel(config.channels.whatsapp, agent, wacli=wacli)
-        agent.channels["whatsapp"] = wa
-        log.info("WhatsApp channel enabled (wacli)")
+            wacli = WacliManager()
+            wa = WhatsAppChannel(config.channels.whatsapp, agent, wacli=wacli)
+            agent.channels["whatsapp"] = wa
+            log.info("WhatsApp channel enabled (wacli)")
 
-    # -- Scheduler --
-    await agent.scheduler.load_jobs()
-    agent.scheduler.start()
-    log.info("Scheduler started with %d jobs", len(agent.scheduler.scheduler.get_jobs()))
+        # -- Scheduler --
+        await agent.scheduler.load_jobs()
+        agent.scheduler.start()
+        log.info("Scheduler started with %d jobs", len(agent.scheduler.scheduler.get_jobs()))
+    except Exception:
+        # Bring-up failed after some bots were already polling — stop them so we
+        # don't leak orphaned pollers (which would 409 on the next start).
+        await _stop_telegram_bots(agent)
+        raise
 
     return agent
+
+
+async def _stop_telegram_bots(agent) -> None:
+    """Stop and deregister the default bot and every per-persona bot (#29).
+
+    Each bot is torn down independently: one that fails to stop must not strand
+    the rest still polling (which would 409 on the next start).
+    """
+    for name, ch in list(agent.channels.items()):
+        if name != "telegram" and not name.startswith("telegram:"):
+            continue
+        try:
+            if ch.app.updater is not None:
+                await ch.app.updater.stop()
+            await ch.app.stop()
+            await ch.app.shutdown()
+        except Exception:
+            log.exception("Error stopping Telegram bot %s", name)
+        agent.channels.pop(name, None)
 
 
 async def _stop_agent(agent) -> None:
@@ -141,12 +176,7 @@ async def _stop_agent(agent) -> None:
 
     set_agent_context(None)
 
-    # Stop the default bot and every per-persona bot ("telegram:<persona>", #29).
-    for name, ch in list(agent.channels.items()):
-        if name == "telegram" or name.startswith("telegram:"):
-            await ch.app.updater.stop()
-            await ch.app.stop()
-            await ch.app.shutdown()
+    await _stop_telegram_bots(agent)
 
 
 # ---------------------------------------------------------------------------

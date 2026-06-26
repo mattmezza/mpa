@@ -64,12 +64,17 @@ async def run_agent_task(
         )
 
     log.info("Scheduler running agent task: %s", task[:100])
+    # A "telegram:<persona>" job is generated AS that persona (#29) so the bot
+    # that delivers it also writes it — while keeping the "system" execution mode
+    # (auto-approved writes, no memory/reflection). Bare channels keep the default.
+    gen_persona = channel.split(":", 1)[1] if channel.startswith("telegram:") else None
     try:
         response = await agent.process(
             message=task,
             channel="system",
             user_id="scheduler",
             chat_id="scheduler",
+            persona_name=gen_persona,
         )
 
         # Deliver the response to the target channel

@@ -482,6 +482,21 @@ class SkillUpsertIn(BaseModel):
     content: str
 
 
+def _persona_public(persona) -> dict:
+    """Persona as JSON for read-only APIs, with the bot token redacted (#29).
+
+    Mirrors how the global Telegram token is redacted in config reads — the token
+    is a secret and must not leave the server in cleartext (exports, list views).
+    """
+    from dataclasses import asdict, replace
+
+    from core.config_store import _redact
+    from core.personae import to_markdown
+
+    safe = replace(persona, bot_token=_redact(persona.bot_token))
+    return {**asdict(safe), "markdown": to_markdown(safe)}
+
+
 class PersonaUpsertIn(BaseModel):
     name: str
     agent_name: str = ""
@@ -2312,30 +2327,22 @@ def create_admin_app(
 
     @app.get("/personae", dependencies=[Depends(auth)])
     async def list_personae() -> dict:
-        from dataclasses import asdict
-
-        from core.personae import to_markdown
-
         store = await _persona_store_from_config(config_store)
         personae = await store.list_personae()
         active = (await config_store.get("agent.active_persona") or "").strip()
         return {
             "count": len(personae),
             "active": active,
-            "personae": [{**asdict(p), "markdown": to_markdown(p)} for p in personae],
+            "personae": [_persona_public(p) for p in personae],
         }
 
     @app.get("/personae/{name}", dependencies=[Depends(auth)])
     async def get_persona(name: str) -> dict:
-        from dataclasses import asdict
-
-        from core.personae import to_markdown
-
         store = await _persona_store_from_config(config_store)
         persona = await store.get(name)
         if not persona:
             raise HTTPException(404, f"Persona not found: {name}")
-        return {**asdict(persona), "markdown": to_markdown(persona)}
+        return _persona_public(persona)
 
     @app.post("/personae", dependencies=[Depends(auth)])
     async def upsert_persona(body: PersonaUpsertIn) -> HTMLResponse:

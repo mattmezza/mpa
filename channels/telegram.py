@@ -57,7 +57,10 @@ class TelegramChannel:
         self.app.add_handler(MessageHandler(filters.TEXT, self._on_text))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
         self.app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, self._on_photo))
-        if config.topics_enabled:
+        # Topic→persona auto-bind only makes sense on the default bot: a persona
+        # bot resolves straight to its own persona (rung 0), so a per-topic binding
+        # would be ignored. Topic *folding* (history isolation) still applies below.
+        if config.topics_enabled and channel_name == "telegram":
             self.app.add_handler(
                 MessageHandler(
                     filters.StatusUpdate.FORUM_TOPIC_CREATED
@@ -378,6 +381,13 @@ class TelegramChannel:
         poll it and edit a single Telegram message in place (the chat equivalent
         of the REPL's self-updating spinner line). No-op when nothing is running.
         """
+        # ponytail: the explore status file is a single global singleton, so only
+        # the default bot mirrors it — otherwise a run triggered via one persona-bot
+        # would bubble into every other bot's chat (#29). Per-run scoping (a status
+        # path keyed by channel/profile) belongs in the browser tool — follow-up.
+        if self.channel_name != "telegram":
+            yield
+            return
         status = Path("/app/data" if Path("/app/data").exists() else "data")
         status = status / "browser" / "last" / "explore.status"
         cid, kw = self._route(chat_id)  # split a folded "<chat>:<thread>" topic id
