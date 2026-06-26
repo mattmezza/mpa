@@ -246,10 +246,23 @@ class GhToolConfig(BaseModel):
     token: str = ""  # GitHub PAT, injected as GH_TOKEN when running `gh`
 
 
+class BrowserToolConfig(BaseModel):
+    """Headless browser automation (Playwright/Chromium) — see tools/browser.py."""
+
+    enabled: bool = False
+    headless: bool = True
+    # Optional CDP endpoint of a sidecar Chromium. Empty = launch locally (works
+    # in the local REPL with no extra services). Set to keep the main image lean.
+    cdp_url: str = ""
+    # Override the browser User-Agent. Empty = built-in desktop Chrome UA.
+    user_agent: str = ""
+
+
 class ToolsConfig(BaseModel):
     """Optional external CLI tools the agent can use (see core/tools.py)."""
 
     gh: GhToolConfig = GhToolConfig()
+    browser: BrowserToolConfig = BrowserToolConfig()
 
 
 class Config(BaseModel):

@@ -1,0 +1,54 @@
+<div class="card" x-data="{ enabled: {{ 'true' if step_ctx.browser_enabled == 'true' else 'false' }} }">
+  <h2 class="text-base mb-3">Browser automation <span class="text-muted font-normal text-xs">(optional)</span></h2>
+
+  <p class="hint mb-3">
+    Let the agent read JS-heavy pages and act on sites via a headless browser
+    (Chromium). Off by default — you can enable it later and add per-domain rules
+    in Settings → Tools.
+  </p>
+
+  <label class="flex items-center gap-2">
+    <input type="checkbox" x-model="enabled">
+    <span class="label mb-0">Enable browser automation</span>
+  </label>
+
+  <div class="alert-info text-xs mt-3">
+    <strong>What works:</strong> most sites, including logged-in sessions you set up
+    once. <strong>May be blocked:</strong> sites behind strong bot-management or
+    interactive challenges.
+  </div>
+
+  <p class="hint mt-3">
+    First-time login is guided and mobile-followable: ask the agent to open a site,
+    it sends a screenshot, you provide credentials and approve from your phone, and
+    the session is saved for reuse. Reading runs without asking; actions ask for
+    approval each time.
+  </p>
+
+  <div class="flex justify-between mt-4">
+    <button class="btn"
+            hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+            hx-vals='{"step": "search", "values": {}}'>
+      Back
+    </button>
+    <div class="flex gap-2">
+      <button class="btn"
+              hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
+              hx-vals='{"step": "admin", "values": {}}'>
+        Skip
+      </button>
+      <button class="btn-primary"
+              @click="
+                htmx.ajax('POST', '/setup/step', {
+                  target: '#wizard-step', swap: 'innerHTML',
+                  values: {
+                    step: 'admin',
+                    'values[tools.browser.enabled]': enabled ? 'true' : 'false'
+                  }
+                })
+              ">
+        Next
+      </button>
+    </div>
+  </div>
+</div>

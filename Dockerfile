@@ -37,6 +37,22 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev --no-install-project
 
+# Bundle full Chromium for the browser tool (Tools tab: browser, issue #16).
+# ON by default: a self-contained image avoids the runtime `playwright install`
+# fetch, which flakes on remote hosts with spotty networking. Adds ~500-700MB.
+# We install the FULL chromium (not chromium-headless-shell): its "new headless"
+# mode renders more faithfully and is far less bot-detectable than the old
+# headless shell — important since the browser/vision tooling targets exactly the
+# janky, JS-heavy, sometimes bot-protected sites where the shell gets served
+# degraded content. Opt out for a lean/sidecar deploy (point tools.browser.cdp_url
+# at a remote Chromium):  docker build --build-arg INSTALL_BROWSER=false .
+ARG INSTALL_BROWSER=true
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN if [ "$INSTALL_BROWSER" = "true" ]; then \
+      uv run playwright install --with-deps chromium && \
+      chmod -R a+rx /ms-playwright; \
+    fi
+
 # Create non-root user
 RUN groupadd --gid 10001 mpa && \
     useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash mpa

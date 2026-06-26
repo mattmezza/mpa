@@ -107,6 +107,13 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:gh*issue create*": "ASK",
     "run_command:gh*pr create*": "ASK",
     "run_command:gh*release create*": "ASK",
+    # Browser automation — reading is safe, acting (click/fill/submit) asks.
+    # Per-domain rules work because every command carries `--url`, e.g. add
+    # "run_command:*browser.py act*github.com*": "ALWAYS" via the admin UI.
+    "run_command:*browser.py read*": "ALWAYS",
+    "run_command:*browser.py screenshot*": "ALWAYS",
+    "run_command:*browser.py profiles*": "ALWAYS",
+    "run_command:*browser.py act*": "ASK",
     "run_command:git*push*": "ASK",
     "run_command:git*commit*": "ASK",
     "web_search": "ALWAYS",
@@ -173,6 +180,31 @@ class PermissionEngine:
         if tool_name == "run_command" and params and "command" in params:
             return f"run_command:{params['command']}"
         return tool_name
+
+    @staticmethod
+    def _rule_pattern(match_key: str) -> str:
+        """Generalize a concrete command into a reusable glob rule for "always".
+
+        Keeps the leading program/script/subcommand tokens (e.g.
+        `python3 /app/tools/browser.py explore`) and wildcards the arguments, so
+        approving once covers every later call of the same command shape. Stops at
+        the first flag/URL/quoted/redirect token and caps at 3 tokens so the rule
+        is neither over-narrow (the whole command) nor over-broad (just the
+        interpreter). Non run_command keys are returned unchanged.
+        """
+        prefix = "run_command:"
+        if not match_key.startswith(prefix):
+            return match_key
+        kept: list[str] = []
+        for tok in match_key[len(prefix) :].split():
+            if tok.startswith("-") or "://" in tok or tok[:1] in "\"'" or tok in "|<>;&":
+                break
+            kept.append(tok)
+            if len(kept) == 3:
+                break
+        if not kept:
+            return match_key  # nothing safe to generalize → keep exact
+        return prefix + " ".join(kept) + "*"
 
     def match_key(self, tool_name: str, params: dict | None = None) -> str:
         """Public helper to build the match key for a tool call."""
@@ -294,8 +326,13 @@ class PermissionEngine:
             return False
         if always_allow:
             match_key = entry.get("match_key")
-            if isinstance(match_key, str) and match_key not in self.rules:
-                self.add_rule(match_key, PermissionLevel.ALWAYS)
+            if isinstance(match_key, str):
+                # Persist a GENERALIZED pattern, not the exact command — otherwise
+                # "always" only ever matches that one verbatim invocation and the
+                # next (different --url/--task/args) prompts again. See _rule_pattern.
+                pattern = self._rule_pattern(match_key)
+                if pattern not in self.rules:
+                    self.add_rule(pattern, PermissionLevel.ALWAYS)
         if skipped:
             future.set_result("skipped")
         elif approved:

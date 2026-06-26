@@ -19,6 +19,7 @@ import mimetypes
 import os
 import sys
 import time
+from pathlib import Path
 
 from core.agent import AgentCore
 from core.config_store import ConfigStore
@@ -38,6 +39,7 @@ except ImportError:  # pragma: no cover - non-POSIX
 log = logging.getLogger(__name__)
 
 USER_ID = "repl"
+_PROMPT = "> "
 
 # Loggers whose INFO output is the agent's "chain of thought" / activity trail.
 _THOUGHT_LOGGERS = ("core.agent", "core.executor", "core.llm.reasoning")
@@ -66,6 +68,11 @@ class _SpinnerHandler(logging.Handler):
         color = _DIM if record.name == "core.llm.reasoning" else _CYAN
         line = f"  {color}· {record.getMessage()}{_RESET}"
         sys.stderr.write("\r\033[K" + line + "\n")
+        # A background task (memory/reflection) can log AFTER the input prompt is
+        # drawn; the \r\033[K above wiped it, so redraw the prompt + any typed text.
+        if self.spinner.awaiting_input:
+            buf = readline.get_line_buffer() if readline else ""
+            sys.stderr.write(_PROMPT + buf)
         sys.stderr.flush()
         self.spinner.redraw()
 
@@ -79,12 +86,31 @@ class Spinner:
         self._task: asyncio.Task | None = None
         self._start = 0.0
         self._frame = "⠋"
+        # True while the main loop blocks on input(), so a late background log line
+        # knows to redraw the prompt it clobbered.
+        self.awaiting_input = False
+
+    # Live progress file written by `tools/browser.py explore` (best-effort tail).
+    _EXPLORE_STATUS = Path("/app/data" if Path("/app/data").exists() else "data") / (
+        "browser/last/explore.status"
+    )
 
     def redraw(self) -> None:
         if self._task is None:  # not running — startup/idle log records mustn't draw it
             return
-        sys.stderr.write(f"\r\033[K\033[2m{self._frame} thinking… {self._elapsed():.0f}s\033[0m")
+        label = self._explore_label() or "thinking…"
+        sys.stderr.write(f"\r\033[K\033[2m{self._frame} {label} {self._elapsed():.0f}s\033[0m")
         sys.stderr.flush()
+
+    def _explore_label(self) -> str | None:
+        """If an `explore` run is updating its status file right now, show that."""
+        try:
+            p = self._EXPLORE_STATUS
+            if time.time() - p.stat().st_mtime < 10:
+                return f"🌐 explore: {p.read_text().strip()[:70]} ·"
+        except OSError:
+            pass
+        return None
 
     def _elapsed(self) -> float:
         return time.monotonic() - self._start
@@ -114,9 +140,10 @@ class Spinner:
 class ReplChannel:
     """Minimal channel: prints approval prompts and reads a y/n from stdin."""
 
-    def __init__(self, agent: AgentCore, spinner: Spinner):
+    def __init__(self, agent: AgentCore, spinner: Spinner, yolo: bool = False):
         self.agent = agent
         self.spinner = spinner
+        self.yolo = yolo  # auto-approve every permission prompt (--yolo)
         # Set per-turn by _run_turn: release/reclaim stdin from the ESC watcher
         # so the approval prompt can read it (else _on_key eats the keystrokes).
         self.pause_keys = None
@@ -125,14 +152,23 @@ class ReplChannel:
     async def send(self, chat_id, text: str) -> None:
         print(f"\n{text}\n")
 
-    async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
+    async def send_approval_request(
+        self, user_id: str, request_id: str, description: str, image_path: str | None = None
+    ) -> None:
+        if self.yolo:  # --yolo: approve everything, no prompt (this call only, no rule)
+            sys.stderr.write(f"\r\033[K\033[2m  · [yolo] auto-approved: {description}\033[0m\n")
+            sys.stderr.flush()
+            self.agent.permissions.resolve_approval(request_id, approved=True)
+            return
         await self.spinner.stop()  # don't fight the prompt for the line
         if self.pause_keys:
             self.pause_keys()
         hist_len = readline.get_current_history_length() if readline else 0
+        # No inline images in a terminal — print the path so you can open it.
+        shot = f"\n[screenshot] {image_path}" if image_path else ""
         try:
             ans = await asyncio.to_thread(
-                input, f"\n[approval] {description}\nApprove? Always|Yes|[No] "
+                input, f"\n[approval] {description}{shot}\nApprove? Always|Yes|[No] "
             )
         finally:
             if self.resume_keys:
@@ -271,6 +307,11 @@ async def main() -> None:
         default=None,
         help="Test with a specific persona active (overrides agent.active_persona).",
     )
+    parser.add_argument(
+        "--yolo",
+        action="store_true",
+        help="Auto-approve every permission prompt (no rules saved). Local testing only.",
+    )
     args = parser.parse_args()
 
     spinner = Spinner()
@@ -293,7 +334,9 @@ async def main() -> None:
         config.agent.active_persona = args.persona
 
     agent = AgentCore(config)
-    agent.channels["repl"] = ReplChannel(agent, spinner)
+    agent.channels["repl"] = ReplChannel(agent, spinner, yolo=args.yolo)
+    if args.yolo:
+        print(f"{_DIM}⚠ --yolo: auto-approving all tool permissions this session.{_RESET}")
 
     if args.persona is not None:
         # Session mode snapshots the system prompt per chat, so a stale session
@@ -309,10 +352,13 @@ async def main() -> None:
     _print_debug_config(config, persona)
 
     while True:
+        spinner.awaiting_input = True
         try:
-            text = await asyncio.to_thread(input, "> ")
+            text = await asyncio.to_thread(input, _PROMPT)
         except EOFError:
             break
+        finally:
+            spinner.awaiting_input = False
         text = text.strip()
         if not text:
             continue

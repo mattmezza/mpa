@@ -1306,6 +1306,29 @@ class AgentCore:
         for sig, _ in pending:
             write_decisions[sig] = decision
 
+    def _approval_image(self, tool_name: str | None, params: dict | None) -> str | None:
+        """Screenshot to attach to a browser `act` approval (mobile follow-along).
+
+        The agent is told to screenshot the page before acting, which writes the
+        per-profile preview; we surface it so the user sees the page next to the
+        Approve/Deny buttons. Returns None for non-browser actions or no preview.
+        """
+        if tool_name != "run_command" or not isinstance(params, dict):
+            return None
+        cmd = params.get("command", "")
+        if "browser.py act" not in cmd:
+            return None
+        from tools.browser import _preview_path
+
+        parts = shlex.split(cmd)
+        profile = "default"
+        if "--profile" in parts:
+            i = parts.index("--profile")
+            if i + 1 < len(parts):
+                profile = parts[i + 1]
+        path = _preview_path(profile)
+        return str(path) if path.exists() else None
+
     async def _await_approval(
         self,
         description: str,
@@ -1329,7 +1352,12 @@ class AgentCore:
 
         # Send the approval prompt via the channel
         try:
-            await ch.send_approval_request(user_id, request_id, description)
+            await ch.send_approval_request(
+                user_id,
+                request_id,
+                description,
+                image_path=self._approval_image(tool_name, params),
+            )
         except AttributeError:
             # Channel doesn't support approval requests — auto-approve
             log.warning("Channel %r doesn't support approvals, auto-approving", channel)

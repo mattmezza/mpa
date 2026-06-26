@@ -82,6 +82,7 @@ SETUP_STEPS = [
     "email",
     "calendar",
     "search",
+    "browser",
     "admin",
     "done",
 ]

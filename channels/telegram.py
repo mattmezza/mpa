@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -216,8 +218,14 @@ class TelegramChannel:
                 return
             raise
 
-    async def send_approval_request(self, user_id: str, request_id: str, description: str) -> None:
-        """Send a permission approval prompt with Approve/Deny inline buttons."""
+    async def send_approval_request(
+        self, user_id: str, request_id: str, description: str, image_path: str | None = None
+    ) -> None:
+        """Send a permission approval prompt with Approve/Deny inline buttons.
+
+        When ``image_path`` is given (e.g. a browser screenshot), send it as a
+        photo with the buttons so the user can watch and approve from their phone.
+        """
         target_id = int(user_id)
         chat_id = self._last_chat_for_user.get(target_id, target_id)
         keyboard = InlineKeyboardMarkup(
@@ -231,11 +239,18 @@ class TelegramChannel:
                 ]
             ]
         )
-        await self.app.bot.send_message(
-            chat_id,
-            f"Permission request:\n\n{description}",
-            reply_markup=keyboard,
-        )
+        text = f"Permission request:\n\n{description}"
+        if image_path:
+            try:
+                with open(image_path, "rb") as photo:
+                    # Telegram caption hard limit is 1024 chars.
+                    await self.app.bot.send_photo(
+                        chat_id, photo, caption=text[:1024], reply_markup=keyboard
+                    )
+                return
+            except Exception:
+                log.exception("Failed to send approval screenshot; falling back to text")
+        await self.app.bot.send_message(chat_id, text, reply_markup=keyboard)
 
     # -- Helpers -------------------------------------------------------------
 
@@ -265,6 +280,58 @@ class TelegramChannel:
             except asyncio.CancelledError:
                 pass
 
+    @asynccontextmanager
+    async def _progress(self, chat_id: int):
+        """Mirror an in-flight `browser.py explore` run into ONE edited message.
+
+        explore writes a per-step line to data/browser/last/explore.status; we
+        poll it and edit a single Telegram message in place (the chat equivalent
+        of the REPL's self-updating spinner line). No-op when nothing is running.
+        """
+        status = Path("/app/data" if Path("/app/data").exists() else "data")
+        status = status / "browser" / "last" / "explore.status"
+        message_id: int | None = None
+        last = None
+
+        async def _poll():
+            nonlocal message_id, last
+            while True:
+                await asyncio.sleep(3)
+                try:
+                    if time.time() - status.stat().st_mtime > 10:
+                        continue  # stale → no run active
+                    text = "🌐 " + status.read_text().strip()[:120]
+                except OSError:
+                    continue
+                if text == last:
+                    continue  # Telegram rejects no-op edits
+                last = text
+                try:
+                    if message_id is None:
+                        msg = await self.app.bot.send_message(chat_id, text)
+                        message_id = msg.message_id
+                    else:
+                        await self.app.bot.edit_message_text(
+                            text, chat_id=chat_id, message_id=message_id
+                        )
+                except Exception:
+                    pass  # transient edit/rate-limit error — keep polling
+
+        task = asyncio.create_task(_poll(), name=f"tg-progress-{chat_id}")
+        try:
+            yield
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            if message_id is not None:  # tidy the progress message away
+                try:
+                    await self.app.bot.delete_message(chat_id, message_id)
+                except Exception:
+                    pass
+
     def _is_allowed(self, user_id: int) -> bool:
         if self.config.allowed_user_ids and user_id not in self.config.allowed_user_ids:
             log.warning("Ignoring message from unauthorized user %s", user_id)
@@ -272,7 +339,7 @@ class TelegramChannel:
         return True
 
     async def _handle_text(self, text: str, user_id: int, chat_id: int) -> None:
-        async with self._typing(chat_id):
+        async with self._typing(chat_id), self._progress(chat_id):
             response = await self.agent.process(
                 message=text,
                 channel="telegram",
@@ -284,7 +351,7 @@ class TelegramChannel:
     async def _handle_voice(
         self, file_id: str, user_id: int, chat_id: int, reply_context: str
     ) -> None:
-        async with self._typing(chat_id):
+        async with self._typing(chat_id), self._progress(chat_id):
             file = await self.app.bot.get_file(file_id)
             audio_bytes = await file.download_as_bytearray()
 
@@ -327,7 +394,7 @@ class TelegramChannel:
     ) -> None:
         from core.models import IMAGE_MIME_TYPES, Attachment
 
-        async with self._typing(chat_id):
+        async with self._typing(chat_id), self._progress(chat_id):
             attachments: list[Attachment] = []
             for file_id, mime_type in file_ids:
                 file = await self.app.bot.get_file(file_id)

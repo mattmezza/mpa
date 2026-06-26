@@ -37,7 +37,7 @@
     <div class="flex gap-2">
       <button class="btn"
               hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
-              hx-vals='{"step": "admin", "values": {}}'>
+              hx-vals='{"step": "browser", "values": {}}'>
         Skip
       </button>
       <button class="btn-primary"
@@ -46,7 +46,7 @@
                 htmx.ajax('POST', '/setup/step', {
                   target: '#wizard-step', swap: 'innerHTML',
                   values: {
-                    step: 'admin',
+                    step: 'browser',
                     'values[search.enabled]': key ? 'true' : 'false',
                     'values[search.api_key]': key,
                     'values[search.provider]': 'tavily'
