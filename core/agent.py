@@ -293,8 +293,10 @@ TOOLS = [
             "second file. Climb only as high as the request needs: plain semantic "
             "HTML for a quick report; add a classless CSS framework (e.g. MVP.css "
             "or Water.css via CDN) for clean docs; custom CSS or TailwindCSS v4 "
-            "(CDN) for designed/branded pages; add JS, or Alpine.js (CDN), only "
-            "when it must be interactive. After writing, give the returned link to "
+            "(its browser CDN build: <script src='https://cdn.jsdelivr.net/npm/"
+            "@tailwindcss/browser@4'></script>) for designed/branded pages; add "
+            "JS, or Alpine.js (CDN), only when it must be interactive. After "
+            "writing, give the returned link to "
             "the user — it expires after the configured TTL."
         ),
         "input_schema": {
@@ -1248,7 +1250,10 @@ class AgentCore:
         if not html.strip():
             return {"error": "Missing 'html' content."}
         title = str(params.get("title", "")).strip()
-        art_id = ArtifactStore(cfg.directory, cfg.ttl_hours).write(html, title=title)
+        try:
+            art_id = ArtifactStore(cfg.directory, cfg.ttl_hours).write(html, title=title)
+        except ValueError as exc:
+            return {"error": str(exc)}
         url = f"{self._base_url()}/artifacts/{art_id}"
         log.info("Tool call: write_artifact — %s (%s)", url, title or "untitled")
         return {"ok": True, "url": url, "title": title}

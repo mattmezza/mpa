@@ -117,7 +117,7 @@ memory:
 
 # Agent-crafted web artifacts — the agent publishes self-contained HTML pages
 # (reports, dashboards, charts) served at /artifacts/<random-id>. Set
-# MPA_BASE_URL so the shared links are reachable from your devices.
+# the MPA_BASE_URL env var so the shared links are reachable from your devices.
 artifacts:
   enabled: true
   directory: "data/artifacts"  # where the HTML files live

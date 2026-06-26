@@ -26,6 +26,12 @@ log = logging.getLogger(__name__)
 # ponytail: fixed hourly sweep; the TTL is the tunable knob, not the cadence.
 _CLEANUP_INTERVAL_S = 3600
 
+# Hard ceiling on a single artifact. The LLM's max_tokens already bounds a write
+# far below this; the cap is a cheap backstop at the write chokepoint against a
+# runaway loop or any future trusted caller, since write_artifact runs without
+# an approval prompt (permissions ALWAYS).
+MAX_ARTIFACT_BYTES = 5 * 1024 * 1024  # 5 MiB
+
 # Artifact ids come from ``secrets.token_urlsafe`` → [A-Za-z0-9_-]. Validating
 # against this on read makes path traversal impossible: no '/', '.', or '\\'
 # ever reaches the filesystem join.
@@ -58,18 +64,33 @@ class ArtifactStore:
         self.enabled = enabled
 
     def write(self, html: str, *, title: str = "") -> str:
-        """Write ``html`` under a fresh random id; return that id."""
+        """Write ``html`` under a fresh random id; return that id.
+
+        Raises ``ValueError`` if the body exceeds ``MAX_ARTIFACT_BYTES``.
+        """
+        data = html.encode("utf-8")
+        if len(data) > MAX_ARTIFACT_BYTES:
+            raise ValueError(f"artifact too large ({len(data)} bytes, max {MAX_ARTIFACT_BYTES})")
         self.dir.mkdir(parents=True, exist_ok=True)
         art_id = secrets.token_urlsafe(12)
-        (self.dir / f"{art_id}.html").write_text(html, encoding="utf-8")
-        log.info("Artifact written: %s (%d bytes) %s", art_id, len(html), title)
+        (self.dir / f"{art_id}.html").write_bytes(data)
+        log.info("Artifact written: %s (%d bytes) %s", art_id, len(data), title)
         return art_id
 
     def path_for(self, art_id: str) -> Path | None:
-        """Resolve an id to its file path, or ``None`` if the id is malformed."""
+        """Resolve an id to its file path, or ``None`` if it is unsafe to serve.
+
+        The id regex blocks traversal in the id itself; the symlink/containment
+        check then refuses anything resolving outside the artifacts dir — so a
+        planted symlink (e.g. to ``data/master.key``) can't be read through the
+        public, unauthenticated route.
+        """
         if not _ID_RE.match(art_id):
             return None
-        return self.dir / f"{art_id}.html"
+        path = self.dir / f"{art_id}.html"
+        if path.is_symlink() or not path.resolve().is_relative_to(self.dir.resolve()):
+            return None
+        return path
 
     def cleanup(self) -> int:
         """Delete artifacts older than ``ttl_hours``; return the count removed.
