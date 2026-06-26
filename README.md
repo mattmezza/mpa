@@ -8,7 +8,7 @@ A self-hosted personal AI agent that runs in a single Docker container. MPA acts
 - **Email** — Read, compose, and manage emails via [Himalaya](https://github.com/pimalaya/himalaya) CLI
 - **Calendar** — CalDAV integration (Google Calendar, iCloud, etc.)
 - **Contacts** — CardDAV providers via the built-in contacts CLI
-- **Personae** — Swappable agent identities (own character, skill/tool scope, voice). Bind one per chat — and, on Telegram, per forum topic — so several run concurrently, each with its own isolated context
+- **Personae** — Swappable agent identities (own character, skill/tool scope, voice). Bind one per chat — and, on Telegram, per forum topic — so several run concurrently, each with its own isolated context. Give a persona its own bot token and it becomes a separate Telegram contact (bot-per-persona)
 - **Memory** — Two-tier system: permanent long-term facts and expiring short-term context, both extracted automatically from conversations
 - **Scheduled tasks** — Cron-based jobs for morning briefings, email checks, contact sync, and custom tasks
 - **Voice** — Speech-to-text (faster-whisper) and text-to-speech (edge-tts)

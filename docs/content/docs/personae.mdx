@@ -109,6 +109,8 @@ By default the active persona is global. You can instead bind a persona to a sin
 conversation — it overrides the global one **only there**. Resolution runs a ladder in
 `AgentCore._resolve_persona(channel, user_id, chat_id)`:
 
+0. a **per-persona bot** — a `telegram:<persona>` channel binds straight to that persona
+   (see [Bot-per-persona](#bot-per-persona)),
 1. the per-chat binding for `(channel, user_id, chat_id)`,
 2. the global active persona,
 3. the default identity.
@@ -127,13 +129,37 @@ history and its own persona binding; the group's General topic maps to the defau
 Name a topic after a persona (its name, agent name, or role) and it auto-binds when the topic
 is created or renamed; rebind any topic from the Chats tab.
 
+## Bot-per-persona
+
+Give a persona its own Telegram **bot token** and it becomes a separate contact in your
+address book — its own name, emoji, and voice — addressable independently of every other
+persona ([#29](https://github.com/mattmezza/mpa/issues/29)). Set it on the persona, not the
+channel: the bot is part of the persona's identity.
+
+- **Configure** — open the persona in the admin UI and fill in *Own Telegram bot* (token from
+  [@BotFather](https://t.me/botfather), plus optional allowed user IDs — blank inherits the
+  global Telegram allowlist). In raw markdown, the frontmatter keys are `bot_token` and
+  `allowed_user_ids`. Leave the token blank and the persona stays reachable only through the
+  default bot. **Restart the agent** after adding or changing a token.
+- **How it routes** — each persona-bot registers as the channel `telegram:<persona>` and runs
+  in the same process. That one composite name does three jobs: it **isolates history** (a
+  Telegram DM has `chat_id == user_id` for every bot, so without it two bots' DMs with you
+  would collide), it **routes approvals and proactive messages** back through the bot that
+  fired them, and it **resolves the persona** with no lookup (rung 0 above). The default bot
+  stays the bare `telegram` channel.
+- **Scheduled jobs** — a job's `channel` accepts `telegram:<persona>` to deliver through that
+  bot; bare `telegram` still targets the default bot, so existing jobs are unchanged.
+
+Same process, N bots today; a separate deployment per persona (one token each) is a later
+step that needs no further code.
+
 ## Roadmap
 
 Persona resolution is deliberately funnelled through one seam,
 `AgentCore._resolve_persona(channel, user_id, chat_id)`, so future work is additive:
 
-- **Bot-per-persona** ([#29](https://github.com/mattmezza/mpa/issues/29)) — run each persona
-  as its own Telegram bot, so agents become separate, independently-addressable contacts.
+- **Group multi-agent** ([#30](https://github.com/mattmezza/mpa/issues/30)) — several
+  persona-bots in one group chat, taking turns. Builds directly on bot-per-persona.
 
 The **secret scope** facet is now enforced by the [secrets vault](/docs/secrets) — a persona
 uses a secret by reference (`{{secret:NAME}}`) only if it is shared or in scope, and values
