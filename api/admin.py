@@ -2265,6 +2265,51 @@ def create_admin_app(
         await _set_active_persona(name)
         return await _personae_partial()
 
+    # ── Chats API (per-chat persona bindings) ──────────────────────────
+
+    async def _chats_partial() -> HTMLResponse:
+        history = await _history_from_config(config_store)
+        chats = await history.list_chats()
+        store = await _persona_store_from_config(config_store)
+        personae = await store.list_personae()
+        return _render_partial("partials/chats.html", chats=chats, personae=personae)
+
+    @app.get("/partials/chats", dependencies=[Depends(auth)])
+    async def partial_chats() -> HTMLResponse:
+        """Chats tab partial — active contexts and their bound persona."""
+        return await _chats_partial()
+
+    @app.post("/chats/bind", dependencies=[Depends(auth)])
+    async def bind_chat(request: Request) -> HTMLResponse:
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        channel = str(body.get("channel", "")).strip()
+        user_id = str(body.get("user_id", "")).strip()
+        chat_id = str(body.get("chat_id", "")).strip()
+        persona = str(body.get("persona", "")).strip()  # "" = unbind (default identity)
+        if not channel or not user_id:
+            raise HTTPException(400, "Missing 'channel' or 'user_id' in request body")
+        if persona:
+            store = await _persona_store_from_config(config_store)
+            if not await store.get(persona):
+                raise HTTPException(404, f"Persona not found: {persona}")
+        # Prefer the running agent so its in-memory caches stay coherent; fall
+        # back to a config-built store when the agent is not running.
+        agent = agent_state.agent
+        if agent:
+            await agent.bind_chat_persona(channel, user_id, chat_id, persona)
+        else:
+            history = await _history_from_config(config_store)
+            if persona:
+                await history.set_chat_persona(channel, user_id, persona, chat_id)
+            else:
+                await history.clear_chat_persona(channel, user_id, chat_id)
+            await history.clear_session_system(channel, user_id, chat_id)
+        return await _chats_partial()
+
     # ── Memory API ─────────────────────────────────────────────────────
 
     @app.get("/memory/long-term", dependencies=[Depends(auth)])
@@ -3080,6 +3125,13 @@ async def _persona_store_from_config(config_store: ConfigStore):
     db_path = await config_store.get("agent.personae_db_path") or "data/personae.db"
     seed_dir = await config_store.get("agent.personae_dir") or "personae/"
     return PersonaStore(db_path=db_path, seed_dir=seed_dir)
+
+
+async def _history_from_config(config_store: ConfigStore):
+    from core.history import ConversationHistory
+
+    db_path = await config_store.get("history.db_path") or "data/history.db"
+    return ConversationHistory(db_path=db_path)
 
 
 # Function-tools that a persona may scope. ``load_skill`` is intentionally

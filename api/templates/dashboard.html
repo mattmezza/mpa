@@ -64,6 +64,10 @@
             @click="select('personae')">
       Personae
     </button>
+    <button class="tab-link" :class="tab === 'chats' && 'tab-link-active'"
+            @click="select('chats')">
+      Chats
+    </button>
     <button class="tab-link" :class="tab === 'llm' && 'tab-link-active'"
             @click="select('llm')">
       LLM
@@ -687,6 +691,7 @@
       identity: '/partials/identity',
       you: '/partials/you',
       personae: '/partials/personae',
+      chats: '/partials/chats',
       llm: '/partials/llm',
       memory: '/partials/memory',
       history: '/partials/history',

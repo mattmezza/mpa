@@ -1,0 +1,65 @@
+{# Chats tab partial — active contexts and the persona bound to each #}
+<div x-data="{ filter: '' }">
+  {# Intro #}
+  <div class="card mb-4">
+    <h2 class="text-base mb-0.5">Chats</h2>
+    <p class="text-muted text-xs">
+      Every active conversation, by <code>channel · user · chat</code>. Bind a
+      persona to a single chat — it overrides the global active persona there.
+      Telegram topics show as <code>chat:topic</code> when topic mode is on.
+    </p>
+    <p class="text-muted text-xs mt-2">
+      A change applies on the next turn; the open chat keeps its current identity
+      until then (its messages are preserved).
+    </p>
+  </div>
+
+  {# Toolbar #}
+  <div class="flex items-center gap-2 mb-4 flex-wrap">
+    <input type="text" class="input-sm flex-1" style="max-width:280px"
+           placeholder="Filter chats..." x-model="filter">
+    <span class="text-muted text-xs">{{ chats|length }} chat{{ '' if chats|length == 1 else 's' }}</span>
+  </div>
+
+  {# Card grid — 1 col on phone, 2 on large #}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+    {% for c in chats %}
+    <div class="card flex flex-col gap-2 {% if c.persona %}border-accent{% endif %}"
+         x-show="!filter
+                 || {{ c.channel|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
+                 || {{ c.user_id|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
+                 || {{ c.chat_id|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())">
+      <div class="flex items-start gap-2 min-w-0">
+        <span class="badge-ok whitespace-nowrap">{{ c.channel }}</span>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-semibold break-all">{{ c.chat_id or '(default)' }}</div>
+          <div class="text-muted text-xs break-all">user {{ c.user_id }}</div>
+        </div>
+      </div>
+
+      <form class="flex items-center gap-1.5 mt-auto pt-1">
+        <input type="hidden" name="channel" value="{{ c.channel }}">
+        <input type="hidden" name="user_id" value="{{ c.user_id }}">
+        <input type="hidden" name="chat_id" value="{{ c.chat_id }}">
+        <label class="text-muted text-xs whitespace-nowrap">Persona</label>
+        <select name="persona" class="input-sm flex-1"
+                hx-post="/chats/bind" hx-trigger="change"
+                hx-include="closest form"
+                hx-target="#tab-content" hx-swap="innerHTML">
+          <option value="" {% if not c.persona %}selected{% endif %}>Default</option>
+          {% for p in personae %}
+          <option value="{{ p.name }}" {% if p.name == c.persona %}selected{% endif %}>
+            {{ p.emoji or '🧩' }} {{ p.role or p.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+    {% endfor %}
+    {% if not chats %}
+    <div class="text-muted text-xs text-center py-6 col-span-full">
+      No chats yet. They appear here once a conversation has started.
+    </div>
+    {% endif %}
+  </div>
+</div>
