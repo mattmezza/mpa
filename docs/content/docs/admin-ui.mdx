@@ -21,7 +21,16 @@ Authentication uses a Bearer token (the `ADMIN_API_KEY` from your config).
 
 ### Dashboard
 
-Overview of agent status, active channels, and quick stats.
+Overview of agent status, active channels, and quick stats. The status badge (top-left)
+shows `RUNNING`/`STOPPED`/etc. and is clickable — it opens Agent Control to start, stop, or
+restart the agent.
+
+Most settings apply live. A few are read only when the agent starts — **channels** (Telegram/
+WhatsApp, including forum-topic mode), **voice** (STT/TTS), and **history → max turns** — so
+saving them shows a **"Restart required"** banner with a **Restart now** button (which also
+updates the status badge). Those sections also carry an inline ⟳ note. Everything else (LLM,
+vision, memory, compaction, search, personae, permissions, jobs, calendars/contacts/email,
+identity) takes effect immediately.
 
 ### Configuration
 
@@ -29,6 +38,7 @@ Edit agent settings without touching config files:
 
 - **Assistant** — the default identity (agent name, character, personalia), used when no persona is active
 - **Personae** — create, edit, and switch swappable agent identities (see below)
+- **Chats** — list active conversations and bind a persona to each (see below)
 - **LLM** — provider, model, and API key configuration. The model field is free-text (enter any model id the provider supports); a **Fetch models** button on each provider card loads the live model list from the provider API into the field's autocomplete, and **Copy list** copies all available ids. Also configures the background models for memory, goal decomposition, task reflection, and **history compaction** (the model used to summarize old conversation turns — see the History tab for the trigger threshold)
 - **Channels** — enable/disable Telegram and WhatsApp
 - **Calendar** — manage CalDAV providers
@@ -51,6 +61,10 @@ Built-in skill editor for creating, editing, and deleting skill files. Changes t
 ### Personae
 
 Manage swappable agent identities — each with its own character, skill allowlist, tool scope, voice, and secret scope. Cards show every persona and the active one; **Use** activates one (applied live to new turns) or revert to **Default** (the Assistant-tab identity). The editor offers a **guided form** (identity, agent name, voice, skill + tool checkboxes, secret scope) and a **raw markdown** toggle for power users. Six starter personae ship seeded. The page is responsive at phone width. See [Personae](/docs/personae) for the full model.
+
+### Chats
+
+Lists every active conversation by `channel · user · chat` and lets you bind a persona to a single chat — it overrides the global active persona **there only** (the resolution ladder is per-chat binding → global persona → default identity). Works for any channel (Telegram, WhatsApp, REPL). Pick a persona from the per-chat dropdown to bind, or **Default** to unbind; the change applies on the next turn and the conversation is preserved. With Telegram `topics_enabled`, each forum topic appears as its own `chat:topic` context. The page is responsive at phone width. See [Per-chat personae](/docs/personae#per-chat-personae) for the model.
 
 ### Memory
 

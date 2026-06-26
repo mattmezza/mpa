@@ -298,6 +298,9 @@ async def _channel_wizard_context(
             ctx["bot_token"] = bot_token
         if user_ids:
             ctx["user_ids"] = user_ids
+        ctx["topics_enabled"] = (
+            str(await config_store.get("channels.telegram.topics_enabled")).lower() == "true"
+        )
     if channel == "whatsapp":
         enabled_raw = await config_store.get("channels.whatsapp.enabled")
         enabled = str(enabled_raw).lower() != "false"
@@ -1492,6 +1495,10 @@ def create_admin_app(
 
     @app.patch("/config", dependencies=[Depends(auth)])
     async def patch_config(body: ConfigPatchIn) -> dict:
+        # Which keys actually changed — so restart_required only fires when a
+        # restart-bound value really moved. A form may re-send unchanged keys
+        # (e.g. History saves both mode (hot-applied) and max_turns every time).
+        changed = {k: v for k, v in body.values.items() if str(await config_store.get(k)) != str(v)}
         await config_store.set_many(body.values)
         agent = agent_state.agent
         if agent:
@@ -1522,7 +1529,10 @@ def create_admin_app(
                     agent.search_client = None
             except Exception:
                 log.exception("Failed to apply updated config to running agent")
-        return {"updated": list(body.values.keys())}
+        return {
+            "updated": list(body.values.keys()),
+            "restart_required": _config_requires_restart(changed),
+        }
 
     @app.post("/debug/system-prompt/preview", dependencies=[Depends(auth)])
     async def system_prompt_preview(body: PromptPreviewIn) -> dict:
@@ -1994,12 +2004,14 @@ def create_admin_app(
         bot_token = str(body.get("bot_token", "")).strip()
         user_ids = str(body.get("user_ids", "")).strip()
         enabled = str(body.get("enabled", "true")).lower() == "true"
+        topics_enabled = bool(body.get("topics_enabled", False))
         if not bot_token:
             raise HTTPException(400, "Bot token is required")
         values = {
             "channels.telegram.enabled": str(enabled).lower(),
             "channels.telegram.bot_token": bot_token,
             "channels.telegram.allowed_user_ids": user_ids,
+            "channels.telegram.topics_enabled": str(topics_enabled).lower(),
         }
         await config_store.set_many(values)
         channel_data = await _channel_list_context(config_store, wacli)
@@ -2264,6 +2276,44 @@ def create_admin_app(
                 raise HTTPException(404, f"Persona not found: {name}")
         await _set_active_persona(name)
         return await _personae_partial()
+
+    # ── Chats API (per-chat persona bindings) ──────────────────────────
+
+    async def _chats_partial() -> HTMLResponse:
+        history = await _history_from_config(config_store)
+        chats = await history.list_chats()
+        store = await _persona_store_from_config(config_store)
+        personae = await store.list_personae()
+        return _render_partial("partials/chats.html", chats=chats, personae=personae)
+
+    @app.get("/partials/chats", dependencies=[Depends(auth)])
+    async def partial_chats() -> HTMLResponse:
+        """Chats tab partial — active contexts and their bound persona."""
+        return await _chats_partial()
+
+    @app.post("/chats/bind", dependencies=[Depends(auth)])
+    async def bind_chat(request: Request) -> HTMLResponse:
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        channel = str(body.get("channel", "")).strip()
+        user_id = str(body.get("user_id", "")).strip()
+        chat_id = str(body.get("chat_id", "")).strip()
+        persona = str(body.get("persona", "")).strip()  # "" = unbind (default identity)
+        if not channel or not user_id:
+            raise HTTPException(400, "Missing 'channel' or 'user_id' in request body")
+        if persona:
+            store = await _persona_store_from_config(config_store)
+            if not await store.get(persona):
+                raise HTTPException(404, f"Persona not found: {persona}")
+        # Use the running agent's history instance so its in-memory session cache
+        # is the one cleared; fall back to a config-built store when not running.
+        agent = agent_state.agent
+        history = agent.history if agent else await _history_from_config(config_store)
+        await history.bind_chat_persona(channel, user_id, chat_id, persona)
+        return await _chats_partial()
 
     # ── Memory API ─────────────────────────────────────────────────────
 
@@ -3080,6 +3130,24 @@ async def _persona_store_from_config(config_store: ConfigStore):
     db_path = await config_store.get("agent.personae_db_path") or "data/personae.db"
     seed_dir = await config_store.get("agent.personae_dir") or "personae/"
     return PersonaStore(db_path=db_path, seed_dir=seed_dir)
+
+
+async def _history_from_config(config_store: ConfigStore):
+    from core.history import ConversationHistory
+
+    db_path = await config_store.get("history.db_path") or "data/history.db"
+    return ConversationHistory(db_path=db_path)
+
+
+# Config keys the running agent only reads at startup, so a change to them via
+# PATCH /config takes effect only after an agent restart. Everything else is
+# hot-applied in patch_config (agent.config swap + llm/memory/search rebuild).
+# Channels are saved through their own routes (always restart-bound) and handled
+# client-side, so they are not listed here.
+def _config_requires_restart(values: dict) -> bool:
+    """True if any saved key is consumed only at agent startup (voice pipeline,
+    history window) and so needs a restart to take effect."""
+    return any(key == "history.max_turns" or key.startswith("voice.") for key in values)
 
 
 # Function-tools that a persona may scope. ``load_skill`` is intentionally
