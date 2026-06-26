@@ -140,9 +140,10 @@ class Spinner:
 class ReplChannel:
     """Minimal channel: prints approval prompts and reads a y/n from stdin."""
 
-    def __init__(self, agent: AgentCore, spinner: Spinner):
+    def __init__(self, agent: AgentCore, spinner: Spinner, yolo: bool = False):
         self.agent = agent
         self.spinner = spinner
+        self.yolo = yolo  # auto-approve every permission prompt (--yolo)
         # Set per-turn by _run_turn: release/reclaim stdin from the ESC watcher
         # so the approval prompt can read it (else _on_key eats the keystrokes).
         self.pause_keys = None
@@ -154,6 +155,11 @@ class ReplChannel:
     async def send_approval_request(
         self, user_id: str, request_id: str, description: str, image_path: str | None = None
     ) -> None:
+        if self.yolo:  # --yolo: approve everything, no prompt (this call only, no rule)
+            sys.stderr.write(f"\r\033[K\033[2m  · [yolo] auto-approved: {description}\033[0m\n")
+            sys.stderr.flush()
+            self.agent.permissions.resolve_approval(request_id, approved=True)
+            return
         await self.spinner.stop()  # don't fight the prompt for the line
         if self.pause_keys:
             self.pause_keys()
@@ -301,6 +307,11 @@ async def main() -> None:
         default=None,
         help="Test with a specific persona active (overrides agent.active_persona).",
     )
+    parser.add_argument(
+        "--yolo",
+        action="store_true",
+        help="Auto-approve every permission prompt (no rules saved). Local testing only.",
+    )
     args = parser.parse_args()
 
     spinner = Spinner()
@@ -323,7 +334,9 @@ async def main() -> None:
         config.agent.active_persona = args.persona
 
     agent = AgentCore(config)
-    agent.channels["repl"] = ReplChannel(agent, spinner)
+    agent.channels["repl"] = ReplChannel(agent, spinner, yolo=args.yolo)
+    if args.yolo:
+        print(f"{_DIM}⚠ --yolo: auto-approving all tool permissions this session.{_RESET}")
 
     if args.persona is not None:
         # Session mode snapshots the system prompt per chat, so a stale session
