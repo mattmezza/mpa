@@ -51,8 +51,7 @@ from urllib.parse import urlparse
 
 NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _DEFAULT_UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (macOS; AArch64) Ladybird/1.0 Chrome/146.0.0.0 AppleWebKit/537.36 Safari/537.36"
 )
 
 
