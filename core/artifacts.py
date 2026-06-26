@@ -90,6 +90,11 @@ class ArtifactStore:
         path = self.dir / f"{art_id}.html"
         if path.is_symlink() or not path.resolve().is_relative_to(self.dir.resolve()):
             return None
+        # A hardlink (st_nlink > 1) or a directory could also point the public
+        # route at content we never wrote; only a plain single-reference file is
+        # served. Missing files fall through and 404 at the caller.
+        if path.exists() and path.stat().st_nlink > 1:
+            return None
         return path
 
     def cleanup(self) -> int:

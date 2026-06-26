@@ -78,6 +78,17 @@ def test_path_for_rejects_symlink_escape(tmp_path) -> None:
     assert ArtifactStore(store_dir).path_for("abcdef12") is None
 
 
+def test_path_for_rejects_hardlink_escape(tmp_path) -> None:
+    # A hardlink to a file outside the dir is not a symlink and resolves inside
+    # the dir, so only the st_nlink check catches it.
+    outside = tmp_path / "secret.txt"
+    outside.write_text("top secret")
+    store_dir = tmp_path / "artifacts"
+    store_dir.mkdir()
+    os.link(outside, store_dir / "abcdef34.html")
+    assert ArtifactStore(store_dir).path_for("abcdef34") is None
+
+
 # -- /artifacts route tests ---------------------------------------------------
 
 
