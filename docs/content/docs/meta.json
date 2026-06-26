@@ -15,6 +15,7 @@
     "secrets",
     "scheduler",
     "voice",
+    "artifacts",
     "admin-ui",
     "---",
     "development",

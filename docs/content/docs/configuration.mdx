@@ -38,7 +38,7 @@ Key variables:
 | `GOOGLE_EMAIL` | Google account for calendar |
 | `GOOGLE_APP_PASSWORD` | Google app-specific password |
 | `MPA_MASTER_KEY` | Infra [secrets vault](/docs/secrets) machine key (optional; a `data/master.key` keyfile is used if unset) |
-| `MPA_BASE_URL` | Base URL for secure "provide a secret" links (defaults to `http://localhost:<admin port>`) |
+| `MPA_BASE_URL` | Base URL for secure "provide a secret" links and [web artifact](/docs/artifacts) links (defaults to `http://localhost:<admin port>`) |
 
 ## Agent config (`config.yml`)
 
@@ -173,6 +173,10 @@ Conversation history settings. `max_turns` controls how many user-assistant pair
 #### `memory`
 
 Memory system settings. `extraction_model` is the cheap/fast model used for post-turn memory extraction. See [Memory](/docs/memory) for details.
+
+#### `artifacts`
+
+Agent-crafted [web artifacts](/docs/artifacts). `directory` is where the HTML files live, and `ttl_hours` sets how long they are kept before the background sweep deletes them (`0` = keep forever). Set `MPA_BASE_URL` so the shared links are reachable from your devices. Enabled by default.
 
 ## Character and identity files
 

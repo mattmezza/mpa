@@ -1,0 +1,72 @@
+---
+title: Web artifacts
+description: The agent publishes self-contained HTML pages — reports, dashboards, charts, mini-tools — served as shareable links at /artifacts/<id>.
+---
+
+# Web artifacts
+
+When an answer is richer than a chat bubble can show — a monthly expense dashboard,
+a chart comparing two options, an interactive checklist, a visual summary of GitHub
+activity — the agent can publish it as a **web artifact**: one self-contained HTML
+page served at `/artifacts/<id>` on the admin app, handed back to you as a link.
+
+It is the agent's "give me a mini-site for X" capability. No nginx, no build step,
+no second file — just a URL you can open on any device.
+
+## How it works
+
+The agent calls the `write_artifact` tool with a complete HTML document. The page is
+saved under `artifacts.directory` (default `data/artifacts/`) with a random,
+unguessable id, and the agent replies with the link:
+
+```
+http://your-host:8000/artifacts/AbC123xy
+```
+
+Set [`MPA_BASE_URL`](/docs/configuration) to your reachable admin URL so the links
+work from your phone, not just `localhost`.
+
+### The complexity ladder
+
+One artifact is **one standalone HTML file**, so the agent inlines everything and
+climbs only as high as the request needs:
+
+| Need | What the agent reaches for |
+|---|---|
+| Quick report | Plain semantic HTML, no styling |
+| Clean readable doc | A classless CSS framework (MVP.css / Water.css) via CDN |
+| Branded / designed page | Custom CSS in `<style>`, or TailwindCSS v4 via CDN |
+| Interactivity | Inline JS, or Alpine.js via CDN |
+
+CSS goes inline in `<style>`, JS inline in `<script>`, and richer libraries load from
+a CDN — so a single file covers every rung without a server or bundler.
+
+## Security & hygiene
+
+- **Unguessable links.** Each artifact gets a random id (`secrets.token_urlsafe`), so
+  the route can't be listed or walked. There is no index — an unknown id returns a 404.
+- **No path traversal.** Ids are validated against `[A-Za-z0-9_-]`, so `/`, `.` and `\`
+  never reach the filesystem.
+- **Sandboxed pages.** Every artifact is served with a `Content-Security-Policy: sandbox`
+  header, putting it in a unique opaque origin. Its (agent-authored) JavaScript therefore
+  **cannot read the admin origin's `localStorage`** — where the admin API key lives — or
+  its cookies. CDN scripts, inline scripts, forms and popups still work.
+- **Automatic expiry.** A background sweep deletes artifacts older than `ttl_hours`
+  (default 168 = 7 days; set `0` to keep them forever).
+- **Per-persona scope.** `write_artifact` is a [gateable tool](/docs/personae) — a persona
+  with a restricted tool scope can be denied the ability to publish artifacts.
+
+Artifacts are served **without authentication** by design — anyone with the link can
+open the page. The unguessable id is the access control. Don't put secrets in an artifact.
+
+## Configuration
+
+```yaml
+artifacts:
+  enabled: true
+  directory: "data/artifacts"  # where the HTML files live
+  ttl_hours: 168               # auto-delete after this many hours (0 = keep forever)
+```
+
+Set `enabled: false` to turn the feature off entirely: the tool refuses to write and the
+`/artifacts/<id>` route returns 404 for everything.
