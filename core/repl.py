@@ -314,13 +314,27 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
+    from dotenv import load_dotenv
+
+    load_dotenv()  # MPA_MASTER_KEY / ADMIN_PASSWORD from .env, as main.py does at boot
+
     spinner = Spinner()
     _setup_logging(spinner)
 
     store = ConfigStore()
     await store.seed_if_empty()
     await store.ensure_admin_password()
-    config = await store.export_to_config()
+
+    # Wire the secrets vault the same way main.py does, so {{secret:}} / ${vault:}
+    # and list_secrets/request_secret work in the repl. ponytail: mirror boot, no abstraction.
+    from core.secret_store import SecretStore
+
+    secret_store = SecretStore()
+    await secret_store.load_infra_cache()
+    seed_pw = os.environ.get("ADMIN_PASSWORD") or os.environ.get("ADMIN_API_KEY")
+    if seed_pw:  # unseals persona vault in-process (created on first set)
+        await secret_store.ensure_wrapped_dek(seed_pw)
+    config = await store.export_to_config(vault_resolve=secret_store.infra_resolve)
 
     if args.persona is not None:
         # Validate against the persona store so a typo fails loudly with options.
@@ -333,7 +347,7 @@ async def main() -> None:
             return
         config.agent.active_persona = args.persona
 
-    agent = AgentCore(config)
+    agent = AgentCore(config, secret_store=secret_store)
     agent.channels["repl"] = ReplChannel(agent, spinner, yolo=args.yolo)
     if args.yolo:
         print(f"{_DIM}⚠ --yolo: auto-approving all tool permissions this session.{_RESET}")

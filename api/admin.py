@@ -2958,10 +2958,14 @@ def create_admin_app(
         expires_at, max_uses = _duration_fields(
             str(form.get("duration", "forever")), str(form.get("until", ""))
         )
+        # "This persona only" with no requesting persona (base agent) is incoherent —
+        # it would orphan the secret (no owner, no grant, not shared → never resolvable).
+        # Treat it as global so the agent that asked can actually use it.
+        shared = scope == "all" or (scope == "this" and not req["persona"])
         await secret_store.set_secret(
             name,
             value,
-            shared=(scope == "all"),
+            shared=shared,
             owner=f"persona:{req['persona']}" if req["persona"] else "",
             description=req["reason"][:200],
             expires_at=expires_at,
