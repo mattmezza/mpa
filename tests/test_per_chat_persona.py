@@ -110,6 +110,22 @@ async def test_resolve_persona_ladder(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_persona_bot_per_persona_channel(tmp_path) -> None:
+    # Rung 0 (#29): a "telegram:<name>" channel binds straight to that persona,
+    # outranking the per-chat binding and the global active persona.
+    h = ConversationHistory(db_path=str(tmp_path / "h.db"))
+    store = await _seed_personae(tmp_path)
+    await h.set_chat_persona("telegram:coach", "u1", "writer", "c1")  # ignored by rung 0
+    fa = _fake_agent(h, store, active="writer")
+    p = await fa._resolve_persona("telegram:coach", "u1", "c1")
+    assert p is not None and p.name == "coach"
+
+    # Unknown persona in the channel name → fall through to the ordinary ladder.
+    p2 = await fa._resolve_persona("telegram:ghost", "u1", "c2")
+    assert p2 is not None and p2.name == "writer"  # global active persona
+
+
+@pytest.mark.asyncio
 async def test_resolve_persona_missing_binding_falls_through(tmp_path) -> None:
     h = ConversationHistory(db_path=str(tmp_path / "h.db"))
     store = await _seed_personae(tmp_path)
