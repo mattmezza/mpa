@@ -13,9 +13,10 @@ services:
       - ./skills:/app/skills:ro
     env_file: .env
     # Browser tool (issue #16). Two options:
-    #  - All-in-one: build with `--build-arg INSTALL_BROWSER=true` to bundle Chromium.
-    #  - Lean core: run the sidecar below and set tools.browser.cdp_url to its CDP
-    #    endpoint (admin UI). Profiles persist on the shared ./data volume.
+    #  - All-in-one (default): Chromium is bundled in the image (~500-700MB), so no
+    #    runtime download. Opt out with `--build-arg INSTALL_BROWSER=false`.
+    #  - Lean core: build with INSTALL_BROWSER=false, run the sidecar below, and set
+    #    tools.browser.cdp_url to its CDP endpoint. Profiles persist on ./data.
     # environment:
     #   - BROWSER_CDP_URL=ws://browser:3000
 
