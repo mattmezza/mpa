@@ -25,12 +25,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 import requests as http_requests
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
+from core.artifacts import ARTIFACT_CSP, NOT_FOUND_HTML, store_from_config, valid_id
 from core.config_store import ConfigStore
 from core.goal_decomposition import classify_complexity, decompose_goal
 from core.llm import LLMClient
@@ -607,6 +608,36 @@ def create_admin_app(
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    # ── Agent web artifacts (public; the random id is the only secret) ──
+    @app.get("/artifacts/{artifact_id}", response_model=None)
+    async def artifact_root(artifact_id: str) -> Response:
+        # Redirect to the trailing-slash form so relative links inside the
+        # artifact (href="style.css", "img/logo.png") resolve under /artifacts/<id>/.
+        # Validate first so a malformed id never reaches the Location header.
+        if not valid_id(artifact_id):
+            return HTMLResponse(NOT_FOUND_HTML, status_code=404)
+        return RedirectResponse(f"/artifacts/{artifact_id}/", status_code=307)
+
+    @app.get("/artifacts/{artifact_id}/{file_path:path}", response_model=None)
+    async def serve_artifact(artifact_id: str, file_path: str = "") -> Response:
+        """Serve a file from an artifact dir. No auth — the unguessable id gates it.
+
+        ``resolve`` validates the id, blocks traversal/dotfiles/symlinks/hardlinks
+        and anything outside the artifact dir. The CSP sandbox keeps artifact JS
+        off the admin origin's localStorage; nosniff stops MIME-sniffing.
+        """
+        store = await store_from_config(config_store)
+        target = store.resolve(artifact_id, file_path) if store.enabled else None
+        if target is None:
+            return HTMLResponse(NOT_FOUND_HTML, status_code=404)
+        return FileResponse(
+            target,
+            headers={
+                "Content-Security-Policy": ARTIFACT_CSP,
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
     auth = _make_auth_dependency(config_store, secret_store)
 
     async def _resolved_config():
@@ -779,10 +810,15 @@ def create_admin_app(
         )
 
     async def _persona_editor_ctx() -> dict:
-        """Shared context for the persona editor: all skills + gateable tools."""
+        """Shared context for the persona editor: all skills + gateable tools.
+
+        A globally-disabled feature (e.g. artifacts) is dropped so its tool is
+        hidden from the persona scope UI.
+        """
         store = await _skills_store_from_config(config_store)
         all_skills = [s["name"] for s in await store.list_skills()]
-        return {"all_skills": all_skills, "all_tools": GATEABLE_TOOLS}
+        artifacts = await store_from_config(config_store)
+        return {"all_skills": all_skills, "all_tools": gateable_tools_for(artifacts.enabled)}
 
     @app.get("/admin/personae/new", response_model=None)
     async def admin_persona_new() -> Response:
@@ -1096,6 +1132,8 @@ def create_admin_app(
         except Exception:
             browser_profiles = []
 
+        artifacts = await store_from_config(config_store)
+
         return _render_partial(
             "partials/tools.html",
             tools=tool_registry(),
@@ -1108,6 +1146,9 @@ def create_admin_app(
             browser_ua=browser_ua,
             browser_profiles=browser_profiles,
             browser_rules=_browser_rules(),
+            artifacts_enabled="true" if artifacts.enabled else "false",
+            artifacts_directory=str(artifacts.dir),
+            artifacts_ttl_hours=str(artifacts.ttl_hours),
         )
 
     @app.post("/tools/gh/test", dependencies=[Depends(auth)])
@@ -3273,7 +3314,15 @@ GATEABLE_TOOLS = [
     "create_calendar_event",
     "web_search",
     "manage_jobs",
+    "write_artifact",
 ]
+
+
+def gateable_tools_for(artifacts_enabled: bool) -> list[str]:
+    """GATEABLE_TOOLS minus tools whose feature is globally disabled."""
+    if artifacts_enabled:
+        return list(GATEABLE_TOOLS)
+    return [t for t in GATEABLE_TOOLS if t != "write_artifact"]
 
 
 # ---------------------------------------------------------------------------

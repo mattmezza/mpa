@@ -281,6 +281,77 @@ TOOLS = [
             "required": ["name", "reason"],
         },
     },
+    {
+        "name": "write_artifact",
+        "description": (
+            "Publish a web artifact and get back a shareable link (e.g. "
+            "https://host/artifacts/AbC123xy/). Use this whenever the answer is "
+            "richer than chat can show: reports, dashboards, charts, comparison "
+            "tables, interactive checklists/trackers, slide decks, or any 'give "
+            "me a mini-site / document for X'. The link serves a whole directory.\n"
+            "Provide EXACTLY ONE of:\n"
+            "- 'html': a full standalone HTML document (becomes index.html). Best "
+            "for a single page. Inline CSS in <style> and JS in <script>. Climb "
+            "only as high as needed: plain semantic HTML for a quick report; a "
+            "classless CSS framework (MVP.css / Water.css via CDN) for clean docs; "
+            "custom CSS or TailwindCSS v4 (browser build "
+            "<script src='https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4'>"
+            "</script>) for designed pages; JS or Alpine.js (CDN) only when "
+            "interactive.\n"
+            "- 'files': a {relative_path: text} map for a MULTI-FILE site — e.g. "
+            "{'index.html': '…', 'style.css': '…', 'app.js': '…'}. Link them with "
+            "relative URLs (href='style.css'). Must include index.html (or set "
+            "'entrypoint').\n"
+            "- 'source_path': an absolute path to a file or directory you already "
+            "produced on disk — a PDF, image, slides, doc, or a prebuilt site dir. "
+            "Use this for binary/generated outputs (e.g. write a PDF with pandoc to "
+            "/tmp, then publish it). Publishing an on-disk file asks the owner for "
+            "approval first.\n"
+            "Pick 'ttl_hours' to fit the content: a small number for things that go "
+            "stale fast (a daily report), a large number or 0 (keep forever) for "
+            "lasting references. Omit to use the configured default. After writing, "
+            "give the returned link to the user."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "html": {
+                    "type": "string",
+                    "description": "A complete HTML document; published as index.html.",
+                },
+                "files": {
+                    "type": "object",
+                    "description": (
+                        "Map of relative filename → text content for a multi-file "
+                        "artifact (e.g. index.html + style.css + app.js)."
+                    ),
+                    "additionalProperties": {"type": "string"},
+                },
+                "source_path": {
+                    "type": "string",
+                    "description": (
+                        "Absolute path to a file or directory to copy in (PDF, "
+                        "image, slides, doc, or a prebuilt site). Asks for approval."
+                    ),
+                },
+                "entrypoint": {
+                    "type": "string",
+                    "description": "File served at the root URL. Default 'index.html'.",
+                },
+                "ttl_hours": {
+                    "type": "integer",
+                    "description": (
+                        "How long to keep this artifact, in hours. 0 = forever. "
+                        "Omit for the configured default."
+                    ),
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional short title, for your reference and the logs.",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -296,6 +367,20 @@ def scoped_tools(persona: Persona | None) -> list[dict]:
     # they are the mechanics personae rely on to read skills and obtain secrets.
     _always = {"load_skill", "list_secrets", "request_secret"}
     return [t for t in TOOLS if persona.allows_tool(t["name"]) or t["name"] in _always]
+
+
+def apply_feature_gates(
+    tools: list[dict], *, secrets_available: bool, artifacts_enabled: bool
+) -> list[dict]:
+    """Drop tools whose backing feature is unavailable/disabled, so the model is
+    never offered a capability it can't use (defence in depth — the tool handlers
+    also refuse). Disabling ``artifacts`` here means no persona can call it."""
+    out = tools
+    if not secrets_available:
+        out = [t for t in out if t["name"] not in ("list_secrets", "request_secret")]
+    if not artifacts_enabled:
+        out = [t for t in out if t["name"] != "write_artifact"]
+    return out
 
 
 class AgentCore:
@@ -399,9 +484,11 @@ class AgentCore:
         # Resolve the active persona (its identity, skills + tool scope) — a
         # per-chat binding wins over the globally selected persona (#14).
         persona = await self._resolve_persona(channel, user_id, chat_id)
-        tools = scoped_tools(persona)
-        if self.secret_store is None:
-            tools = [t for t in tools if t["name"] not in ("list_secrets", "request_secret")]
+        tools = apply_feature_gates(
+            scoped_tools(persona),
+            secrets_available=self.secret_store is not None,
+            artifacts_enabled=self.config.artifacts.enabled,
+        )
 
         # Static system prompt. In session mode it is snapshotted once at the
         # start of the session and reused for every turn (so the static content
@@ -1086,6 +1173,12 @@ class AgentCore:
         if name == "request_secret":
             return await self._tool_request_secret(params, channel, user_id, request_state)
 
+        if name == "write_artifact":
+            result = self._tool_write_artifact(params)
+            if is_write_action and self._is_tool_success(result):
+                executed_writes.add(write_sig)
+            return result
+
         return {"error": f"Unknown tool: {name}"}
 
     @staticmethod
@@ -1198,10 +1291,54 @@ class AgentCore:
         except Exception as exc:
             return {"error": str(exc)}
 
-    def _vault_base_url(self) -> str:
+    def _base_url(self) -> str:
         import os
 
         return os.getenv("MPA_BASE_URL", f"http://localhost:{self.config.admin.port}")
+
+    def _tool_write_artifact(self, params: dict) -> dict:
+        """Publish a web artifact (page, multi-file site, or file); return its URL."""
+        from core.artifacts import ArtifactStore
+
+        cfg = self.config.artifacts
+        if not cfg.enabled:
+            return {"error": "Web artifacts are disabled in config (artifacts.enabled)."}
+
+        files = params.get("files") or None
+        if files is not None and not isinstance(files, dict):
+            return {"error": "'files' must be a map of filename → text content."}
+        html = params.get("html")
+        if html and not files:
+            files = {"index.html": str(html)}
+        source_path = params.get("source_path") or None
+        if not files and not source_path:
+            return {"error": "Provide one of 'html', 'files', or 'source_path'."}
+        if files and source_path:
+            return {"error": "Provide only one of 'html'/'files' or 'source_path'."}
+
+        entrypoint = str(params.get("entrypoint") or "index.html")
+        ttl_hours = params.get("ttl_hours")
+        if ttl_hours is not None:
+            try:
+                ttl_hours = int(ttl_hours)
+            except TypeError, ValueError:
+                return {"error": "'ttl_hours' must be an integer (0 = keep forever)."}
+        title = str(params.get("title", "")).strip()
+
+        store = ArtifactStore(cfg.directory, cfg.ttl_hours)
+        try:
+            art_id = store.create(
+                files=files,
+                source_path=source_path,
+                entrypoint=entrypoint,
+                ttl_hours=ttl_hours,
+                title=title,
+            )
+        except (ValueError, OSError) as exc:
+            return {"error": str(exc)}
+        url = f"{self._base_url()}/artifacts/{art_id}/"
+        log.info("Tool call: write_artifact — %s (%s)", url, title or "untitled")
+        return {"ok": True, "url": url, "title": title}
 
     async def _notify_secret_request(
         self, channel: str, user_id: str, name: str, reason: str, link: str
@@ -1242,7 +1379,7 @@ class AgentCore:
         token = await self.secret_store.create_request(
             sname, persona=persona_name, reason=reason, suggested_scope=scope
         )
-        link = f"{self._vault_base_url()}/vault/fill/{token}"
+        link = f"{self._base_url()}/vault/fill/{token}"
         await self._notify_secret_request(channel, user_id, sname, reason, link)
         return {
             "status": "requested",

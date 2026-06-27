@@ -114,3 +114,11 @@ memory:
   # Tier 4 — long-term hygiene pass (cluster + merge near-duplicates)
   hygiene_enabled: true
   hygiene_similarity_threshold: 0.45 # min similarity to cluster two memories
+
+# Agent-crafted web artifacts — the agent publishes pages, multi-file sites, or
+# documents (PDF, image, slides) served at /artifacts/<random-id>/. Set the
+# MPA_BASE_URL env var so the shared links are reachable from your devices.
+artifacts:
+  enabled: true
+  directory: "data/artifacts"  # where artifacts live
+  ttl_hours: 168               # default lifetime; agent may pick its own (0 = forever)

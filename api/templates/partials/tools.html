@@ -13,6 +13,69 @@
     </p>
   </div>
 
+  {# Web artifacts (built-in tool) #}
+  <div class="card" x-data="{
+    enabled: {{ artifacts_enabled|default('true', true)|tojson|forceescape }},
+    directory: {{ artifacts_directory|default('data/artifacts', true)|tojson|forceescape }},
+    ttl: {{ artifacts_ttl_hours|default('168', true)|tojson|forceescape }},
+    result: '', resultOk: false,
+    save() {
+      const vals = {
+        'artifacts.enabled': String(this.enabled === true || this.enabled === 'true'),
+        'artifacts.directory': this.directory,
+        'artifacts.ttl_hours': String(parseInt(this.ttl) || 0)
+      };
+      fetch('/config', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')},
+        body: JSON.stringify({values: vals})
+      })
+      .then(r => { this.resultOk = r.ok; return r.json(); })
+      .then(d => {
+        this.result = this.resultOk ? 'Artifact settings saved' : (d.detail || 'Error');
+        if (this.resultOk && window.showToast) { window.showToast('Artifact settings saved'); }
+      })
+      .catch(e => { this.resultOk = false; this.result = e.message; });
+    }
+  }">
+    <div class="flex items-center justify-between gap-3 mb-1">
+      <h3 class="text-sm text-accent">Web artifacts</h3>
+      <div class="flex items-center gap-2">
+        <label class="label mb-0">Enabled</label>
+        <input type="checkbox" x-model="enabled" :checked="enabled === 'true' || enabled === true">
+      </div>
+    </div>
+    <p class="text-muted text-xs mb-4">
+      Let the assistant publish pages, multi-file sites, or documents (PDF, image,
+      slides) as shareable links at <code>/artifacts/&lt;id&gt;/</code>. When disabled,
+      the tool is hidden from the assistant (and from the Personae tool scope) and
+      every artifact link returns 404. Assign it per persona in the
+      <strong>Personae</strong> editor.
+    </p>
+    <div class="space-y-3" x-show="enabled === 'true' || enabled === true">
+      <div>
+        <label class="label">Directory</label>
+        <input type="text" class="input-sm" style="max-width:500px" x-model="directory"
+               placeholder="data/artifacts">
+        <p class="text-muted text-xs mt-1">Where artifacts are stored on disk.</p>
+      </div>
+      <div>
+        <label class="label">Default TTL (hours)</label>
+        <input type="number" min="0" class="input-sm" style="max-width:200px" x-model="ttl">
+        <p class="text-muted text-xs mt-1">
+          Default lifetime before cleanup; the assistant may set its own per artifact.
+          <code>0</code> = keep forever.
+        </p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 mt-4">
+      <button class="btn-primary btn-sm" @click="save()">Save</button>
+    </div>
+    <template x-if="result">
+      <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
+    </template>
+  </div>
+
   {# GitHub CLI (gh) #}
   <div class="card">
     <div class="flex items-center justify-between gap-3 mb-1">
