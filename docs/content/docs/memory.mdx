@@ -117,7 +117,7 @@ Set `memory.embedding.enabled: false` to fall back to **Tier-1 lexical** (word-o
 
 ### What embeddings power
 
-- **Relevance-ranked injection.** Instead of dumping the most recent `long_term_limit` rows into the prompt, only the `injection_top_k` (default 12) memories most relevant to the *current message* are injected. They're scored Generative-Agents style: `relevance + 0.5·importance + 0.3·recency`. (In session mode, where the static prompt is snapshotted once, the session's first message is the query.)
+- **Relevance-ranked injection.** Instead of dumping the most recent `long_term_limit` rows into the prompt, only the `injection_top_k` (default 12) memories most relevant to the *current message* are injected. They're scored Generative-Agents style: `relevance + 0.5·importance + 0.3·recency`. Injection happens in the **per-turn preamble** (prepended to the current user message), not the static system prompt — so even in session mode (where the static prompt is snapshotted once) the current message is the query every turn, and a fact written mid-session is visible on the next turn without `/new`.
 - **Dedup.** `update_memory` retrieves ADD/UPDATE/DELETE/NOOP candidates by cosine similarity (with a per-row lexical fallback for any memory that has no vector yet).
 - **Hygiene clustering** (Tier 4, below).
 

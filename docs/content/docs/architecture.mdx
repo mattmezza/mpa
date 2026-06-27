@@ -70,8 +70,8 @@ The agent becomes a **thin orchestrator**: it reads skill files, passes them to 
 The brain of MPA. Implements the LLM tool-use loop:
 
 1. Load conversation history
-2. Build the static system prompt (skills, character, personalia, memories, active tools). In session mode this is snapshotted once per conversation (rebuilt after `/new`) and reused every turn, so the cacheable prefix stays stable; on Anthropic it is sent with a `cache_control` breakpoint so the tools + system prefix is not reprocessed each turn
-3. Inject the live date/time (and any per-request execution plan) at the start of the current user message — so the agent always knows "now" without mutating the cached prefix
+2. Build the static system prompt (skills, character, personalia, active tools). In session mode this is snapshotted once per conversation (rebuilt after `/new`) and reused every turn, so the cacheable prefix stays stable; on Anthropic it is sent with a `cache_control` breakpoint so the tools + system prefix is not reprocessed each turn
+3. Inject the live date/time, the fresh relevance-ranked memories + task reflections, and any per-request execution plan at the start of the current user message — so the agent always knows "now" and sees memories written mid-session, without mutating the cached prefix. (Memories live here, not in the snapshot, so a fact extracted mid-session reaches the model on the very next turn instead of waiting for `/new`.)
 4. Call the LLM
 5. Handle tool calls with permission checks
 6. Save conversation turn and extract memories
