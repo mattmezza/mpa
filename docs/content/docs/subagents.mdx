@@ -1,0 +1,107 @@
+---
+title: Subagents
+description: Delegate scoped subtasks to sub-loops — on demand or scheduled — with lifecycle control.
+---
+
+# Subagents
+
+A **subagent** is a scoped run of the agent loop that the main agent can delegate
+work to. It runs under a chosen [persona](/docs/personae), returns a structured
+result, and — like a [scheduled job](/docs/scheduler) — appears in a registry you
+can list, monitor, and cancel.
+
+There is **one execution primitive** reached by two trigger paths:
+
+- **On demand** — the agent calls the `spawn_subagent` tool mid-conversation.
+- **Scheduled** — a `subagent` job fired by the [scheduler](/docs/scheduler).
+
+A subagent runs with **system semantics**: no goal decomposition, no memory
+extraction, no reflection, and no per-action approval prompts — the same path
+scheduled jobs already use. You approve the delegation once (the `spawn_subagent`
+call is an [ASK action](/docs/permissions)); the subagent then runs autonomously
+within its scope.
+
+## On demand
+
+The agent decides to delegate and calls the tool. Two modes:
+
+- **Synchronous** (default): the tool blocks, the subagent runs to completion,
+  and `{ summary, result }` comes back as the tool result — the agent continues
+  in the same turn.
+- **Background** (`background: true`): the tool returns a run id immediately and
+  the subagent runs off-turn. When it finishes, the result is **posted back to
+  the chat it was started from**.
+
+```jsonc
+// spawn_subagent tool input
+{
+  "task": "Research the top 3 Python HTTP clients and summarise trade-offs",
+  "persona": "coding-helper",   // optional — omit to inherit your identity & scope
+  "background": false            // true → run async, report back when done
+}
+```
+
+The `task` is self-contained: a subagent has **no memory** of the conversation
+that spawned it, so everything it needs goes in `task`.
+
+## Scheduled
+
+Run a subagent on a cron or one-shot schedule by giving a job `type: "subagent"`
+and a `persona`. The result is delivered to the job's `channel`.
+
+```yaml
+scheduler:
+  jobs:
+    - id: "weekly_review"
+      cron: "0 18 * * 5"        # Fridays at 18:00
+      type: "subagent"
+      persona: "writing-editor"
+      task: "Draft a short weekly review from this week's notes and email it to me"
+      channel: "telegram"
+```
+
+You can also create subagent jobs from the **Jobs** tab of the [admin UI](/docs/admin-ui).
+
+## Scope: inherit, never widen
+
+A subagent's [persona](/docs/personae) scope — the tools it may call, skills it
+may load, and [secrets](/docs/secrets) it may use — is the **intersection** of
+the caller's scope and the requested persona's. A child can never gain a
+capability the caller lacked. The allowlist convention applies: an empty list
+means "all", so an unrestricted caller delegating to a scoped persona *narrows*,
+and a scoped caller delegating to an open persona keeps its own limits.
+
+[Permission rules](/docs/permissions) (`NEVER` in particular) still apply inside
+the subagent, so a blocked action stays blocked at any depth.
+
+## Guardrails
+
+Sensible defaults keep delegation safe and bounded — tune them under
+`subagents` in `config.yml`:
+
+| Setting | Default | What it does |
+|---------|---------|--------------|
+| `enabled` | `true` | Master switch; off removes the `spawn_subagent` tool |
+| `recursion_depth` | `3` | Max nesting (a top-level spawn is depth 1) |
+| `max_steps` | `12` | Max tool-call rounds per run — a hard stop |
+| `token_budget` | `100000` | Approx token ceiling per run (best-effort) |
+| `max_concurrent` | `3` | Max background runs at once |
+
+A run that hits its step or token budget stops and returns what it has, with a
+note that the budget was reached.
+
+## Monitoring & cancelling
+
+Background subagents are first-class runs you can watch and stop:
+
+- **Telegram** — send `/jobs` to list active runs, each with an inline **Cancel**
+  button. Monitoring and cancelling a long task from your phone needs no web UI.
+- **Admin UI** — the **Jobs** tab shows a live card per run (persona, status,
+  elapsed time, current step) with a cancel button; the layout collapses to a
+  single column at phone width.
+
+Cancelling stops the run; if it was a background run, a cancellation notice is
+posted back to the originating chat.
+
+> Runs live in memory, so a restart clears the registry (and stops any in-flight
+> background runs) — there is nothing to resume after a reboot.
