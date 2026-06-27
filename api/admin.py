@@ -2222,7 +2222,10 @@ def create_admin_app(
         else:
             raise HTTPException(400, f"Unknown channel: {channel}")
 
-        await config_store.set_many(values)
+        # Disabling the channel must not blank a vault-managed token — that would
+        # orphan the secret (issue #35). Lifecycle of vaulted secrets lives on the
+        # Secrets tab; here we just disable + clear the non-secret fields.
+        await config_store.set_many(await _preserve_vault_refs(values))
         channel_data = await _channel_list_context(config_store, wacli)
         return _render_partial("partials/channels.html", **channel_data)
 

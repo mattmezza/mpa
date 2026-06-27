@@ -556,3 +556,14 @@ async def test_telegram_editor_and_save_preserve_vaulted_token(admin_client) -> 
     assert resp.status_code == 200
     assert await cs.get("channels.telegram.bot_token") == "${vault:TELEGRAM_BOT_TOKEN}"
     assert await cs.get("channels.telegram.allowed_user_ids") == "42"
+
+
+async def test_delete_channel_preserves_vaulted_token(admin_client) -> None:
+    # Disabling a channel must not orphan its vault-managed token.
+    client, _s, cs = admin_client
+    await cs.set("channels.telegram.bot_token", "${vault:TELEGRAM_BOT_TOKEN}")
+    await cs.set("channels.telegram.enabled", "true")
+    resp = client.delete("/channels/telegram", headers=_auth())
+    assert resp.status_code == 200
+    assert await cs.get("channels.telegram.bot_token") == "${vault:TELEGRAM_BOT_TOKEN}"
+    assert await cs.get("channels.telegram.enabled") == "false"  # still disabled
