@@ -621,6 +621,11 @@ class AgentCore:
         stamp = now.strftime("%A, %B %d, %Y %H:%M %Z")
         preamble = f"[Current date & time: {stamp}]"
 
+        # ponytail: in session mode this now runs a query embed + cosine scan +
+        # reinforce-write every turn (was once per session). Intended — that is
+        # what makes injection fresh and per-turn relevant — and cheap for a
+        # personal store. If the store grows huge, gate behind the recall_memory
+        # tool (issue #41 phase 2) instead of always-injecting top-k.
         try:
             memories = await self.memory.format_for_prompt(query=query)
             if memories:
