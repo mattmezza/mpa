@@ -195,6 +195,7 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
     elif step == "secrets":
         import os as _os
 
+        from core.secret_store import INFRA_VAULT_KEYS
         from core.vault import load_machine_key
 
         ctx["machine_key_present"] = bool(load_machine_key())  # type: ignore[assignment]
@@ -202,16 +203,7 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             _os.environ.get("ADMIN_PASSWORD") or _os.environ.get("ADMIN_API_KEY")
         )
         detected = []
-        for cfg_key in (
-            "agent.anthropic_api_key",
-            "agent.openai_api_key",
-            "agent.google_api_key",
-            "agent.grok_api_key",
-            "agent.deepseek_api_key",
-            "channels.telegram.bot_token",
-            "search.api_key",
-            "tools.gh.token",
-        ):
+        for cfg_key in INFRA_VAULT_KEYS:
             val = await config_store.get(cfg_key)
             if val and not val.startswith("${"):
                 detected.append(cfg_key)
@@ -602,6 +594,45 @@ def create_admin_app(
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     auth = _make_auth_dependency(config_store, secret_store)
+
+    async def _resolved_config():
+        """Export the Config with ``${vault:NAME}`` references resolved.
+
+        The infra vault owns migrated credentials (issue #35), so any code that
+        reconstructs a live Config from the store — rebuilding the LLM/search
+        clients, testing embeddings — must resolve vault refs or it would hand a
+        literal ``${vault:…}`` string to a client. ``secret_store`` is absent in
+        some unit tests; fall back to the unresolved export there.
+        """
+        if secret_store is not None:
+            return await config_store.export_to_config(vault_resolve=secret_store.infra_resolve)
+        return await config_store.export_to_config()
+
+    def _is_vault_ref(value: str | None) -> bool:
+        """True if a stored config value points at the infra vault."""
+        return bool(value) and str(value).startswith("${vault:")
+
+    async def _preserve_vault_refs(values: dict) -> dict:
+        """Drop blank/echoed writes to vault-managed secret keys.
+
+        Once a credential is migrated its tab shows a read-only "managed in
+        vault" field that submits empty (or echoes the ref). Without this guard
+        that save would overwrite the ``${vault:NAME}`` reference and orphan the
+        secret. A real, freshly-typed value (non-empty, not a ``${…}`` ref) is
+        always allowed through, so re-entering a key still works.
+        """
+        from core.secret_store import INFRA_VAULT_KEYS
+
+        out = dict(values)
+        for key in INFRA_VAULT_KEYS:
+            if key not in out:
+                continue
+            incoming = str(out[key])
+            if incoming and not incoming.startswith("${"):
+                continue
+            if _is_vault_ref(await config_store.get(key)):
+                del out[key]
+        return out
 
     # Keys managed by dedicated tabs — excluded from the generic Config tab.
     _IDENTITY_KEYS = {
@@ -1517,12 +1548,13 @@ def create_admin_app(
         # Which keys actually changed — so restart_required only fires when a
         # restart-bound value really moved. A form may re-send unchanged keys
         # (e.g. History saves both mode (hot-applied) and max_turns every time).
-        changed = {k: v for k, v in body.values.items() if str(await config_store.get(k)) != str(v)}
-        await config_store.set_many(body.values)
+        values = await _preserve_vault_refs(body.values)
+        changed = {k: v for k, v in values.items() if str(await config_store.get(k)) != str(v)}
+        await config_store.set_many(values)
         agent = agent_state.agent
         if agent:
             try:
-                new_config = await config_store.export_to_config()
+                new_config = await _resolved_config()
                 agent.config = new_config
                 agent.llm = LLMClient.from_agent_config(new_config.agent)
                 agent.executor.tool_env = tool_env(new_config)
@@ -1549,14 +1581,14 @@ def create_admin_app(
             except Exception:
                 log.exception("Failed to apply updated config to running agent")
         return {
-            "updated": list(body.values.keys()),
+            "updated": list(values.keys()),
             "restart_required": _config_requires_restart(changed),
         }
 
     @app.post("/debug/system-prompt/preview", dependencies=[Depends(auth)])
     async def system_prompt_preview(body: PromptPreviewIn) -> dict:
         message = body.message.strip()
-        config = await config_store.export_to_config()
+        config = await _resolved_config()
 
         skills_store = await _skills_store_from_config(config_store)
         await skills_store.ensure_seeded()
@@ -2426,7 +2458,7 @@ def create_admin_app(
         """Report embedding config + whether a local model is already on disk."""
         from core.embeddings import LOCAL_PROVIDERS
 
-        config = await config_store.export_to_config()
+        config = await _resolved_config()
         emb = config.memory.embedding
         is_local = emb.provider in LOCAL_PROVIDERS
         model_ready: bool | None = None
@@ -2447,7 +2479,7 @@ def create_admin_app(
         """Download the local embedding model now (also done at Docker build)."""
         from core.embeddings import LOCAL_PROVIDERS, prefetch_local_model
 
-        config = await config_store.export_to_config()
+        config = await _resolved_config()
         emb = config.memory.embedding
         if emb.provider not in LOCAL_PROVIDERS:
             raise HTTPException(400, "Prefetch only applies to the local embedding provider")
@@ -2468,7 +2500,7 @@ def create_admin_app(
             cosine_similarity,
         )
 
-        config = await config_store.export_to_config()
+        config = await _resolved_config()
         emb = config.memory.embedding
         try:
             if emb.provider in LOCAL_PROVIDERS:
@@ -2842,19 +2874,11 @@ def create_admin_app(
             "enter the effort value manually for this provider.",
         }
 
-    # ── Secrets vault (issue #19) ──────────────────────────────────────
-    # Config keys that hold a single infra secret, with their vault names. Used
-    # by the wizard's "import from .env" step (provider blobs are not auto-moved).
-    _INFRA_MIGRATE = {
-        "agent.anthropic_api_key": "ANTHROPIC_API_KEY",
-        "agent.openai_api_key": "OPENAI_API_KEY",
-        "agent.google_api_key": "GOOGLE_API_KEY",
-        "agent.grok_api_key": "GROK_API_KEY",
-        "agent.deepseek_api_key": "DEEPSEEK_API_KEY",
-        "channels.telegram.bot_token": "TELEGRAM_BOT_TOKEN",
-        "search.api_key": "TAVILY_API_KEY",
-        "tools.gh.token": "GH_TOKEN",
-    }
+    # ── Secrets vault (issue #19, #35) ─────────────────────────────────
+    # INFRA_VAULT_KEYS (core.secret_store) maps the single-value credential keys
+    # to their vault names; migrate_config_to_infra_vault moves the plaintext.
+    # Used by the wizard "import" step and the post-setup Secrets tab button
+    # (provider blobs — email/calendar/contacts — are not auto-moved here).
 
     def _duration_fields(duration: str, until: str) -> tuple[str | None, int | None]:
         """Map a UI duration choice to (expires_at, max_uses)."""
@@ -3123,12 +3147,10 @@ def create_admin_app(
         if action == "generate" and secret_store is not None:
             key = generate_and_save_machine_key()
             secret_store.infra = type(secret_store.infra)(key)  # reload infra vault
-        elif action == "import" and secret_store is not None and secret_store.infra.available:
-            for cfg_key, vname in _INFRA_MIGRATE.items():
-                val = await config_store.get(cfg_key)
-                if val and not val.startswith("${"):
-                    await secret_store.set_infra_secret(vname, val, f"migrated from {cfg_key}")
-                    await config_store.set(cfg_key, f"${{vault:{vname}}}")
+        elif action == "import" and secret_store is not None:
+            from core.secret_store import migrate_config_to_infra_vault
+
+            await migrate_config_to_infra_vault(config_store, secret_store)
         ctx = await _wizard_step_context("secrets", config_store)
         return _render_wizard_step("secrets", SETUP_STEPS, ctx)
 
