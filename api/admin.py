@@ -96,6 +96,15 @@ def _render_partial(template_name: str, **ctx: object) -> HTMLResponse:
     return HTMLResponse(tmpl.render(**ctx))
 
 
+def _is_vault_ref(value: str | None) -> bool:
+    """True if a stored config value points at the infra vault (issue #35).
+
+    Vault-managed credentials must never be echoed back into a form field — the
+    tab/wizard shows a read-only note instead — so callers filter these out.
+    """
+    return bool(value) and str(value).startswith("${vault:")
+
+
 async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str, str]:
     """Fetch previously-saved config values relevant to a wizard step.
 
@@ -118,7 +127,8 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             ("agent.model", "model"),
         ):
             val = await config_store.get(key)
-            if val:
+            # Don't pre-fill a form field with a ${vault:} reference (issue #35).
+            if val and not _is_vault_ref(val):
                 ctx[var] = val
     elif step == "identity":
         for key, var in (
@@ -160,7 +170,7 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             ("channels.telegram.allowed_user_ids", "user_ids"),
         ):
             val = await config_store.get(key)
-            if val:
+            if val and not _is_vault_ref(val):
                 ctx[var] = val
     elif step == "whatsapp":
         for key, var in (("channels.whatsapp.allowed_numbers", "allowed_numbers"),):
@@ -186,7 +196,7 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
                 pass
     elif step == "search":
         val = await config_store.get("search.api_key")
-        if val:
+        if val and not _is_vault_ref(val):
             ctx["tavily_key"] = val
     elif step == "admin":
         val = await config_store.get("admin.password_hash")
@@ -288,7 +298,7 @@ async def _channel_wizard_context(
         user_ids = await config_store.get("channels.telegram.allowed_user_ids")
         # Vault-managed token (issue #35): mark it so the editor shows a read-only
         # note instead of the input, and never ship the ref to the browser.
-        bot_token_vaulted = bool(bot_token) and str(bot_token).startswith("${vault:")
+        bot_token_vaulted = _is_vault_ref(bot_token)
         ctx["bot_token_vaulted"] = bot_token_vaulted  # type: ignore[assignment]
         if bot_token and not bot_token_vaulted:
             ctx["bot_token"] = bot_token
@@ -611,10 +621,6 @@ def create_admin_app(
         if secret_store is not None:
             return await config_store.export_to_config(vault_resolve=secret_store.infra_resolve)
         return await config_store.export_to_config()
-
-    def _is_vault_ref(value: str | None) -> bool:
-        """True if a stored config value points at the infra vault."""
-        return bool(value) and str(value).startswith("${vault:")
 
     async def _preserve_vault_refs(values: dict) -> dict:
         """Drop blank/echoed writes to vault-managed secret keys.

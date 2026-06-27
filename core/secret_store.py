@@ -537,7 +537,9 @@ class SecretStore:
                 (name, token, description),
             )
             await db.commit()
-        self._infra_cache[name] = value
+            # Update the cache only after a successful commit so a failed write
+            # can't leave the in-memory value ahead of the database.
+            self._infra_cache[name] = value
 
     async def get_infra_secret(self, name: str) -> str | None:
         await self._ensure_schema()
@@ -617,6 +619,10 @@ async def migrate_config_to_infra_vault(config_store, secret_store: SecretStore)
     for cfg_key, vname in INFRA_VAULT_KEYS.items():
         val = await config_store.get(cfg_key)
         if val and not val.startswith("${"):
+            # Fail-safe order: write the encrypted secret FIRST, then repoint the
+            # config at it. If the second write fails, the config still holds the
+            # working plaintext (no data loss) and the only residue is a harmless
+            # encrypted entry; re-running heals it (the upsert is idempotent).
             await secret_store.set_infra_secret(vname, val, f"migrated from {cfg_key}")
             await config_store.set(cfg_key, f"${{vault:{vname}}}")
             migrated.append(cfg_key)

@@ -526,6 +526,22 @@ async def test_tools_and_search_collapse_vaulted(admin_client) -> None:
     assert "Stored in the" in search and "${vault:TAVILY_API_KEY}" not in search
 
 
+async def test_wizard_context_skips_vault_refs(tmp_path) -> None:
+    # The wizard must not pre-fill a form field with a ${vault:} reference.
+    from api.admin import _wizard_step_context
+
+    cs = ConfigStore(db_path=str(tmp_path / "config.db"))
+    await cs.set("agent.anthropic_api_key", "${vault:ANTHROPIC_API_KEY}")
+    await cs.set("agent.openai_api_key", "sk-plain")
+    await cs.set("channels.telegram.bot_token", "${vault:TELEGRAM_BOT_TOKEN}")
+    await cs.set("search.api_key", "${vault:TAVILY_API_KEY}")
+    llm = await _wizard_step_context("llm", cs)
+    assert "anthropic_api_key" not in llm  # vault ref filtered out
+    assert llm.get("openai_api_key") == "sk-plain"  # plaintext still pre-filled
+    assert "bot_token" not in await _wizard_step_context("telegram", cs)
+    assert "tavily_key" not in await _wizard_step_context("search", cs)
+
+
 async def test_telegram_editor_and_save_preserve_vaulted_token(admin_client) -> None:
     client, _s, cs = admin_client
     await cs.set("channels.telegram.bot_token", "${vault:TELEGRAM_BOT_TOKEN}")
