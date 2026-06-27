@@ -1423,6 +1423,7 @@ def create_admin_app(
                     "run_at": j.get("run_at", ""),
                     "description": j.get("description", ""),
                     "created_by": j.get("created_by", ""),
+                    "persona": j.get("persona", ""),
                 }
             )
         return jobs
@@ -1451,6 +1452,7 @@ def create_admin_app(
         task = str(body.get("task", "")).strip()
         channel = str(body.get("channel", "telegram")).strip()
         description = str(body.get("description", "")).strip()
+        persona = str(body.get("persona", "")).strip()
 
         if not job_id:
             raise HTTPException(400, "Job ID is required")
@@ -1462,10 +1464,10 @@ def create_admin_app(
         else:
             if not run_at:
                 raise HTTPException(400, "Run-at datetime is required for one-time jobs")
-        if job_type not in ("agent", "agent_silent", "system", "memory_consolidation"):
+        if job_type not in ("agent", "agent_silent", "system", "memory_consolidation", "subagent"):
             raise HTTPException(400, f"Invalid job type: {job_type}")
         if job_type != "memory_consolidation" and not task:
-            raise HTTPException(400, "Task is required for agent/system jobs")
+            raise HTTPException(400, "Task is required for agent/system/subagent jobs")
 
         if schedule == "cron":
             from core.scheduler import _parse_cron
@@ -1494,6 +1496,7 @@ def create_admin_app(
             status="active",
             created_by="admin",
             description=description,
+            persona=persona,
         )
 
         # Sync with APScheduler if the agent is running
@@ -1586,6 +1589,44 @@ def create_admin_app(
         return HTMLResponse(
             f'<span class="alert-success">Job &quot;{job_id}&quot; triggered — check logs '
             "for output</span>"
+        )
+
+    # ── Subagent runs (issue #15) ──────────────────────────────────────
+
+    def _subagent_runs() -> list:
+        """Live subagent runs from the running agent (newest first)."""
+        agent = agent_state.agent
+        if not agent:
+            return []
+        return agent.subagents.list_runs()
+
+    @app.get("/partials/subagent-runs", dependencies=[Depends(auth)])
+    async def partial_subagent_runs() -> HTMLResponse:
+        """Subagent runs card grid — polled by the Jobs tab for live status."""
+        return _render_partial(
+            "partials/subagent_runs.html",
+            runs=_subagent_runs(),
+            agent_running=agent_state.agent is not None,
+        )
+
+    @app.post("/subagents/cancel", dependencies=[Depends(auth)])
+    async def cancel_subagent(request: Request) -> HTMLResponse:
+        """Cancel a running subagent. Returns the refreshed runs partial."""
+        agent = agent_state.agent
+        if not agent:
+            raise HTTPException(503, "Agent not running")
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        run_id = str(body.get("run_id", "")).strip()
+        if not run_id:
+            raise HTTPException(400, "Missing 'run_id' in request body")
+        agent.subagents.cancel(run_id)
+        log.info("Subagent %r cancelled via admin", run_id)
+        return _render_partial(
+            "partials/subagent_runs.html", runs=_subagent_runs(), agent_running=True
         )
 
     # ── Config API ─────────────────────────────────────────────────────
