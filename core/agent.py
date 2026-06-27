@@ -1239,8 +1239,14 @@ class AgentCore:
         # ``manage_jobs`` is exempt: job creation is idempotent and guarded on
         # job id + status inside the tool, so an earlier write in the same turn
         # must never block a (re)create — that was the "already fulfilled" bug
-        # against brand-new job ids (issue #11).
-        if is_write_action and name != "manage_jobs" and write_sig in executed_writes:
+        # against brand-new job ids (issue #11). ``spawn_subagent`` is likewise
+        # exempt: each spawn is a distinct run (its own run id), so the agent may
+        # legitimately fan out the same task more than once in a turn (#15).
+        if (
+            is_write_action
+            and name not in ("manage_jobs", "spawn_subagent")
+            and write_sig in executed_writes
+        ):
             return {
                 "error": (
                     "This exact action was already completed in this request; not repeating it."
@@ -1873,7 +1879,6 @@ class AgentCore:
             origin_channel=origin_channel,
             origin_user_id=origin_user_id,
             origin_chat_id=origin_chat_id,
-            parent_id=parent_state.get("run_id"),
         )
 
         if background:
@@ -2019,8 +2024,10 @@ class AgentCore:
             self.subagents.finish(run.run_id, "error", error=str(exc))
             await self._deliver_subagent_result(run, f"Subagent failed: {exc}")
             return
-        self.subagents.finish(run.run_id, "done", result=text)
-        await self._deliver_subagent_result(run, text)
+        # Only deliver the result if this completion is what finalised the run —
+        # a run cancelled in the final moment must not also post its result.
+        if self.subagents.finish(run.run_id, "done", result=text):
+            await self._deliver_subagent_result(run, text)
 
     async def _deliver_subagent_result(self, run: SubagentRun, text: str) -> None:
         """Post a background subagent's result to the chat that started it."""

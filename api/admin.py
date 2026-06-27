@@ -1468,6 +1468,9 @@ def create_admin_app(
             raise HTTPException(400, f"Invalid job type: {job_type}")
         if job_type != "memory_consolidation" and not task:
             raise HTTPException(400, "Task is required for agent/system/subagent jobs")
+        # Persona only applies to subagent jobs — don't persist a stray value on others.
+        if job_type != "subagent":
+            persona = ""
 
         if schedule == "cron":
             from core.scheduler import _parse_cron
@@ -1567,7 +1570,12 @@ def create_admin_app(
 
         import asyncio
 
-        from core.scheduler import run_agent_task, run_memory_consolidation, run_system_command
+        from core.scheduler import (
+            run_agent_task,
+            run_memory_consolidation,
+            run_subagent_task,
+            run_system_command,
+        )
 
         job_type = job.get("type", "agent")
         task = job.get("task", "")
@@ -1582,6 +1590,15 @@ def create_admin_app(
             asyncio.create_task(run_system_command(command=task))
         elif job_type == "memory_consolidation":
             asyncio.create_task(run_memory_consolidation())
+        elif job_type == "subagent":
+            asyncio.create_task(
+                run_subagent_task(
+                    persona=job.get("persona", ""),
+                    task=task,
+                    channel=channel_name,
+                    job_id=job_id,
+                )
+            )
         else:
             return HTMLResponse('<span class="alert-error">Unknown job type</span>')
 

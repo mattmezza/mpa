@@ -5,7 +5,7 @@
   <div class="card">
     <div class="flex items-center justify-between gap-2">
       <span class="font-medium text-xs break-all">{{ r.persona or 'default' }}</span>
-      <span class="{% if r.status == 'running' %}badge-ok{% elif r.status == 'error' %}badge-warn{% else %}badge-off{% endif %}">
+      <span class="{% if r.status in ('running', 'done') %}badge-ok{% elif r.status == 'error' %}badge-warn{% else %}badge-off{% endif %}">
         {{ r.status }}
       </span>
     </div>

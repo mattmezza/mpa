@@ -60,7 +60,6 @@ class SubagentRun:
     origin_channel: str = ""
     origin_user_id: str = ""
     origin_chat_id: str = ""
-    parent_id: str | None = None
     _task: asyncio.Task | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -73,22 +72,6 @@ class SubagentRun:
         if secs < 60:
             return f"{secs}s"
         return f"{secs // 60}m {secs % 60}s"
-
-    def to_dict(self) -> dict:
-        return {
-            "run_id": self.run_id,
-            "persona": self.persona,
-            "task": self.task,
-            "depth": self.depth,
-            "background": self.background,
-            "status": self.status,
-            "progress": self.progress,
-            "result": self.result,
-            "error": self.error,
-            "elapsed": round(self.elapsed, 1),
-            "elapsed_str": self.elapsed_str,
-            "parent_id": self.parent_id,
-        }
 
 
 class SubagentRegistry:
@@ -116,15 +99,19 @@ class SubagentRegistry:
         runs = [r for r in self._runs.values() if not active_only or r.status == "running"]
         return sorted(runs, key=lambda r: r.started_at, reverse=True)
 
-    def finish(self, run_id: str, status: str, *, result: str = "", error: str = "") -> None:
+    def finish(self, run_id: str, status: str, *, result: str = "", error: str = "") -> bool:
+        """Move a *running* run to a terminal state. Returns False (a no-op) when
+        the run is unknown or already finished, so a terminal state is sticky —
+        e.g. a late normal completion cannot overwrite a cancellation."""
         run = self._runs.get(run_id)
-        if not run:
-            return
+        if not run or run.status != "running":
+            return False
         run.status = status
         run.result = result
         run.error = error
         run.finished_at = time.time()
         self._trim()
+        return True
 
     def cancel(self, run_id: str) -> bool:
         """Request cancellation of a running subagent. Returns False if it is not

@@ -165,6 +165,23 @@ async def test_run_subagent_step_budget_stops_loop(agent) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_subagent_token_budget_stops_loop(agent) -> None:
+    agent.config.subagents.token_budget = 100
+    agent.config.subagents.max_steps = 100  # ensure the token budget is the limiter
+    call = LLMToolCall(id="1", name="web_search", arguments={"query": "q"})
+    # Each round reports 80 tokens; cumulative exceeds 100 after the second call.
+    agent.llm = _ScriptedLLM(
+        [
+            LLMResponse(text="", tool_calls=[call], usage={"input_tokens": 80, "output_tokens": 0})
+            for _ in range(10)
+        ]
+    )
+    result = await agent.run_subagent(task="loop")
+    assert result["ok"] is True
+    assert "budget" in result["result"].lower()
+
+
+@pytest.mark.asyncio
 async def test_run_subagent_background_reports_to_origin(agent) -> None:
     channel = AsyncMock()
     agent.channels["telegram"] = channel
@@ -196,6 +213,35 @@ async def test_run_subagent_background_respects_concurrency(agent) -> None:
     agent.subagents.register(SubagentRun(run_id="busy", persona="", task="t"))
     result = await agent.run_subagent(task="x", background=True)
     assert "concurrent" in result["error"].lower() or "max" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_spawn_subagent_not_deduplicated_in_turn(agent) -> None:
+    """Two identical spawns in one turn must both run (each is a distinct run)."""
+    from core.llm import LLMToolCall
+
+    agent.llm = _ScriptedLLM(
+        [LLMResponse(text="a", tool_calls=[]), LLMResponse(text="b", tool_calls=[])]
+    )
+    state = agent._new_request_state(
+        None, origin={"channel": "system", "user_id": "u", "chat_id": ""}
+    )
+    call = LLMToolCall(id="x", name="spawn_subagent", arguments={"task": "same task"})
+    r1 = await agent._execute_tool(call, "system", "u", state)
+    r2 = await agent._execute_tool(call, "system", "u", state)
+    assert r1.get("ok") is True
+    assert r2.get("ok") is True
+    assert r1["run_id"] != r2["run_id"]
+
+
+def test_finish_does_not_overwrite_terminal_state() -> None:
+    """A late normal completion cannot un-cancel a run."""
+    reg = SubagentRegistry()
+    reg.register(_run("a"))
+    assert reg.cancel("a") is True
+    assert reg.finish("a", "done", result="late") is False  # no-op
+    assert reg.get("a").status == "cancelled"
+    assert reg.get("a").result == ""
 
 
 def test_narrow_persona_intersects_scopes(agent) -> None:

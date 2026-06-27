@@ -133,6 +133,8 @@ async def run_subagent_task(
             await ch.send(owner, text)
         elif not ch:
             log.warning("Scheduler: channel %r not registered, subagent result dropped", channel)
+        elif not owner:
+            log.warning("Scheduler: no owner chat for channel %r, subagent result dropped", channel)
     except Exception:
         log.exception("Scheduler subagent task failed: %s", task[:100])
 
