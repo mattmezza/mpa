@@ -286,7 +286,11 @@ async def _channel_wizard_context(
     if channel == "telegram":
         bot_token = await config_store.get("channels.telegram.bot_token")
         user_ids = await config_store.get("channels.telegram.allowed_user_ids")
-        if bot_token:
+        # Vault-managed token (issue #35): mark it so the editor shows a read-only
+        # note instead of the input, and never ship the ref to the browser.
+        bot_token_vaulted = bool(bot_token) and str(bot_token).startswith("${vault:")
+        ctx["bot_token_vaulted"] = bot_token_vaulted  # type: ignore[assignment]
+        if bot_token and not bot_token_vaulted:
             ctx["bot_token"] = bot_token
         if user_ids:
             ctx["user_ids"] = user_ids
@@ -959,6 +963,13 @@ def create_admin_app(
         grok_base_url = await config_store.get("agent.grok_base_url") or ""
         deepseek_api_key = await config_store.get("agent.deepseek_api_key") or ""
         deepseek_base_url = await config_store.get("agent.deepseek_base_url") or ""
+        # Vault-managed keys (issue #35): show a read-only "in vault" note instead
+        # of the input, and don't ship the ref to the browser.
+        anthropic_vaulted = _is_vault_ref(anthropic_api_key)
+        openai_vaulted = _is_vault_ref(openai_api_key)
+        google_vaulted = _is_vault_ref(google_api_key)
+        grok_vaulted = _is_vault_ref(grok_api_key)
+        deepseek_vaulted = _is_vault_ref(deepseek_api_key)
         model = await config_store.get("agent.model") or "claude-4-6-sonnet"
         thinking_level = await config_store.get("agent.thinking_level") or ""
         extraction_provider = await config_store.get("memory.extraction_provider") or "anthropic"
@@ -999,14 +1010,19 @@ def create_admin_app(
         return _render_partial(
             "partials/llm.html",
             provider=provider,
-            anthropic_api_key=anthropic_api_key,
-            openai_api_key=openai_api_key,
+            anthropic_api_key="" if anthropic_vaulted else anthropic_api_key,
+            anthropic_vaulted=anthropic_vaulted,
+            openai_api_key="" if openai_vaulted else openai_api_key,
+            openai_vaulted=openai_vaulted,
             openai_base_url=openai_base_url,
-            google_api_key=google_api_key,
+            google_api_key="" if google_vaulted else google_api_key,
+            google_vaulted=google_vaulted,
             google_base_url=google_base_url,
-            grok_api_key=grok_api_key,
+            grok_api_key="" if grok_vaulted else grok_api_key,
+            grok_vaulted=grok_vaulted,
             grok_base_url=grok_base_url,
-            deepseek_api_key=deepseek_api_key,
+            deepseek_api_key="" if deepseek_vaulted else deepseek_api_key,
+            deepseek_vaulted=deepseek_vaulted,
             deepseek_base_url=deepseek_base_url,
             model=model,
             thinking_level=thinking_level,
@@ -1059,6 +1075,7 @@ def create_admin_app(
         gh_enabled = await config_store.get("tools.gh.enabled")
         gh_enabled = gh_enabled if gh_enabled is not None else "false"
         gh_token = await config_store.get("tools.gh.token") or ""
+        gh_token_vaulted = _is_vault_ref(gh_token)
 
         browser_enabled = await config_store.get("tools.browser.enabled")
         browser_enabled = browser_enabled if browser_enabled is not None else "false"
@@ -1077,7 +1094,8 @@ def create_admin_app(
             "partials/tools.html",
             tools=tool_registry(),
             gh_enabled=gh_enabled,
-            gh_token=gh_token,
+            gh_token="" if gh_token_vaulted else gh_token,
+            gh_token_vaulted=gh_token_vaulted,
             browser_enabled=browser_enabled,
             browser_headless=browser_headless,
             browser_cdp=browser_cdp,
@@ -1184,12 +1202,14 @@ def create_admin_app(
         enabled = await config_store.get("search.enabled") or "false"
         provider = await config_store.get("search.provider") or "tavily"
         api_key = await config_store.get("search.api_key") or ""
+        api_key_vaulted = _is_vault_ref(api_key)
         max_results = await config_store.get("search.max_results") or "5"
         return _render_partial(
             "partials/search.html",
             enabled=enabled,
             provider=provider,
-            api_key=api_key,
+            api_key="" if api_key_vaulted else api_key,
+            api_key_vaulted=api_key_vaulted,
             max_results=max_results,
         )
 
@@ -2056,14 +2076,18 @@ def create_admin_app(
         user_ids = str(body.get("user_ids", "")).strip()
         enabled = str(body.get("enabled", "true")).lower() == "true"
         topics_enabled = bool(body.get("topics_enabled", False))
-        if not bot_token:
+        # When the token lives in the vault the editor submits an empty field —
+        # treat the existing ${vault:} ref as "present" and leave it untouched.
+        token_is_vaulted = _is_vault_ref(await config_store.get("channels.telegram.bot_token"))
+        if not bot_token and not token_is_vaulted:
             raise HTTPException(400, "Bot token is required")
         values = {
             "channels.telegram.enabled": str(enabled).lower(),
-            "channels.telegram.bot_token": bot_token,
             "channels.telegram.allowed_user_ids": user_ids,
             "channels.telegram.topics_enabled": str(topics_enabled).lower(),
         }
+        if bot_token:  # only overwrite when a real new token was typed
+            values["channels.telegram.bot_token"] = bot_token
         await config_store.set_many(values)
         channel_data = await _channel_list_context(config_store, wacli)
         return _render_partial("partials/channels.html", **channel_data)

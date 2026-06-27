@@ -501,3 +501,42 @@ async def test_patch_config_preserves_vault_ref(tmp_path) -> None:
         headers=_auth(),
     )
     assert await cs.get("agent.anthropic_api_key") == "sk-new-plaintext"
+
+
+# ── Safe UI collapse (issue #35) ───────────────────────────────────────────
+
+
+async def test_llm_tab_collapses_vaulted_key(admin_client) -> None:
+    client, _s, cs = admin_client
+    await cs.set("agent.anthropic_api_key", "${vault:ANTHROPIC_API_KEY}")
+    body = client.get("/partials/llm", headers=_auth()).text
+    assert "Stored in the" in body  # read-only vault note shown
+    assert "${vault:ANTHROPIC_API_KEY}" not in body  # ref never shipped to the browser
+    assert 'x-model="openaiKey"' in body  # other providers still editable
+
+
+async def test_tools_and_search_collapse_vaulted(admin_client) -> None:
+    client, _s, cs = admin_client
+    await cs.set("tools.gh.token", "${vault:GH_TOKEN}")
+    await cs.set("search.api_key", "${vault:TAVILY_API_KEY}")
+    tools = client.get("/partials/tools", headers=_auth()).text
+    assert "Stored in the" in tools and "${vault:GH_TOKEN}" not in tools
+    assert 'x-model="ghToken"' not in tools  # input replaced by the note
+    search = client.get("/partials/search", headers=_auth()).text
+    assert "Stored in the" in search and "${vault:TAVILY_API_KEY}" not in search
+
+
+async def test_telegram_editor_and_save_preserve_vaulted_token(admin_client) -> None:
+    client, _s, cs = admin_client
+    await cs.set("channels.telegram.bot_token", "${vault:TELEGRAM_BOT_TOKEN}")
+    editor = client.get("/channels/wizard?channel=telegram", headers=_auth()).text
+    assert "Secrets" in editor and "${vault:TELEGRAM_BOT_TOKEN}" not in editor
+    # Saving with an empty token field must NOT 400 and must keep the ref.
+    resp = client.post(
+        "/channels/telegram",
+        json={"bot_token": "", "user_ids": "42", "enabled": "true"},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200
+    assert await cs.get("channels.telegram.bot_token") == "${vault:TELEGRAM_BOT_TOKEN}"
+    assert await cs.get("channels.telegram.allowed_user_ids") == "42"
