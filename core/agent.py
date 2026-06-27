@@ -369,6 +369,20 @@ def scoped_tools(persona: Persona | None) -> list[dict]:
     return [t for t in TOOLS if persona.allows_tool(t["name"]) or t["name"] in _always]
 
 
+def apply_feature_gates(
+    tools: list[dict], *, secrets_available: bool, artifacts_enabled: bool
+) -> list[dict]:
+    """Drop tools whose backing feature is unavailable/disabled, so the model is
+    never offered a capability it can't use (defence in depth — the tool handlers
+    also refuse). Disabling ``artifacts`` here means no persona can call it."""
+    out = tools
+    if not secrets_available:
+        out = [t for t in out if t["name"] not in ("list_secrets", "request_secret")]
+    if not artifacts_enabled:
+        out = [t for t in out if t["name"] != "write_artifact"]
+    return out
+
+
 class AgentCore:
     def __init__(self, config: Config, secret_store: SecretStore | None = None):
         self.config = config
@@ -470,9 +484,11 @@ class AgentCore:
         # Resolve the active persona (its identity, skills + tool scope) — a
         # per-chat binding wins over the globally selected persona (#14).
         persona = await self._resolve_persona(channel, user_id, chat_id)
-        tools = scoped_tools(persona)
-        if self.secret_store is None:
-            tools = [t for t in tools if t["name"] not in ("list_secrets", "request_secret")]
+        tools = apply_feature_gates(
+            scoped_tools(persona),
+            secrets_available=self.secret_store is not None,
+            artifacts_enabled=self.config.artifacts.enabled,
+        )
 
         # Static system prompt. In session mode it is snapshotted once at the
         # start of the session and reused for every turn (so the static content

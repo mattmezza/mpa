@@ -335,3 +335,31 @@ def test_publishing_file_requires_approval(tmp_path) -> None:
 
     assert engine.check("write_artifact", publish) == PermissionLevel.ASK
     assert engine.is_write_action("write_artifact", publish) is True
+
+
+# -- global disable removes the tool everywhere --------------------------------
+
+
+def test_disabled_drops_write_artifact_from_llm_tools() -> None:
+    from core.agent import TOOLS, apply_feature_gates
+
+    def names(ts):
+        return {t["name"] for t in ts}
+
+    assert "write_artifact" in names(
+        apply_feature_gates(TOOLS, secrets_available=True, artifacts_enabled=True)
+    )
+    assert "write_artifact" not in names(
+        apply_feature_gates(TOOLS, secrets_available=True, artifacts_enabled=False)
+    )
+    # The secrets gate still composes independently.
+    no_secrets = names(apply_feature_gates(TOOLS, secrets_available=False, artifacts_enabled=True))
+    assert "list_secrets" not in no_secrets and "request_secret" not in no_secrets
+
+
+def test_disabled_hides_write_artifact_from_persona_scope() -> None:
+    from api.admin import GATEABLE_TOOLS, gateable_tools_for
+
+    assert "write_artifact" in gateable_tools_for(True)
+    assert set(gateable_tools_for(True)) == set(GATEABLE_TOOLS)
+    assert "write_artifact" not in gateable_tools_for(False)

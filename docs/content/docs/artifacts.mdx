@@ -85,6 +85,8 @@ artifacts:
   ttl_hours: 168               # default lifetime; agent may override per artifact (0 = forever)
 ```
 
-Set `enabled: false` to turn the feature off entirely: the tool refuses to write and the
-`/artifacts/<id>/` route returns 404 for everything. These keys are editable from the admin
-**Config** tab, and `write_artifact` can be allowed/denied per persona in the persona editor.
+These settings are managed from the admin **Tools** tab (enable/disable, directory, default
+TTL). Setting `enabled: false` turns the feature off **entirely**: `write_artifact` is hidden
+from the assistant *and* from the Personae tool-scope UI, no persona can call it, and every
+`/artifacts/<id>/` link returns 404. When enabled, allow or deny it per persona in the
+**Personae** editor.
