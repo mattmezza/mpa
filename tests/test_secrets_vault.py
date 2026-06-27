@@ -435,3 +435,69 @@ async def test_wizard_secrets_step_generates_key_and_imports(tmp_path, monkeypat
     assert r.status_code == 200
     assert await cs.get("agent.anthropic_api_key") == "${vault:ANTHROPIC_API_KEY}"
     assert await s.get_infra_secret("ANTHROPIC_API_KEY") == "sk-plaintext"
+
+
+# ── Post-setup migration (issue #35) ───────────────────────────────────────
+
+
+async def _migrate_app(tmp_path, *, machine_key="mk"):
+    db = str(tmp_path / "config.db")
+    cs = ConfigStore(db_path=db)
+    await cs.set_setup_step("done")
+    await cs.set_admin_password("testpw")
+    await cs.set("agent.personae_db_path", str(tmp_path / "personae.db"))
+    await cs.set("agent.personae_dir", "")
+    s = SecretStore(db_path=db, infra_vault=InfraVault(machine_key))
+    await s.ensure_wrapped_dek("testpw")
+    app, _ = create_admin_app(AgentState(), cs, secret_store=s)
+    return TestClient(app), s, cs
+
+
+async def test_post_setup_migrate_endpoint(tmp_path) -> None:
+    client, s, cs = await _migrate_app(tmp_path)
+    await cs.set("agent.anthropic_api_key", "sk-plaintext")
+    await cs.set("search.api_key", "tvly-plaintext")
+    await cs.set("agent.openai_api_key", "${vault:OPENAI_API_KEY}")  # already a ref → skip
+    resp = client.post("/admin/secrets/migrate", headers=_auth())
+    assert resp.status_code == 200 and "Migrated 2 credential(s)" in resp.text
+    # Plaintext values never echoed back into the rendered partial.
+    assert "sk-plaintext" not in resp.text and "tvly-plaintext" not in resp.text
+    assert await cs.get("agent.anthropic_api_key") == "${vault:ANTHROPIC_API_KEY}"
+    assert await cs.get("search.api_key") == "${vault:TAVILY_API_KEY}"
+    assert await s.get_infra_secret("ANTHROPIC_API_KEY") == "sk-plaintext"
+    assert await s.get_infra_secret("TAVILY_API_KEY") == "tvly-plaintext"
+    # Idempotent: a second run finds nothing left to move.
+    resp2 = client.post("/admin/secrets/migrate", headers=_auth())
+    assert "Nothing to migrate" in resp2.text
+
+
+async def test_migrate_endpoint_requires_machine_key(tmp_path) -> None:
+    client, _s, cs = await _migrate_app(tmp_path, machine_key=None)
+    await cs.set("agent.anthropic_api_key", "sk-plaintext")
+    resp = client.post("/admin/secrets/migrate", headers=_auth())
+    assert resp.status_code == 200 and "No machine key configured" in resp.text
+    # Untouched — no half-migration without a key.
+    assert await cs.get("agent.anthropic_api_key") == "sk-plaintext"
+
+
+async def test_patch_config_preserves_vault_ref(tmp_path) -> None:
+    # A collapsed (vault-managed) field submits empty; the ref must survive.
+    client, s, cs = await _migrate_app(tmp_path)
+    await s.set_infra_secret("ANTHROPIC_API_KEY", "sk-real")
+    await cs.set("agent.anthropic_api_key", "${vault:ANTHROPIC_API_KEY}")
+    resp = client.patch(
+        "/config",
+        json={"values": {"agent.anthropic_api_key": "", "agent.model": "claude-x"}},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200
+    assert "agent.anthropic_api_key" not in resp.json()["updated"]  # dropped, not written
+    assert await cs.get("agent.anthropic_api_key") == "${vault:ANTHROPIC_API_KEY}"
+    assert await cs.get("agent.model") == "claude-x"  # non-secret still saved
+    # Re-entering a real key still works (guard only drops blank/echoed writes).
+    client.patch(
+        "/config",
+        json={"values": {"agent.anthropic_api_key": "sk-new-plaintext"}},
+        headers=_auth(),
+    )
+    assert await cs.get("agent.anthropic_api_key") == "sk-new-plaintext"

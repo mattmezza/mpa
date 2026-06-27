@@ -2903,6 +2903,8 @@ def create_admin_app(
             await persona_store.upsert(p)
 
     async def _secrets_ctx() -> dict:
+        from core.secret_store import INFRA_VAULT_KEYS
+
         persona_store = await _persona_store_from_config(config_store)
         personae = await persona_store.list_personae()
         meta = await secret_store.list_secret_meta()
@@ -2910,6 +2912,12 @@ def create_admin_app(
             holders = [p.name for p in personae if m["name"] in p.secrets]
             m["holders"] = holders
             m["personae"] = "all" if m["shared"] else (", ".join(holders) if holders else "—")
+        # Credential keys still holding a plaintext value (migratable to the vault).
+        migratable = []
+        for cfg_key in INFRA_VAULT_KEYS:
+            val = await config_store.get(cfg_key)
+            if val and not val.startswith("${"):
+                migratable.append(cfg_key)
         return {
             "configured": True,
             "unsealed": secret_store.persona_unsealed(),
@@ -2917,6 +2925,7 @@ def create_admin_app(
             "secrets": meta,
             "infra": await secret_store.list_infra_names(),
             "personae": [p.name for p in personae],
+            "migratable": migratable,
         }
 
     def _no_vault_partial() -> HTMLResponse:
@@ -2927,6 +2936,31 @@ def create_admin_app(
         if secret_store is None:
             return _no_vault_partial()
         return _render_partial("partials/secrets.html", **(await _secrets_ctx()))
+
+    @app.post("/admin/secrets/migrate", response_class=HTMLResponse, dependencies=[Depends(auth)])
+    async def migrate_secrets() -> HTMLResponse:
+        """Move any still-plaintext credentials onto the infra vault (issue #35).
+
+        The non-destructive, post-setup counterpart of the wizard's import step:
+        existing installs can collapse their scattered LLM/Telegram/Tavily/gh
+        credentials into the vault without re-running setup. Idempotent.
+        """
+        if secret_store is None:
+            return _no_vault_partial()
+        from core.secret_store import migrate_config_to_infra_vault
+
+        ctx = await _secrets_ctx()
+        if not secret_store.infra.available:
+            ctx["error"] = "No machine key configured (set MPA_MASTER_KEY or generate one)."
+            return _render_partial("partials/secrets.html", **ctx)
+        migrated = await migrate_config_to_infra_vault(config_store, secret_store)
+        ctx = await _secrets_ctx()
+        ctx["flash"] = (
+            f"Migrated {len(migrated)} credential(s) into the vault."
+            if migrated
+            else "Nothing to migrate — all credentials already reference the vault."
+        )
+        return _render_partial("partials/secrets.html", **ctx)
 
     @app.post("/admin/secrets", response_class=HTMLResponse, dependencies=[Depends(auth)])
     async def add_secret(request: Request) -> HTMLResponse:
