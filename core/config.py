@@ -77,6 +77,11 @@ class AgentConfig(BaseModel):
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
     skills_db_path: str = "data/skills.db"
+    # How the skills index reaches the model (#50):
+    #   "inject"    — the full index rides every turn's preamble (default; unchanged)
+    #   "on_demand" — the preamble omits it; the model calls search_skills/list_skills
+    # Any unrecognised value falls back to "inject" (the safe default).
+    skills_index_mode: str = "inject"
     personae_dir: str = "personae/"
     personae_db_path: str = "data/personae.db"
     active_persona: str = ""  # empty = default identity (character/personalia below)

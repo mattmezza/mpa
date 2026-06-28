@@ -83,7 +83,14 @@ def test_gateable_tools_in_sync_with_tools() -> None:
     from api.admin import GATEABLE_TOOLS
     from core.agent import TOOLS
 
-    always_on = {"load_skill", "recall_memory", "list_secrets", "request_secret"}
+    always_on = {
+        "load_skill",
+        "search_skills",
+        "list_skills",
+        "recall_memory",
+        "list_secrets",
+        "request_secret",
+    }
     assert set(GATEABLE_TOOLS) | always_on == {t["name"] for t in TOOLS}
 
 

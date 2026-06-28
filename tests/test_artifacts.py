@@ -347,13 +347,21 @@ def test_disabled_drops_write_artifact_from_llm_tools() -> None:
         return {t["name"] for t in ts}
 
     assert "write_artifact" in names(
-        apply_feature_gates(TOOLS, secrets_available=True, artifacts_enabled=True)
+        apply_feature_gates(
+            TOOLS, secrets_available=True, artifacts_enabled=True, skills_on_demand=False
+        )
     )
     assert "write_artifact" not in names(
-        apply_feature_gates(TOOLS, secrets_available=True, artifacts_enabled=False)
+        apply_feature_gates(
+            TOOLS, secrets_available=True, artifacts_enabled=False, skills_on_demand=False
+        )
     )
     # The secrets gate still composes independently.
-    no_secrets = names(apply_feature_gates(TOOLS, secrets_available=False, artifacts_enabled=True))
+    no_secrets = names(
+        apply_feature_gates(
+            TOOLS, secrets_available=False, artifacts_enabled=True, skills_on_demand=False
+        )
+    )
     assert "list_secrets" not in no_secrets and "request_secret" not in no_secrets
 
 

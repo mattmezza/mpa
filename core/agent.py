@@ -28,7 +28,7 @@ from core.memory import MemoryStore
 from core.models import AgentResponse, Attachment
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
 from core.personae import Persona, PersonaStore
-from core.prompt_builder import build_prompt_sections
+from core.prompt_builder import SKILLS_DISCOVERY_POINTER, build_prompt_sections
 from core.scheduler import AgentScheduler
 from core.secret_store import SecretStore
 from core.skills import SkillsEngine
@@ -197,6 +197,41 @@ TOOLS = [
             },
             "required": ["name"],
         },
+    },
+    # Skill discovery (#50) — only advertised when skills_index_mode == "on_demand"
+    # (the full index is NOT injected then). Return name + summary, never bodies;
+    # the model then calls load_skill to read the chosen skill in full.
+    {
+        "name": "search_skills",
+        "description": (
+            "Find skills relevant to the current task. Returns the top matching skills "
+            "as name + summary (NOT their full content). Pass a short natural-language "
+            "query or keywords describing what you need to do, then call `load_skill` "
+            "with a returned name to read that skill's full instructions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What you want to do (keywords or a short phrase)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max skills to return (default 10).",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "list_skills",
+        "description": (
+            "List every skill available to you as name + summary (NOT full content). "
+            "Use this to browse the whole catalogue; prefer `search_skills` when you "
+            "know what you're after. Call `load_skill` with a name to read one in full."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "recall_memory",
@@ -493,9 +528,19 @@ def scoped_tools(persona: Persona | None) -> list[dict]:
         return TOOLS
     # ``load_skill`` and the vault discovery/request tools are always retained:
     # they are the mechanics personae rely on to read skills and obtain secrets.
-    # ``recall_memory`` too — memory is injected for every persona (scope-filtered),
-    # so its on-demand counterpart exposes nothing extra and stays available (#47).
-    _always = {"load_skill", "recall_memory", "list_secrets", "request_secret"}
+    # ``search_skills``/``list_skills`` mirror ``load_skill`` (a persona needs them
+    # to discover its own allowlisted skills in on-demand mode — #50); the feature
+    # gate below still drops them when that mode is off. ``recall_memory`` too —
+    # memory is injected for every persona (scope-filtered), so its on-demand
+    # counterpart exposes nothing extra and stays available (#47).
+    _always = {
+        "load_skill",
+        "search_skills",
+        "list_skills",
+        "recall_memory",
+        "list_secrets",
+        "request_secret",
+    }
     return [t for t in TOOLS if persona.allows_tool(t["name"]) or t["name"] in _always]
 
 
@@ -504,16 +549,21 @@ def apply_feature_gates(
     *,
     secrets_available: bool,
     artifacts_enabled: bool,
+    skills_on_demand: bool,
     subagents_enabled: bool = True,
 ) -> list[dict]:
     """Drop tools whose backing feature is unavailable/disabled, so the model is
     never offered a capability it can't use (defence in depth — the tool handlers
-    also refuse). Disabling ``artifacts`` here means no persona can call it."""
+    also refuse). Disabling ``artifacts`` here means no persona can call it. The
+    skill-discovery tools are offered only in on-demand index mode (#50); in the
+    default inject mode the full index is already in context, so they'd be noise."""
     out = tools
     if not secrets_available:
         out = [t for t in out if t["name"] not in ("list_secrets", "request_secret")]
     if not artifacts_enabled:
         out = [t for t in out if t["name"] != "write_artifact"]
+    if not skills_on_demand:
+        out = [t for t in out if t["name"] not in ("search_skills", "list_skills")]
     if not subagents_enabled:
         out = [t for t in out if t["name"] != "spawn_subagent"]
     return out
@@ -655,6 +705,7 @@ class AgentCore:
             scoped_tools(persona),
             secrets_available=self.secret_store is not None,
             artifacts_enabled=self.config.artifacts.enabled,
+            skills_on_demand=self.config.agent.skills_index_mode == "on_demand",
             subagents_enabled=self.config.subagents.enabled,
         )
 
@@ -804,16 +855,26 @@ class AgentCore:
         # turns: any of those that drop or change the block simply won't find it,
         # and the failure direction is a harmless re-send, never a blind turn.
         # Injection mode and tests pass ``None`` → always include.
+        # On-demand mode (#50): omit the full index; carry only a short, static
+        # pointer to the search_skills/list_skills tools. The pointer is identical
+        # every turn, so the same history gate that dedups the index also dedups it
+        # (sent once per session, re-sent after a /new/compaction).
         try:
-            skills_index = await self.skills.get_index_block(
-                allow=persona.skills if persona else None
-            )
-            if skills_index:
-                block = f"<available_skills>\n{skills_index}\n</available_skills>"
-                if session_key is None or not await self._skills_block_in_history(
-                    session_key, block
-                ):
-                    preamble += f"\n\n{block}"
+            if self.config.agent.skills_index_mode == "on_demand":
+                block = f"<available_skills>\n{SKILLS_DISCOVERY_POINTER}\n</available_skills>"
+            else:
+                skills_index = await self.skills.get_index_block(
+                    allow=persona.skills if persona else None
+                )
+                block = (
+                    f"<available_skills>\n{skills_index}\n</available_skills>"
+                    if skills_index
+                    else ""
+                )
+            if block and (
+                session_key is None or not await self._skills_block_in_history(session_key, block)
+            ):
+                preamble += f"\n\n{block}"
         except Exception:
             log.exception("Failed to load skills index for turn preamble")
 
@@ -1486,6 +1547,23 @@ class AgentCore:
             if not content:
                 return {"error": f"Skill not found: {skill_name}"}
             return {"name": skill_name, "content": content}
+
+        if name == "search_skills":
+            query = str(params.get("query", "")).strip()
+            log.info("Tool call: search_skills — %r", query)
+            allowed = (request_state or {}).get("allowed_skills")
+            limit = params.get("limit")
+            try:
+                limit = int(limit) if limit else 10
+            except TypeError, ValueError:
+                limit = 10
+            matches = await self.skills.search_index(query, allow=allowed, limit=max(1, limit))
+            return {"skills": matches}
+
+        if name == "list_skills":
+            log.info("Tool call: list_skills")
+            allowed = (request_state or {}).get("allowed_skills")
+            return {"skills": await self.skills.index_entries(allow=allowed)}
 
         if name == "recall_memory":
             return await self._tool_recall_memory(params, request_state)

@@ -30,6 +30,17 @@ Never guess at command syntax — always refer to the skill file.
 You may create or update skills using the `skills.py` CLI
 after loading the `skill-creator` skill."""
 
+# Shown instead of the full skills index when ``agent.skills_index_mode`` is
+# "on_demand" (#50). Mirrors the <secrets> pointer: advertise the discovery tool,
+# not the whole list — the model pulls matches lazily via search_skills.
+SKILLS_DISCOVERY_POINTER = (
+    "Skills (reusable instructions for specific tasks) are available but not listed "
+    "here, to keep this prompt small. When a request might need one, call the "
+    "`search_skills` tool with a short query to find matching skills (returns name + "
+    "summary), or `list_skills` to browse them all. Then call `load_skill` with a "
+    "name to read that skill's full instructions before acting."
+)
+
 DEFAULT_HISTORY_HANDLING_BLOCK = """Previous messages in this conversation
 have already been handled.
 Always focus exclusively on the latest user message as the current, active request.
@@ -117,6 +128,7 @@ def build_prompt_sections(
     include_memories: bool = True,
     include_reflections: bool = True,
     include_skills: bool = True,
+    skills_on_demand: bool = False,
 ) -> PromptSections:
     """Build all prompt sections with current config and dynamic context.
 
@@ -196,7 +208,9 @@ def build_prompt_sections(
         memory_section = f"<memories>\n{memories}\n</memories>"
 
     skills_section = ""
-    if include_skills and skills_index:
+    if skills_on_demand:
+        skills_section = f"<available_skills>\n{SKILLS_DISCOVERY_POINTER}\n</available_skills>"
+    elif include_skills and skills_index:
         skills_section = f"<available_skills>\n{skills_index}\n</available_skills>"
 
     reflections_section = ""
