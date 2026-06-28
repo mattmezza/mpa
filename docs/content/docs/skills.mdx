@@ -14,6 +14,8 @@ Skills are the central design idea of MPA. Instead of hardcoding how each integr
 3. The LLM reads the skill documentation and constructs the correct CLI commands
 4. Commands are executed via the tool executor with permission checks
 
+By default the **whole index** rides every turn. As the catalogue grows you can switch to [on-demand discovery](#serving-the-index-on-demand) so the model fetches only the entries it needs.
+
 This means adding a new capability is as simple as writing a markdown file. No Python code changes needed.
 
 ## Built-in skills
@@ -160,6 +162,38 @@ show up on the next turn without a `/new`:
 
 The model picks a skill from the index, then calls `load_skill` to pull its full
 content.
+
+## Serving the index on-demand
+
+Injecting the full index every turn is fine at a few dozen skills, but it does not
+scale indefinitely — every allowed skill's `name: summary` line sits in context
+whether or not the current request needs it. When the catalogue grows, switch the
+index to **on-demand** mode:
+
+```yaml
+agent:
+  skills_index_mode: "on_demand"   # default: "inject"
+```
+
+In on-demand mode the `<available_skills>` block carries only a short pointer
+instead of the full list, and the model pulls entries lazily through two tools —
+exactly how the secrets vault advertises `list_secrets` rather than dumping every
+secret name into the prompt:
+
+| Tool | Returns |
+|------|---------|
+| `search_skills(query, limit?)` | The top matching skills as `name + summary` (keyword-ranked over name and summary) |
+| `list_skills()` | Every available skill as `name + summary` (browse the whole catalogue) |
+
+Both are scoped to the active persona's skill allowlist, the same scope that
+`load_skill` enforces — a persona never discovers a skill it can't load. The flow
+becomes: `search_skills` → pick a name → `load_skill` → act. This extends the
+existing lazy pattern (bodies are already loaded on demand) up one level to the
+index itself.
+
+`"inject"` stays the default, so behaviour is unchanged until you opt in. The two
+discovery tools are only offered in on-demand mode; in inject mode the full index
+is already in context, so they would be redundant.
 
 ## Tips for writing good skills
 
