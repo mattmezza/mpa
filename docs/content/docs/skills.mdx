@@ -125,7 +125,7 @@ class SkillsEngine:
         return "\n\n".join(sections)
 ```
 
-Skills are wrapped in `<skill>` XML tags and injected into the `<available_skills>` block of the system prompt. The LLM uses these to construct correct CLI commands.
+Skills are advertised in the `<available_skills>` block, which is rebuilt fresh each turn and injected at the start of the user message (alongside the live date/time and memories), not baked into the snapshotted static prompt. So a skill created mid-session — e.g. via the skill-creator skill — is visible to the model on the very next turn without a `/new`. The LLM uses the index to pick a skill, then `load_skill` pulls its full content to construct correct CLI commands.
 
 ## System prompt integration
 
