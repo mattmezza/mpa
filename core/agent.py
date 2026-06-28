@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import shlex
+import time
 import uuid
 from collections import OrderedDict, deque
 from datetime import datetime
@@ -29,6 +30,7 @@ from core.models import AgentResponse, Attachment
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
 from core.personae import Persona, PersonaStore
 from core.prompt_builder import SKILLS_DISCOVERY_POINTER, build_prompt_sections
+from core.reply_decision import should_reply
 from core.scheduler import AgentScheduler
 from core.secret_store import SecretStore
 from core.skills import SkillsEngine
@@ -619,6 +621,12 @@ class AgentCore:
         self.prompt_capture: deque[dict[str, str]] = deque(maxlen=20)
         # Vision fallback caption cache (image hash -> "[Image: ...]"), LRU-bounded.
         self._vision_cache: OrderedDict[str, str] = OrderedDict()
+        # Reply-decision rate-limit backstop (#36): recent auto-reply timestamps
+        # per (channel, chat_id). In-memory, resets on restart — a runaway loop
+        # is transient, so persistence would be over-engineering.
+        # ponytail: unbounded keys if you have thousands of distinct chats;
+        # prune oldest keys if that ever shows up in memory.
+        self._reply_times: dict[tuple[str, str], list[float]] = {}
 
         # Web search (Tavily)
         if config.search.enabled and config.search.api_key:
@@ -680,6 +688,33 @@ class AgentCore:
             persona = await self._load_persona(persona_name)
         else:
             persona = await self._resolve_persona(channel, user_id, chat_id)
+
+        # Reply decision (#36): in a shared/group chat, stay quiet for messages
+        # aimed at someone else or caught in a bot-to-bot reaction loop. Off by
+        # default; never gates 1:1 chats (group_only) or scheduler/system turns.
+        # A hard per-chat rate cap backstops the LLM gate so a runaway loop
+        # always terminates even if the gate keeps voting "reply". Returns an
+        # empty response so the channel sends nothing.
+        rd_cfg = self.config.reply_decision
+        if (
+            rd_cfg.enabled
+            and channel != "system"
+            and (not rd_cfg.group_only or self._is_group_chat(user_id, chat_id))
+        ):
+            if self._reply_rate_exceeded(channel, chat_id, rd_cfg):
+                log.warning(
+                    "Reply suppressed: rate cap %d/%ds hit for chat=%s channel=%s",
+                    rd_cfg.max_replies_per_window,
+                    rd_cfg.window_seconds,
+                    chat_id,
+                    channel,
+                )
+                return AgentResponse(text="")
+            identity = persona.name if persona else "the assistant"
+            llm = self._background_llm(rd_cfg.provider, rd_cfg.thinking_level)
+            if not await should_reply(llm, rd_cfg.model, message, identity):
+                return AgentResponse(text="")
+            self._record_reply(channel, chat_id)
 
         # Per-turn preamble: live date/time + fresh memory/reflections + skills
         # index + plan. Memory is scoped to the active persona (#42): shared +
@@ -2653,6 +2688,31 @@ class AgentCore:
         except Exception:
             log.exception("Failed to build embedding client; disabling semantic memory")
             return None
+
+    def _is_group_chat(self, user_id: str, chat_id: str) -> bool:
+        """Heuristic: a chat whose id differs from the user id is a group (#36).
+
+        Telegram private chats use the user's own id as the chat id, and a
+        WhatsApp DM falls back to the sender as chat_id — so ``chat_id == user_id``
+        marks a 1:1 chat. Anything else (a negative Telegram group id, a
+        ``"<chat>:<thread>"`` topic, a ``"...@g.us"`` WhatsApp jid) is shared.
+        ponytail: a convention, not a protocol guarantee — if a channel ever
+        sets chat_id == user_id for a real group, thread an explicit is_group
+        flag through process() instead.
+        """
+        return bool(chat_id) and chat_id != user_id
+
+    def _reply_rate_exceeded(self, channel: str, chat_id: str, cfg) -> bool:
+        """True if this chat already hit its auto-reply cap in the rolling window."""
+        now = time.time()
+        key = (channel, chat_id)
+        recent = [t for t in self._reply_times.get(key, []) if now - t < cfg.window_seconds]
+        self._reply_times[key] = recent  # also prunes expired timestamps
+        return len(recent) >= cfg.max_replies_per_window
+
+    def _record_reply(self, channel: str, chat_id: str) -> None:
+        """Record that an auto-reply went out, for the rate-limit backstop (#36)."""
+        self._reply_times.setdefault((channel, chat_id), []).append(time.time())
 
     async def _maybe_decompose(self, message: str) -> DecomposedGoal | None:
         """Classify and optionally decompose a user message into sub-goals.

@@ -125,7 +125,10 @@ class WhatsAppChannel:
             user_id=sender,
             chat_id=chat_id,
         )
-        await self.send(sender, response.text)
+        # Empty text means "no reply" (e.g. the reply-decision gate, #36) — stay
+        # silent rather than sending a blank WhatsApp message.
+        if response.text:
+            await self.send(sender, response.text)
         if getattr(response, "system_notice", None):
             await self.send(sender, response.system_notice)
         return {"ok": True}
