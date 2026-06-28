@@ -271,6 +271,7 @@
           <th class="w-20">Category</th>
           <th class="w-24">Subject</th>
           <th>Content</th>
+          <th class="w-24">Scope</th>
           <th class="w-10"></th>
         </tr>
       </thead>
@@ -281,6 +282,7 @@
           <td class="text-xs">{{ m.category }}</td>
           <td class="text-xs">{{ m.subject }}</td>
           <td class="text-xs break-all">{{ m.content }}</td>
+          <td class="text-xs">{% if m.scope %}{{ m.scope }}{% else %}<span class="text-muted">shared</span>{% endif %}</td>
           <td>
             <button class="btn-danger btn-sm"
                     hx-post="/memory/delete" hx-target="#tab-content" hx-swap="innerHTML"
@@ -292,7 +294,7 @@
         </tr>
         {% endfor %}
         {% if not long_term %}
-        <tr><td colspan="5" class="text-muted text-xs text-center py-4">No long-term memories</td></tr>
+        <tr><td colspan="6" class="text-muted text-xs text-center py-4">No long-term memories</td></tr>
         {% endif %}
       </tbody>
     </table>
@@ -306,6 +308,7 @@
         <tr>
           <th class="w-10">ID</th>
           <th>Content</th>
+          <th class="w-24">Scope</th>
           <th class="w-32">Expires</th>
           <th class="w-10"></th>
         </tr>
@@ -315,6 +318,7 @@
         <tr>
           <td class="text-xs">{{ m.id }}</td>
           <td class="text-xs break-all">{{ m.content }}</td>
+          <td class="text-xs">{% if m.scope %}{{ m.scope }}{% else %}<span class="text-muted">shared</span>{% endif %}</td>
           <td class="text-xs">{{ m.expires_at }}</td>
           <td>
             <button class="btn-danger btn-sm"
@@ -327,7 +331,7 @@
         </tr>
         {% endfor %}
         {% if not short_term %}
-        <tr><td colspan="4" class="text-muted text-xs text-center py-4">No active short-term memories</td></tr>
+        <tr><td colspan="5" class="text-muted text-xs text-center py-4">No active short-term memories</td></tr>
         {% endif %}
       </tbody>
     </table>
