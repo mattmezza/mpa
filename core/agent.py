@@ -437,6 +437,12 @@ class AgentCore:
         config_db = "data/config.db"
         self.permissions = PermissionEngine(db_path=config_db)
         self.prompt_capture: deque[dict[str, str]] = deque(maxlen=20)
+        # Per-session hash of the last skills index sent in the preamble (#46
+        # follow-up). In session mode the index is re-sent only when it changed
+        # since the previous turn; between changes the model still sees the prior
+        # copy in replayed history. Keyed by (channel, user_id, chat_id); cleared
+        # on /new and on compaction (both can drop the old copy from view).
+        self._last_skills_hash: dict[tuple[str, str, str], str] = {}
         # Vision fallback caption cache (image hash -> "[Image: ...]"), LRU-bounded.
         self._vision_cache: OrderedDict[str, str] = OrderedDict()
 
@@ -478,6 +484,8 @@ class AgentCore:
                 await self.history.clear_session(channel, user_id, chat_id)
             else:
                 await self.history.clear(channel, user_id, chat_id)
+            # Drop the skills-index hash so a fresh session re-sends it next turn.
+            self._last_skills_hash.pop((channel, user_id, chat_id), None)
             log.info(
                 "Conversation cleared by user (channel=%s, user=%s, chat=%s)",
                 channel,
@@ -504,8 +512,13 @@ class AgentCore:
         # Per-turn preamble: live date/time + fresh memory/reflections + skills
         # index + plan. Memory is scoped to the active persona (#42): shared +
         # its private. Skills index is scoped to the persona's allowlist (#46).
+        session_key = (channel, user_id, chat_id) if self.history_mode == "session" else None
         preamble = await self._turn_preamble(
-            decomposed_goal, query=message, scope=_persona_scope(persona), persona=persona
+            decomposed_goal,
+            query=message,
+            scope=_persona_scope(persona),
+            persona=persona,
+            session_key=session_key,
         )
 
         tools = apply_feature_gates(
@@ -622,6 +635,7 @@ class AgentCore:
         query: str | None = None,
         scope: str = "",
         persona: Persona | None = None,
+        session_key: tuple[str, str, str] | None = None,
     ) -> str:
         """Build the per-turn preamble prepended to the current user message.
 
@@ -638,21 +652,33 @@ class AgentCore:
 
         ``scope`` is the active persona's memory scope (#42): ``""`` = shared
         only, ``"<persona>"`` = shared + that persona's private memory.
-        ``persona`` scopes the skills index to its allowlist.
+        ``persona`` scopes the skills index to its allowlist. ``session_key``
+        gates skills re-injection (see below); ``None`` = always inject.
         """
         now = datetime.now(ZoneInfo(self.config.agent.timezone))
         stamp = now.strftime("%A, %B %d, %Y %H:%M %Z")
         preamble = f"[Current date & time: {stamp}]"
 
-        # Skills index, rebuilt fresh per turn so a skill added mid-session (e.g.
-        # via skill-creator) is immediately visible without a /new (#46). Cheap:
-        # a local DB read, like memory. Scoped to the persona's allowlist.
+        # Skills index, scoped to the persona's allowlist. Rebuilt fresh per turn
+        # so a skill added mid-session (e.g. via skill-creator) is immediately
+        # visible without a /new (#46). Cheap: a local DB read, like memory.
+        #
+        # In session mode (``session_key`` set) we re-send the block only when it
+        # changed since the previous turn; between changes the model still sees
+        # the prior copy in the replayed history, so re-sending every turn would
+        # just accumulate identical copies. The hash is cleared on /new and on
+        # compaction (which can drop the old copy from view). Injection mode and
+        # tests pass ``None`` → always include (stateless window, nothing to gate).
         try:
             skills_index = await self.skills.get_index_block(
                 allow=persona.skills if persona else None
             )
             if skills_index:
-                preamble += f"\n\n<available_skills>\n{skills_index}\n</available_skills>"
+                digest = hashlib.sha256(skills_index.encode("utf-8")).hexdigest()
+                if session_key is None or self._last_skills_hash.get(session_key) != digest:
+                    preamble += f"\n\n<available_skills>\n{skills_index}\n</available_skills>"
+                    if session_key is not None:
+                        self._last_skills_hash[session_key] = digest
         except Exception:
             log.exception("Failed to load skills index for turn preamble")
 
@@ -736,6 +762,9 @@ class AgentCore:
 
         new_messages, _summary = result
         await self.history.replace_session(channel, user_id, new_messages, chat_id)
+        # Compaction can summarize away the turn that carried the skills index, so
+        # drop the hash to force a fresh re-send on the next turn (#46 follow-up).
+        self._last_skills_hash.pop((channel, user_id, chat_id), None)
         log.info(
             "Compacted session %s/%s/%s: %d → %d messages (~%d ctx tokens)",
             channel,

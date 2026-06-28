@@ -227,6 +227,43 @@ async def test_mid_session_skill_visible_next_turn_without_new(agent) -> None:
     assert await agent._session_system_prompt("telegram", "u1", "") == snapshot
 
 
+@pytest.mark.asyncio
+async def test_skills_index_resent_only_when_changed(agent) -> None:
+    """In session mode the skills index rides the preamble only when it changed
+    since the previous turn (#46 follow-up): between changes the model still sees
+    the prior copy in replayed history, so we don't re-send identical copies.
+    """
+    key = ("telegram", "u1", "")
+    await agent.skills.store.upsert_skill("weather", "# weather\nfetch the forecast")
+
+    # First turn: index is new for this session → included.
+    first = await agent._turn_preamble(None, query="hi", session_key=key)
+    assert "<available_skills>" in first and "weather" in first
+
+    # Second turn, registry unchanged → index omitted (already in history).
+    second = await agent._turn_preamble(None, query="hi again", session_key=key)
+    assert "<available_skills>" not in second
+
+    # A new skill changes the index → re-sent.
+    await agent.skills.store.upsert_skill("news", "# news\nread headlines")
+    third = await agent._turn_preamble(None, query="more", session_key=key)
+    assert "<available_skills>" in third and "news" in third
+
+    # Still unchanged again → omitted.
+    fourth = await agent._turn_preamble(None, query="more", session_key=key)
+    assert "<available_skills>" not in fourth
+
+    # Invalidation (e.g. /new or compaction clears the hash) → re-sent.
+    agent._last_skills_hash.pop(key, None)
+    fifth = await agent._turn_preamble(None, query="fresh", session_key=key)
+    assert "<available_skills>" in fifth
+
+    # No session key (injection mode / tests) → always included, never gated.
+    a = await agent._turn_preamble(None, query="x")
+    b = await agent._turn_preamble(None, query="x")
+    assert "<available_skills>" in a and "<available_skills>" in b
+
+
 # ---------------------------------------------------------------------------
 # Per-action write state — one write's outcome must not block a different one
 # ---------------------------------------------------------------------------
