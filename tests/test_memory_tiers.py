@@ -206,8 +206,6 @@ class TestRecall:
 
         assert out
         assert out[0]["content"] == "allergic to shellfish"
-        # The unrelated row is below the relevance floor and must be excluded.
-        assert all(m["content"] != "speaks turkish fluently" for m in out)
 
     async def test_searches_and_unarchives_archived_rows(self, embed_store):
         # An archived memory is invisible to injection but recall must still find
@@ -239,6 +237,9 @@ class TestRecall:
         await store._insert_long_term("fact", "simge", "speaks turkish")
         out = await store.recall("shellfish allergy")
         assert any("shellfish" in m["content"] for m in out)
+        # The relevance floor drops the zero-overlap row (deterministic on the
+        # lexical path — guards _RECALL_MIN_RELEVANCE against being lowered to 0).
+        assert all("turkish" not in m["content"] for m in out)
 
     async def test_scope_isolation(self, embed_store):
         # Recall must honour persona scope (#42): a persona sees shared + its own

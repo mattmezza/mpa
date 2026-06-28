@@ -141,7 +141,7 @@ Relevance-ranked injection is a small always-on top-k: great for the obvious fac
 - Recalling **revives** the matched rows: they're reinforced (`access_count` / `last_accessed`) and any archived one is un-archived — a fact the agent looked up and used is warm again.
 - **Scope-aware** (#42): recall is filtered to `scope IN ('', <active persona>)` exactly like injection, so a persona only ever recalls shared facts plus its own private ones — never another persona's. The default identity recalls shared only.
 
-The tool is read-only (no approval prompt) and available to every persona (it can't surface anything injection couldn't already show that persona), alongside the sqlite CLI the [memory skill](#) teaches for exact-field queries and bulk edits.
+The tool is read-only (no approval prompt) and available to every persona (it can't surface anything injection couldn't already show that persona), alongside the sqlite CLI the memory skill teaches for exact-field queries and bulk edits.
 
 All of this is configurable live from the **admin Memory tab** (enable toggle, backend, model, top-k, plus Download / Test buttons).
 
