@@ -593,6 +593,13 @@ class AgentCore:
             persona=persona,
             session_key=session_key,
         )
+        # Append the status of still-running background subagents from this chat,
+        # so the agent always knows what is pending (their results are folded into
+        # the conversation history when they finish). (#15)
+        if channel != "system":
+            note = self._subagent_status_note(channel, chat_id)
+            if note:
+                preamble = f"{preamble}\n\n{note}"
 
         tools = apply_feature_gates(
             scoped_tools(persona),
@@ -815,6 +822,35 @@ class AgentCore:
                     if isinstance(part, dict) and block in str(part.get("text", "")):
                         return True
         return False
+
+    def _subagent_status_note(self, channel: str, chat_id: str) -> str:
+        """Status of background subagents spawned from this chat, for the preamble.
+
+        Running runs appear every turn; a finished run appears once (the turn
+        after it completes) so the agent learns the outcome without re-announcing
+        it forever. Their results are also delivered to the chat directly. (#15)
+        """
+        runs = self.subagents.updates_for(channel, chat_id)
+        if not runs:
+            return ""
+        lines = []
+        for r in runs:
+            who = f"- [{r.run_id}] {r.persona or 'default'} — {r.status} ({r.elapsed_str})"
+            if r.status == "running":
+                lines.append(f"{who}; {r.progress}" if r.progress else who)
+            else:
+                lines.append(f"{who}: {short_summary(r.result or r.error or '', 200)}")
+        body = "\n".join(lines)
+        return (
+            "<background_subagents>\n"
+            "Background subagents you spawned from this chat. Their results are "
+            "posted to this chat directly as they finish, so you do not need to "
+            "relay them.\n"
+            f"{body}\n"
+            "Trust this status: never say a subagent is still running if it shows "
+            "done, cancelled, or error here.\n"
+            "</background_subagents>"
+        )
 
     async def _session_system_prompt(
         self,
@@ -1904,7 +1940,11 @@ class AgentCore:
                 "background": True,
                 "status": "running",
                 "persona": run.persona,
-                "note": "Running in the background; the result will be posted here when done.",
+                "note": (
+                    "Running in the background; its result is posted to this chat "
+                    "automatically when done — you don't relay it. Each later turn "
+                    "shows this run's status until it finishes."
+                ),
             }
 
         # Synchronous: run to completion and return the result to the caller.

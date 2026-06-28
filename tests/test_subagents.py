@@ -85,6 +85,23 @@ def test_short_summary_first_nonempty_line_capped() -> None:
     assert len(short_summary("x" * 400)) == 281  # 280 + ellipsis
 
 
+def test_updates_for_filters_by_chat_and_reports_finish_once() -> None:
+    reg = SubagentRegistry()
+    here = SubagentRun(run_id="a", persona="", task="t", origin_channel="tg", origin_chat_id="1")
+    other = SubagentRun(run_id="b", persona="", task="t", origin_channel="tg", origin_chat_id="2")
+    reg.register(here)
+    reg.register(other)
+
+    # Running runs appear every turn; the other chat's run is never included.
+    assert [r.run_id for r in reg.updates_for("tg", "1")] == ["a"]
+    assert [r.run_id for r in reg.updates_for("tg", "1")] == ["a"]
+
+    # After it finishes it appears exactly once more, then never again.
+    reg.finish("a", "done", result="answer")
+    assert [r.run_id for r in reg.updates_for("tg", "1")] == ["a"]
+    assert reg.updates_for("tg", "1") == []
+
+
 # ---------------------------------------------------------------------------
 # AgentCore.run_subagent — built with a scripted fake LLM (no network)
 # ---------------------------------------------------------------------------
@@ -252,6 +269,27 @@ def test_narrow_persona_intersects_scopes(agent) -> None:
     assert child.skills == ["s1", "s2"]  # child unspecified → inherits parent
     assert child.tools == ["b"]  # intersection, never 'c'
     assert child.secrets == []  # 'y' not in parent's ['x']
+
+
+def test_subagent_status_note_reports_this_chats_runs(agent) -> None:
+    agent.subagents.register(
+        SubagentRun(
+            run_id="r1",
+            persona="coding-helper",
+            task="t",
+            origin_channel="repl",
+            origin_chat_id="repl",
+            progress="step 2",
+        )
+    )
+    agent.subagents.finish("r1", "done", result="the iPhone 17e is CHF 599")
+
+    note = agent._subagent_status_note("repl", "repl")
+    assert "r1" in note and "done" in note and "CHF 599" in note
+    # Scoped to the chat: a different chat sees nothing.
+    assert agent._subagent_status_note("repl", "other-chat") == ""
+    # Reported once: the next turn no longer repeats the finished run.
+    assert agent._subagent_status_note("repl", "repl") == ""
 
 
 # ---------------------------------------------------------------------------
