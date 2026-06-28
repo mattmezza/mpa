@@ -333,7 +333,6 @@ async def test_new_command_clears_injection_history(tmp_path) -> None:
         db_path=config.history.db_path, max_turns=config.history.max_turns
     )
     agent.history_mode = "injection"
-    agent._last_skills_hash = {}
 
     # Seed some history
     await agent.history.add_turn("telegram", "u1", "user", "hello")
@@ -366,7 +365,6 @@ async def test_new_command_clears_session(tmp_path) -> None:
         db_path=config.history.db_path, max_turns=config.history.max_turns
     )
     agent.history_mode = "session"
-    agent._last_skills_hash = {}
 
     # Seed a session
     await agent.history.append_session_message(
@@ -401,7 +399,6 @@ async def test_new_command_case_insensitive(tmp_path) -> None:
         db_path=config.history.db_path, max_turns=config.history.max_turns
     )
     agent.history_mode = "injection"
-    agent._last_skills_hash = {}
 
     await agent.history.add_turn("telegram", "u1", "user", "hello")
     await agent.history.add_turn("telegram", "u1", "assistant", "hi")

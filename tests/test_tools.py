@@ -229,32 +229,42 @@ async def test_mid_session_skill_visible_next_turn_without_new(agent) -> None:
 
 @pytest.mark.asyncio
 async def test_skills_index_resent_only_when_changed(agent) -> None:
-    """In session mode the skills index rides the preamble only when it changed
-    since the previous turn (#46 follow-up): between changes the model still sees
-    the prior copy in replayed history, so we don't re-send identical copies.
+    """In session mode the skills index rides the preamble only when it isn't
+    already in the replayed history (#46 follow-up): an unchanged index sits in
+    history from a prior turn, so re-sending it would just accumulate copies. The
+    gate reads the real history, so it stays correct across changes and clears.
     """
-    key = ("telegram", "u1", "")
+    ch, uid, cid = "telegram", "u1", ""
+    key = (ch, uid, cid)
+
+    async def persist(msg: dict) -> None:
+        # Mimic what _process_session does: the preamble-bearing user message is
+        # appended to the session, becoming visible to later turns.
+        await agent.history.append_session_message(ch, uid, msg, cid)
+
     await agent.skills.store.upsert_skill("weather", "# weather\nfetch the forecast")
 
-    # First turn: index is new for this session → included.
+    # Turn 1: index new for this session → included; persist it as a real turn would.
     first = await agent._turn_preamble(None, query="hi", session_key=key)
     assert "<available_skills>" in first and "weather" in first
+    await persist({"role": "user", "content": first})
 
-    # Second turn, registry unchanged → index omitted (already in history).
-    second = await agent._turn_preamble(None, query="hi again", session_key=key)
+    # Turn 2, registry unchanged → omitted (the block is already in history).
+    second = await agent._turn_preamble(None, query="again", session_key=key)
     assert "<available_skills>" not in second
 
-    # A new skill changes the index → re-sent.
+    # A new skill changes the index → re-sent (the old block no longer matches).
     await agent.skills.store.upsert_skill("news", "# news\nread headlines")
     third = await agent._turn_preamble(None, query="more", session_key=key)
     assert "<available_skills>" in third and "news" in third
+    await persist({"role": "user", "content": third})
 
-    # Still unchanged again → omitted.
+    # Unchanged again → omitted.
     fourth = await agent._turn_preamble(None, query="more", session_key=key)
     assert "<available_skills>" not in fourth
 
-    # Invalidation (e.g. /new or compaction clears the hash) → re-sent.
-    agent._last_skills_hash.pop(key, None)
+    # /new (or compaction) empties the history → the only copy is gone → re-sent.
+    await agent.history.clear_session(ch, uid, cid)
     fifth = await agent._turn_preamble(None, query="fresh", session_key=key)
     assert "<available_skills>" in fifth
 

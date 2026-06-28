@@ -437,12 +437,6 @@ class AgentCore:
         config_db = "data/config.db"
         self.permissions = PermissionEngine(db_path=config_db)
         self.prompt_capture: deque[dict[str, str]] = deque(maxlen=20)
-        # Per-session hash of the last skills index sent in the preamble (#46
-        # follow-up). In session mode the index is re-sent only when it changed
-        # since the previous turn; between changes the model still sees the prior
-        # copy in replayed history. Keyed by (channel, user_id, chat_id); cleared
-        # on /new and on compaction (both can drop the old copy from view).
-        self._last_skills_hash: dict[tuple[str, str, str], str] = {}
         # Vision fallback caption cache (image hash -> "[Image: ...]"), LRU-bounded.
         self._vision_cache: OrderedDict[str, str] = OrderedDict()
 
@@ -484,8 +478,6 @@ class AgentCore:
                 await self.history.clear_session(channel, user_id, chat_id)
             else:
                 await self.history.clear(channel, user_id, chat_id)
-            # Drop the skills-index hash so a fresh session re-sends it next turn.
-            self._last_skills_hash.pop((channel, user_id, chat_id), None)
             log.info(
                 "Conversation cleared by user (channel=%s, user=%s, chat=%s)",
                 channel,
@@ -663,22 +655,25 @@ class AgentCore:
         # so a skill added mid-session (e.g. via skill-creator) is immediately
         # visible without a /new (#46). Cheap: a local DB read, like memory.
         #
-        # In session mode (``session_key`` set) we re-send the block only when it
-        # changed since the previous turn; between changes the model still sees
-        # the prior copy in the replayed history, so re-sending every turn would
-        # just accumulate identical copies. The hash is cleared on /new and on
-        # compaction (which can drop the old copy from view). Injection mode and
-        # tests pass ``None`` → always include (stateless window, nothing to gate).
+        # In session mode (``session_key`` set) the preamble is persisted into the
+        # growing history, so re-sending an unchanged index every turn would just
+        # accumulate identical copies. We skip it only when the exact block is
+        # ALREADY present in the replayed history (so the model still sees it).
+        # Gating on the real history — not a side cache — keeps it correct by
+        # construction across /new, compaction, persona rebind and concurrent
+        # turns: any of those that drop or change the block simply won't find it,
+        # and the failure direction is a harmless re-send, never a blind turn.
+        # Injection mode and tests pass ``None`` → always include.
         try:
             skills_index = await self.skills.get_index_block(
                 allow=persona.skills if persona else None
             )
             if skills_index:
-                digest = hashlib.sha256(skills_index.encode("utf-8")).hexdigest()
-                if session_key is None or self._last_skills_hash.get(session_key) != digest:
-                    preamble += f"\n\n<available_skills>\n{skills_index}\n</available_skills>"
-                    if session_key is not None:
-                        self._last_skills_hash[session_key] = digest
+                block = f"<available_skills>\n{skills_index}\n</available_skills>"
+                if session_key is None or not await self._skills_block_in_history(
+                    session_key, block
+                ):
+                    preamble += f"\n\n{block}"
         except Exception:
             log.exception("Failed to load skills index for turn preamble")
 
@@ -712,6 +707,32 @@ class AgentCore:
                 "</execution_plan>"
             )
         return preamble
+
+    async def _skills_block_in_history(self, session_key: tuple[str, str, str], block: str) -> bool:
+        """True if the exact ``<available_skills>`` block is already present in the
+        replayed session history — so the model still sees it and we needn't
+        re-send it this turn (#46 follow-up).
+
+        Reads the same message array that will be sent to the model, so the
+        decision is correct by construction: after a /new or compaction the block
+        is gone (→ re-send), a persona rebind or new skill changes the block (→
+        re-send), and concurrent turns that haven't yet persisted both re-send
+        (harmless). Cheap: a substring scan over the (compaction-bounded) history.
+        """
+        try:
+            messages = await self.history.get_session(*session_key)
+        except Exception:
+            return False  # safe direction: re-send rather than risk a blind turn
+        for m in messages:
+            content = m.get("content")
+            if isinstance(content, str):
+                if block in content:
+                    return True
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and block in str(part.get("text", "")):
+                        return True
+        return False
 
     async def _session_system_prompt(
         self,
@@ -762,9 +783,6 @@ class AgentCore:
 
         new_messages, _summary = result
         await self.history.replace_session(channel, user_id, new_messages, chat_id)
-        # Compaction can summarize away the turn that carried the skills index, so
-        # drop the hash to force a fresh re-send on the next turn (#46 follow-up).
-        self._last_skills_hash.pop((channel, user_id, chat_id), None)
         log.info(
             "Compacted session %s/%s/%s: %d → %d messages (~%d ctx tokens)",
             channel,
