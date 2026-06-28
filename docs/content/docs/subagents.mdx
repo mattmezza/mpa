@@ -76,19 +76,22 @@ the subagent, so a blocked action stays blocked at any depth.
 
 ## Guardrails
 
-Sensible defaults keep delegation safe and bounded — tune them under
-`subagents` in `config.yml`:
+Sensible defaults keep delegation safe and bounded. Edit them in the admin
+**Tools** tab (the <strong>Subagents</strong> card — the master switch and every
+limit, applied live without a restart), or under `subagents` in `config.yml`:
 
 | Setting | Default | What it does |
 |---------|---------|--------------|
-| `enabled` | `true` | Master switch; off removes the `spawn_subagent` tool |
+| `enabled` | `true` | Master switch; off hides the `spawn_subagent` tool everywhere |
 | `recursion_depth` | `3` | Max nesting (a top-level spawn is depth 1) |
 | `max_steps` | `12` | Max tool-call rounds per run — a hard stop |
 | `token_budget` | `100000` | Approx token ceiling per run (best-effort) |
 | `max_concurrent` | `3` | Max background runs at once |
 
-A run that hits its step or token budget stops and returns what it has, with a
-note that the budget was reached.
+When disabled, the tool is hidden from the assistant and from the Personae tool
+scope. Assign it per persona in the **Personae** editor. A run that hits its step
+or token budget stops and returns what it has, with a note that the budget was
+reached.
 
 ## Monitoring & cancelling
 

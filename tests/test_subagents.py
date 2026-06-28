@@ -259,6 +259,27 @@ def test_narrow_persona_intersects_scopes(agent) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_disabled_drops_spawn_subagent_from_llm_tools() -> None:
+    from core.agent import TOOLS, apply_feature_gates
+
+    def names(ts):
+        return {t["name"] for t in ts}
+
+    base = dict(secrets_available=True, artifacts_enabled=True)
+    assert "spawn_subagent" in names(apply_feature_gates(TOOLS, **base, subagents_enabled=True))
+    assert "spawn_subagent" not in names(
+        apply_feature_gates(TOOLS, **base, subagents_enabled=False)
+    )
+
+
+def test_disabled_hides_spawn_subagent_from_persona_scope() -> None:
+    from api.admin import GATEABLE_TOOLS, gateable_tools_for
+
+    assert "spawn_subagent" in gateable_tools_for(True)
+    assert set(gateable_tools_for(True)) == set(GATEABLE_TOOLS)
+    assert "spawn_subagent" not in gateable_tools_for(True, subagents_enabled=False)
+
+
 def test_subagent_is_valid_job_type() -> None:
     assert "subagent" in VALID_TYPES
 

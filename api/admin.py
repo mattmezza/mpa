@@ -835,7 +835,12 @@ def create_admin_app(
         store = await _skills_store_from_config(config_store)
         all_skills = [s["name"] for s in await store.list_skills()]
         artifacts = await store_from_config(config_store)
-        return {"all_skills": all_skills, "all_tools": gateable_tools_for(artifacts.enabled)}
+        sub_enabled = await config_store.get("subagents.enabled")
+        sub_on = sub_enabled is None or sub_enabled == "true"
+        return {
+            "all_skills": all_skills,
+            "all_tools": gateable_tools_for(artifacts.enabled, subagents_enabled=sub_on),
+        }
 
     @app.get("/admin/personae/new", response_model=None)
     async def admin_persona_new() -> Response:
@@ -1151,6 +1156,15 @@ def create_admin_app(
 
         artifacts = await store_from_config(config_store)
 
+        # Subagents (issue #15) — keys may be absent on a store seeded before the
+        # feature existed, so fall back to the SubagentsConfig defaults.
+        sub_enabled = await config_store.get("subagents.enabled")
+        sub_enabled = sub_enabled if sub_enabled is not None else "true"
+        sub_recursion = await config_store.get("subagents.recursion_depth") or "3"
+        sub_steps = await config_store.get("subagents.max_steps") or "12"
+        sub_tokens = await config_store.get("subagents.token_budget") or "100000"
+        sub_concurrent = await config_store.get("subagents.max_concurrent") or "3"
+
         return _render_partial(
             "partials/tools.html",
             tools=tool_registry(),
@@ -1166,6 +1180,11 @@ def create_admin_app(
             artifacts_enabled="true" if artifacts.enabled else "false",
             artifacts_directory=str(artifacts.dir),
             artifacts_ttl_hours=str(artifacts.ttl_hours),
+            subagents_enabled=sub_enabled,
+            subagents_recursion_depth=sub_recursion,
+            subagents_max_steps=sub_steps,
+            subagents_token_budget=sub_tokens,
+            subagents_max_concurrent=sub_concurrent,
         )
 
     @app.post("/tools/gh/test", dependencies=[Depends(auth)])
@@ -3399,11 +3418,14 @@ GATEABLE_TOOLS = [
 ]
 
 
-def gateable_tools_for(artifacts_enabled: bool) -> list[str]:
+def gateable_tools_for(artifacts_enabled: bool, subagents_enabled: bool = True) -> list[str]:
     """GATEABLE_TOOLS minus tools whose feature is globally disabled."""
-    if artifacts_enabled:
-        return list(GATEABLE_TOOLS)
-    return [t for t in GATEABLE_TOOLS if t != "write_artifact"]
+    out = list(GATEABLE_TOOLS)
+    if not artifacts_enabled:
+        out = [t for t in out if t != "write_artifact"]
+    if not subagents_enabled:
+        out = [t for t in out if t != "spawn_subagent"]
+    return out
 
 
 # ---------------------------------------------------------------------------
