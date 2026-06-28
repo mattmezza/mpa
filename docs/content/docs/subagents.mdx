@@ -93,6 +93,15 @@ and a scoped caller delegating to an open persona keeps its own limits.
 [Permission rules](/docs/permissions) (`NEVER` in particular) still apply inside
 the subagent, so a blocked action stays blocked at any depth.
 
+## Choosing a persona
+
+Selection stays **user-led**: omitting `persona` runs the subagent as the caller
+itself (the chat's bound persona), so a subtask stays in the identity the user
+already chose. To make the *specialist* case an informed choice rather than a
+guess, each turn the agent sees a compact roster of available personae
+(`name — role`) and only names one when the subtask clearly fits it. A wrong
+name is rejected with the list of valid names, so the agent can self-correct.
+
 ## Guardrails
 
 Sensible defaults keep delegation safe and bounded. Edit them in the admin

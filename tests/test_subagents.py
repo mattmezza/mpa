@@ -506,3 +506,61 @@ async def test_run_subagent_effort_uses_scoped_client(agent, monkeypatch) -> Non
     assert result["ok"] is True
     assert captured["level"] == "high"
     assert agent.subagents.get(result["run_id"]).effort == "high"
+
+
+# ---------------------------------------------------------------------------
+# Persona roster — let the agent pick a specialist, selection stays user-led
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_personae_roster_lists_name_and_role(agent, monkeypatch) -> None:
+    personae = [
+        Persona(name="coding-helper", role="Writes and reviews code"),
+        Persona(name="writing-editor", role="Edits prose\nsecond line ignored"),
+    ]
+    monkeypatch.setattr(agent.personae, "list_personae", AsyncMock(return_value=personae))
+    block = await agent._personae_roster_block(None)
+    assert "<personae>" in block
+    assert "- coding-helper — Writes and reviews code" in block
+    assert "- writing-editor — Edits prose" in block  # only the first role line
+    assert "second line ignored" not in block
+
+
+@pytest.mark.asyncio
+async def test_personae_roster_marks_current_and_gates(agent, monkeypatch) -> None:
+    personae = [Persona(name="me", role="r1"), Persona(name="other", role="r2")]
+    monkeypatch.setattr(agent.personae, "list_personae", AsyncMock(return_value=personae))
+    block = await agent._personae_roster_block(Persona(name="me", role="r1"))
+    assert "- me (you) — r1" in block
+    # a persona whose tool scope excludes spawn_subagent gets no roster
+    scoped = Persona(name="me", tools=["web_search"])
+    assert await agent._personae_roster_block(scoped) == ""
+    # nor when subagents are disabled
+    agent.config.subagents.enabled = False
+    assert await agent._personae_roster_block(None) == ""
+
+
+@pytest.mark.asyncio
+async def test_personae_roster_only_offered_on_main_turn(agent, monkeypatch) -> None:
+    monkeypatch.setattr(
+        agent.personae,
+        "list_personae",
+        AsyncMock(return_value=[Persona(name="coding-helper", role="code")]),
+    )
+    # subagent preamble (offer_personae defaults False) → no roster leaks in
+    assert "<personae>" not in await agent._turn_preamble(None, query="x")
+    # main turn opts in
+    assert "<personae>" in await agent._turn_preamble(None, query="x", offer_personae=True)
+
+
+@pytest.mark.asyncio
+async def test_run_subagent_unknown_persona_lists_available(agent, monkeypatch) -> None:
+    monkeypatch.setattr(
+        agent.personae,
+        "list_personae",
+        AsyncMock(return_value=[Persona(name="coding-helper"), Persona(name="analyst")]),
+    )
+    result = await agent.run_subagent(task="x", persona_name="nope")
+    assert "not found" in result["error"].lower()
+    assert "coding-helper" in result["error"] and "analyst" in result["error"]

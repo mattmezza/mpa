@@ -635,6 +635,7 @@ class AgentCore:
             scope=_persona_scope(persona),
             persona=persona,
             session_key=session_key,
+            offer_personae=True,
         )
         # Append the status of still-running background subagents from this chat,
         # so the agent always knows what is pending (their results are folded into
@@ -760,6 +761,7 @@ class AgentCore:
         scope: str = "",
         persona: Persona | None = None,
         session_key: tuple[str, str, str] | None = None,
+        offer_personae: bool = False,
     ) -> str:
         """Build the per-turn preamble prepended to the current user message.
 
@@ -821,6 +823,14 @@ class AgentCore:
         except Exception:
             log.exception("Failed to load memories for turn preamble")
 
+        # Roster of personae the agent can delegate to via spawn_subagent, so its
+        # choice is informed rather than guessed (#15). Only on the main turn —
+        # selection stays user-led (omit persona = run as yourself / the bound one).
+        if offer_personae:
+            roster = await self._personae_roster_block(persona)
+            if roster:
+                preamble += f"\n\n{roster}"
+
         if self.config.task_reflection.enabled:
             try:
                 reflections = await self.reflections.format_for_prompt()
@@ -839,6 +849,41 @@ class AgentCore:
                 "</execution_plan>"
             )
         return preamble
+
+    async def _personae_roster_block(self, persona: Persona | None) -> str:
+        """Compact `name — role` roster of personae the agent can delegate to (#15).
+
+        Makes specialist delegation an informed choice instead of a guess, while
+        leaving selection user-led: omitting ``persona`` runs the subagent as the
+        caller itself. Returns "" (nothing injected) when subagents are disabled,
+        the active persona can't spawn, or there is no one to delegate to.
+        """
+        if not self.config.subagents.enabled:
+            return ""
+        if persona is not None and not persona.allows_tool("spawn_subagent"):
+            return ""
+        try:
+            personae = await self.personae.list_personae()
+        except Exception:
+            log.exception("Failed to list personae for the subagent roster")
+            return ""
+        current = persona.name if persona else ""
+        lines = []
+        for p in personae:
+            role = p.role.strip().splitlines()[0].strip() if (p.role or "").strip() else ""
+            tag = " (you)" if p.name == current else ""
+            lines.append(f"- {p.name}{tag}" + (f" — {role}" if role else ""))
+        if not lines:
+            return ""
+        body = "\n".join(lines)
+        return (
+            "<personae>\n"
+            "Personae you may run a subagent as via spawn_subagent's 'persona'. "
+            "Omit 'persona' to run as yourself (the default) — name one only when "
+            "the subtask clearly fits that specialist.\n"
+            f"{body}\n"
+            "</personae>"
+        )
 
     async def _skills_block_in_history(self, session_key: tuple[str, str, str], block: str) -> bool:
         """True if the exact ``<available_skills>`` block is already present in the
@@ -1938,7 +1983,17 @@ class AgentCore:
         if persona_name:
             requested = await self._load_persona(persona_name)
             if requested is None:
-                return {"error": f"Persona not found: {persona_name}"}
+                try:
+                    names = [p.name for p in await self.personae.list_personae()]
+                except Exception:
+                    names = []
+                hint = f" Available: {', '.join(names)}." if names else ""
+                return {
+                    "error": (
+                        f"Persona not found: {persona_name}.{hint} "
+                        "Omit 'persona' to run as yourself."
+                    )
+                }
         else:
             requested = parent_state.get("persona_obj")
         child_persona = self._narrow_persona(requested, parent_state) if requested else None
