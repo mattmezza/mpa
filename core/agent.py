@@ -501,10 +501,11 @@ class AgentCore:
         else:
             persona = await self._resolve_persona(channel, user_id, chat_id)
 
-        # Per-turn preamble: live date/time + fresh memory/reflections + plan.
-        # Memory is scoped to the active persona (#42): shared + its private.
+        # Per-turn preamble: live date/time + fresh memory/reflections + skills
+        # index + plan. Memory is scoped to the active persona (#42): shared +
+        # its private. Skills index is scoped to the persona's allowlist (#46).
         preamble = await self._turn_preamble(
-            decomposed_goal, query=message, scope=_persona_scope(persona)
+            decomposed_goal, query=message, scope=_persona_scope(persona), persona=persona
         )
 
         tools = apply_feature_gates(
@@ -620,25 +621,40 @@ class AgentCore:
         decomposed_goal: DecomposedGoal | None,
         query: str | None = None,
         scope: str = "",
+        persona: Persona | None = None,
     ) -> str:
         """Build the per-turn preamble prepended to the current user message.
 
         Always carries the live date/time (so the agent knows 'now' every turn);
-        also carries fresh, query-relevant memory + reflections and the
-        execution plan when the request was decomposed.
+        also carries fresh, query-relevant memory + reflections, the live skills
+        index, and the execution plan when the request was decomposed.
 
-        Memory/reflections live here, not in the static system prompt: in
+        Memory/reflections/skills live here, not in the static system prompt: in
         session mode that prompt is snapshotted once and would freeze any
-        mid-session extraction out of view until ``/new`` (#41). The preamble is
-        rebuilt every turn and rides on the new (uncached) user message, so it
-        costs only the block's own tokens and is also relevance-ranked per turn.
+        mid-session change out of view until ``/new`` (#41, #46) — e.g. a skill
+        added via the skill-creator stayed invisible. The preamble is rebuilt
+        every turn and rides on the new (uncached) user message, so it costs only
+        the block's own tokens and is also relevance-ranked per turn.
 
         ``scope`` is the active persona's memory scope (#42): ``""`` = shared
         only, ``"<persona>"`` = shared + that persona's private memory.
+        ``persona`` scopes the skills index to its allowlist.
         """
         now = datetime.now(ZoneInfo(self.config.agent.timezone))
         stamp = now.strftime("%A, %B %d, %Y %H:%M %Z")
         preamble = f"[Current date & time: {stamp}]"
+
+        # Skills index, rebuilt fresh per turn so a skill added mid-session (e.g.
+        # via skill-creator) is immediately visible without a /new (#46). Cheap:
+        # a local DB read, like memory. Scoped to the persona's allowlist.
+        try:
+            skills_index = await self.skills.get_index_block(
+                allow=persona.skills if persona else None
+            )
+            if skills_index:
+                preamble += f"\n\n<available_skills>\n{skills_index}\n</available_skills>"
+        except Exception:
+            log.exception("Failed to load skills index for turn preamble")
 
         # ponytail: in session mode this now runs a query embed + cosine scan +
         # reinforce-write every turn (was once per session). Intended — that is
@@ -1915,16 +1931,15 @@ class AgentCore:
         decomposed_goal: DecomposedGoal | None = None,
         persona: Persona | None = None,
     ) -> str:
-        skills_index = await self.skills.get_index_block(allow=persona.skills if persona else None)
-
-        # Memory + reflections are NOT baked into the static prompt: in session
-        # mode it is snapshotted once and would freeze stale (#41). They are
-        # injected fresh per turn in the preamble instead (see _turn_preamble),
-        # which also makes them query-relevant on every turn.
+        # Memory, reflections AND the skills index are NOT baked into the static
+        # prompt: in session mode it is snapshotted once and would freeze stale —
+        # a skill added mid-session stayed invisible until /new (#41, #46). All
+        # three are injected fresh per turn in the preamble instead (see
+        # _turn_preamble), which also makes memory query-relevant every turn.
         sections = build_prompt_sections(
             config=self.config,
             history_mode=self.history_mode,
-            skills_index=skills_index,
+            skills_index="",
             memories="",
             reflections="",
             decomposed_goal=decomposed_goal,
@@ -1932,6 +1947,7 @@ class AgentCore:
             secrets_available=self.secret_store is not None,
             include_memories=False,
             include_reflections=False,
+            include_skills=False,
         )
         return sections.full_prompt
 

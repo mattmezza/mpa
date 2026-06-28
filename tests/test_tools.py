@@ -201,6 +201,32 @@ async def test_mid_session_memory_visible_next_turn_without_new(agent) -> None:
     assert await agent._session_system_prompt("telegram", "u1", "") == snapshot
 
 
+@pytest.mark.asyncio
+async def test_mid_session_skill_visible_next_turn_without_new(agent) -> None:
+    """A skill added mid-session must reach the model on the next turn (#46).
+
+    The skills index rides the per-turn preamble, so a skill created mid-session
+    (e.g. via skill-creator) is advertised immediately — even though the static
+    session system prompt is snapshotted once and never rebuilt mid-session.
+    """
+    # Snapshot the static prompt: it must NOT carry the skills index at all.
+    snapshot = await agent._session_system_prompt("telegram", "u1", "")
+    assert "available_skills" not in snapshot
+
+    # A skill created after the snapshot (the staleness scenario from #46).
+    await agent.skills.store.upsert_skill(
+        "weather", "---\nname: weather\ndescription: fetch the forecast\n---\nbody"
+    )
+
+    # Next turn's preamble advertises it — no /new, no snapshot rebuild.
+    preamble = await agent._turn_preamble(None, query="what's the weather?")
+    assert "<available_skills>" in preamble
+    assert "weather" in preamble
+
+    # Snapshot is still the frozen one (cache intact, not rebuilt).
+    assert await agent._session_system_prompt("telegram", "u1", "") == snapshot
+
+
 # ---------------------------------------------------------------------------
 # Per-action write state — one write's outcome must not block a different one
 # ---------------------------------------------------------------------------
