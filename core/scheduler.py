@@ -64,12 +64,17 @@ async def run_agent_task(
         )
 
     log.info("Scheduler running agent task: %s", task[:100])
+    # A "telegram:<persona>" job is generated AS that persona (#29) so the bot
+    # that delivers it also writes it — while keeping the "system" execution mode
+    # (auto-approved writes, no memory/reflection). Bare channels keep the default.
+    gen_persona = channel.split(":", 1)[1] if channel.startswith("telegram:") else None
     try:
         response = await agent.process(
             message=task,
             channel="system",
             user_id="scheduler",
             chat_id="scheduler",
+            persona_name=gen_persona,
         )
 
         # Deliver the response to the target channel
@@ -146,12 +151,22 @@ async def run_memory_consolidation() -> None:
 
 
 def _get_owner_chat_id(agent: AgentCore, channel: str) -> int | str | None:
-    """Get the owner's chat ID for proactive messages."""
-    if channel == "telegram":
-        tg_config = agent.config.channels.telegram
-        if tg_config.allowed_user_ids:
-            return tg_config.allowed_user_ids[0]
-    return None
+    """Get the owner's chat ID for proactive messages.
+
+    Works for the default ``telegram`` bot and every per-persona ``telegram:<persona>``
+    bot (#29): each registered channel carries its own allowlist (a persona bot
+    inherits the global one when unset), so the owner is its first allowed user.
+    """
+    if channel != "telegram" and not channel.startswith("telegram:"):
+        return None
+    # Persona bots carry their own allowlist (inheriting global when unset).
+    if channel.startswith("telegram:"):
+        ch = agent.channels.get(channel)
+        ids = getattr(getattr(ch, "config", None), "allowed_user_ids", None)
+        if ids:
+            return ids[0]
+    ids = agent.config.channels.telegram.allowed_user_ids
+    return ids[0] if ids else None
 
 
 def _parse_cron(expr: str) -> dict:

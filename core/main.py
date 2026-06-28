@@ -46,6 +46,7 @@ async def _start_agent(config_store: ConfigStore):
     from channels.telegram import TelegramChannel
     from channels.whatsapp import WhatsAppChannel
     from core.agent import AgentCore
+    from core.config import TelegramConfig
     from voice.pipeline import VoicePipeline
 
     # Decrypt infra secrets into memory so ${vault:NAME} resolves at config load
@@ -84,33 +85,87 @@ async def _start_agent(config_store: ConfigStore):
         )
         agent.voice = voice
 
-    # -- Telegram --
-    if config.channels.telegram.enabled and config.channels.telegram.bot_token:
-        tg = TelegramChannel(config.channels.telegram, agent, voice=voice)
-        agent.channels["telegram"] = tg
-        log.info("Starting Telegram bot…")
+    # -- Telegram: the default bot plus one bot per persona that carries a token (#29).
+    # A single bad/revoked token must never abort the others, WhatsApp, or the
+    # scheduler — each bot is brought up independently and failures are isolated.
+    async def _start_tg(conf, name: str, channel_name: str = "telegram") -> None:
+        try:
+            tg = TelegramChannel(conf, agent, voice=voice, channel_name=channel_name)
+            await tg.app.initialize()
+            await tg.app.start()
+            if tg.app.updater is not None:
+                await tg.app.updater.start_polling()
+            agent.channels[name] = tg  # registered only once it is actually polling
+            log.info("Telegram bot started (%s)", name)
+        except Exception:
+            log.exception("Failed to start Telegram bot %s — skipping", name)
 
-        await tg.app.initialize()
-        await tg.app.start()
-        updater = tg.app.updater
-        if updater is not None:
-            await updater.start_polling()
+    try:
+        tg_global = config.channels.telegram
+        seen_tokens: set[str] = set()
+        if tg_global.enabled and tg_global.bot_token:
+            seen_tokens.add(tg_global.bot_token)
+            await _start_tg(tg_global, "telegram")
 
-    # -- WhatsApp --
-    if config.channels.whatsapp.enabled:
-        from core.wacli import WacliManager
+        for persona in await agent.personae.list_personae():
+            token = (persona.bot_token or "").strip()
+            if not token:
+                continue  # no own bot — reachable only via the default bot
+            if token in seen_tokens:
+                log.warning(
+                    "Persona %s shares a bot token with another bot — skipping its bot "
+                    "(one token can only be polled once)",
+                    persona.name,
+                )
+                continue
+            seen_tokens.add(token)
+            pconf = TelegramConfig(
+                enabled=True,
+                bot_token=token,
+                allowed_user_ids=persona.allowed_user_ids or tg_global.allowed_user_ids,
+                topics_enabled=tg_global.topics_enabled,
+            )
+            await _start_tg(pconf, f"telegram:{persona.name}", f"telegram:{persona.name}")
 
-        wacli = WacliManager()
-        wa = WhatsAppChannel(config.channels.whatsapp, agent, wacli=wacli)
-        agent.channels["whatsapp"] = wa
-        log.info("WhatsApp channel enabled (wacli)")
+        # -- WhatsApp --
+        if config.channels.whatsapp.enabled:
+            from core.wacli import WacliManager
 
-    # -- Scheduler --
-    await agent.scheduler.load_jobs()
-    agent.scheduler.start()
-    log.info("Scheduler started with %d jobs", len(agent.scheduler.scheduler.get_jobs()))
+            wacli = WacliManager()
+            wa = WhatsAppChannel(config.channels.whatsapp, agent, wacli=wacli)
+            agent.channels["whatsapp"] = wa
+            log.info("WhatsApp channel enabled (wacli)")
+
+        # -- Scheduler --
+        await agent.scheduler.load_jobs()
+        agent.scheduler.start()
+        log.info("Scheduler started with %d jobs", len(agent.scheduler.scheduler.get_jobs()))
+    except Exception:
+        # Bring-up failed after some bots were already polling — stop them so we
+        # don't leak orphaned pollers (which would 409 on the next start).
+        await _stop_telegram_bots(agent)
+        raise
 
     return agent
+
+
+async def _stop_telegram_bots(agent) -> None:
+    """Stop and deregister the default bot and every per-persona bot (#29).
+
+    Each bot is torn down independently: one that fails to stop must not strand
+    the rest still polling (which would 409 on the next start).
+    """
+    for name, ch in list(agent.channels.items()):
+        if name != "telegram" and not name.startswith("telegram:"):
+            continue
+        try:
+            if ch.app.updater is not None:
+                await ch.app.updater.stop()
+            await ch.app.stop()
+            await ch.app.shutdown()
+        except Exception:
+            log.exception("Error stopping Telegram bot %s", name)
+        agent.channels.pop(name, None)
 
 
 async def _stop_agent(agent) -> None:
@@ -121,11 +176,7 @@ async def _stop_agent(agent) -> None:
 
     set_agent_context(None)
 
-    if "telegram" in agent.channels:
-        tg = agent.channels["telegram"]
-        await tg.app.updater.stop()
-        await tg.app.stop()
-        await tg.app.shutdown()
+    await _stop_telegram_bots(agent)
 
 
 # ---------------------------------------------------------------------------

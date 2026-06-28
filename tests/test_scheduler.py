@@ -94,6 +94,31 @@ async def test_run_agent_task_sends_to_owner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_agent_task_persona_job_generates_as_persona() -> None:
+    # A "telegram:<persona>" job (#29) is generated AS that persona (persona_name
+    # forced) while keeping the "system" execution mode, and delivered via that
+    # bot to its own owner (the bot's allowlist, not the global one).
+    channel = AsyncMock()
+    channel.config = SimpleNamespace(allowed_user_ids=[99])
+    agent = SimpleNamespace(
+        channels={"telegram:coach": channel},
+        process=AsyncMock(return_value=SimpleNamespace(text="done")),
+        config=SimpleNamespace(
+            channels=SimpleNamespace(telegram=SimpleNamespace(allowed_user_ids=[1]))
+        ),
+        job_store=None,
+    )
+    set_agent_context(agent)
+
+    await run_agent_task("ping", channel="telegram:coach")
+
+    _, kwargs = agent.process.call_args
+    assert kwargs["persona_name"] == "coach"
+    assert kwargs["channel"] == "system"  # execution mode unchanged
+    channel.send.assert_awaited_once_with(99, "done")  # coach bot → coach's owner
+
+
+@pytest.mark.asyncio
 async def test_run_agent_task_marks_oneshot_done() -> None:
     """One-shot jobs should be marked 'done' after execution."""
     channel = AsyncMock()

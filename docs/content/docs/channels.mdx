@@ -34,6 +34,16 @@ channels:
 - **Inline keyboards** — used for permission approval flow (Approve / Edit / Deny)
 - **User ID whitelist** — only allowed users can interact with the bot
 - **Forum topics** (opt-in) — with `topics_enabled`, each topic in a group becomes its own context with its own bound persona; see [Per-chat personae](/docs/personae#per-chat-personae)
+- **Bot-per-persona** (opt-in) — give a persona its own bot token and it becomes a separate Telegram contact, running alongside the default bot in the same process; see below
+
+### Bot-per-persona
+
+The `bot_token` above configures the **default** bot. Any persona can additionally carry its
+own token (set on the persona, not here), turning it into an independently-addressable
+contact. Each persona-bot registers as the channel `telegram:<persona>`, isolating its
+history, approvals, and scheduled jobs from the default bot and from every other persona.
+Configure it on the persona and restart the agent — see
+[Bot-per-persona](/docs/personae#bot-per-persona).
 
 ### Permission approvals
 

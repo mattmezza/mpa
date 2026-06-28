@@ -37,11 +37,19 @@ _HTML_TAG_RE = re.compile(
 
 class TelegramChannel:
     def __init__(
-        self, config: TelegramConfig, agent: AgentCore, voice: VoicePipeline | None = None
+        self,
+        config: TelegramConfig,
+        agent: AgentCore,
+        voice: VoicePipeline | None = None,
+        channel_name: str = "telegram",
     ):
         self.config = config
         self.agent = agent
         self.voice = voice
+        # The channel string this bot reports to the agent. The default bot is
+        # bare "telegram"; a per-persona bot is "telegram:<persona>" (#29), which
+        # silos history and resolves straight to that persona.
+        self.channel_name = channel_name
         # Last chat a user wrote from, used to route approval prompts. Holds a
         # folded "<chat>:<thread>" string when the message came from a topic.
         self._last_chat_for_user: dict[int, int | str] = {}
@@ -49,7 +57,10 @@ class TelegramChannel:
         self.app.add_handler(MessageHandler(filters.TEXT, self._on_text))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
         self.app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, self._on_photo))
-        if config.topics_enabled:
+        # Topic→persona auto-bind only makes sense on the default bot: a persona
+        # bot resolves straight to its own persona (rung 0), so a per-topic binding
+        # would be ignored. Topic *folding* (history isolation) still applies below.
+        if config.topics_enabled and channel_name == "telegram":
             self.app.add_handler(
                 MessageHandler(
                     filters.StatusUpdate.FORUM_TOPIC_CREATED
@@ -273,7 +284,9 @@ class TelegramChannel:
         if user_id is None or not self._is_allowed(user_id):
             return
         chat_id = f"{chat.id}:{thread}"
-        bound = await self.agent.bind_chat_persona_by_label("telegram", str(user_id), chat_id, name)
+        bound = await self.agent.bind_chat_persona_by_label(
+            self.channel_name, str(user_id), chat_id, name
+        )
         if bound:
             await self.send(chat_id, f"Bound this topic to {bound}.")
 
@@ -368,6 +381,13 @@ class TelegramChannel:
         poll it and edit a single Telegram message in place (the chat equivalent
         of the REPL's self-updating spinner line). No-op when nothing is running.
         """
+        # ponytail: the explore status file is a single global singleton, so only
+        # the default bot mirrors it — otherwise a run triggered via one persona-bot
+        # would bubble into every other bot's chat (#29). Per-run scoping (a status
+        # path keyed by channel/profile) belongs in the browser tool — follow-up.
+        if self.channel_name != "telegram":
+            yield
+            return
         status = Path("/app/data" if Path("/app/data").exists() else "data")
         status = status / "browser" / "last" / "explore.status"
         cid, kw = self._route(chat_id)  # split a folded "<chat>:<thread>" topic id
@@ -423,7 +443,7 @@ class TelegramChannel:
         async with self._typing(chat_id), self._progress(chat_id):
             response = await self.agent.process(
                 message=text,
-                channel="telegram",
+                channel=self.channel_name,
                 user_id=str(user_id),
                 chat_id=str(chat_id),
             )
@@ -459,7 +479,7 @@ class TelegramChannel:
                 content = f"{reply_context}{content}"
             response = await self.agent.process(
                 message=content,
-                channel="telegram",
+                channel=self.channel_name,
                 user_id=str(user_id),
                 chat_id=str(chat_id),
             )
@@ -504,7 +524,7 @@ class TelegramChannel:
                 content = f"{reply_context}{content}" if content else reply_context
             response = await self.agent.process(
                 message=content,
-                channel="telegram",
+                channel=self.channel_name,
                 user_id=str(user_id),
                 attachments=attachments,
                 chat_id=str(chat_id),

@@ -34,10 +34,18 @@ CREATE TABLE IF NOT EXISTS personae (
     skills TEXT DEFAULT '',
     tools TEXT DEFAULT '',
     secrets TEXT DEFAULT '',
+    bot_token TEXT DEFAULT '',
+    allowed_user_ids TEXT DEFAULT '',
     created_at DATETIME DEFAULT (datetime('now')),
     updated_at DATETIME DEFAULT (datetime('now'))
 );
 """
+
+# Columns added after the table first shipped — applied to existing DBs on open.
+_MIGRATIONS = (
+    "ALTER TABLE personae ADD COLUMN bot_token TEXT DEFAULT ''",  # #29
+    "ALTER TABLE personae ADD COLUMN allowed_user_ids TEXT DEFAULT ''",  # #29
+)
 
 
 @dataclass(slots=True)
@@ -54,6 +62,8 @@ class Persona:
     skills: list[str] = field(default_factory=list)  # allowlist; [] = all
     tools: list[str] = field(default_factory=list)  # allowlist; [] = all
     secrets: list[str] = field(default_factory=list)  # vault scope; stored only (#19)
+    bot_token: str = ""  # own Telegram bot; empty = reachable only via the default bot (#29)
+    allowed_user_ids: list[int] = field(default_factory=list)  # bot ACL; [] = inherit global
 
     def allows_skill(self, name: str) -> bool:
         return not self.skills or name in self.skills
@@ -72,6 +82,17 @@ def _as_list(value: object) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(p).strip() for p in value if str(p).strip()]
     return []
+
+
+def _as_int_list(value: object) -> list[int]:
+    """Coerce a frontmatter / form value into a clean list of ints (drops non-numeric)."""
+    out: list[int] = []
+    for item in _as_list(value):
+        try:
+            out.append(int(item))
+        except ValueError:
+            continue
+    return out
 
 
 def parse_markdown(text: str, *, name: str) -> Persona:
@@ -117,6 +138,8 @@ def parse_markdown(text: str, *, name: str) -> Persona:
         skills=_as_list(fm.get("skills")),
         tools=_as_list(fm.get("tools")),
         secrets=_as_list(fm.get("secrets")),
+        bot_token=str(fm.get("bot_token", "") or ""),
+        allowed_user_ids=_as_int_list(fm.get("allowed_user_ids")),
     )
 
 
@@ -127,6 +150,8 @@ def to_markdown(p: Persona) -> str:
         "role": p.role,
         "emoji": p.emoji,
         "voice": p.voice,
+        "bot_token": p.bot_token,
+        "allowed_user_ids": p.allowed_user_ids,
         "skills": p.skills,
         "tools": p.tools,
         "secrets": p.secrets,
@@ -151,6 +176,12 @@ class PersonaStore:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
             await db.executescript(_SCHEMA)
+            for stmt in _MIGRATIONS:
+                try:
+                    await db.execute(stmt)
+                except aiosqlite.OperationalError:
+                    pass  # column already present
+            await db.commit()
         self._ready = True
 
     async def ensure_seeded(self) -> bool:
@@ -175,13 +206,15 @@ class PersonaStore:
     async def _upsert(db: aiosqlite.Connection, p: Persona) -> None:
         await db.execute(
             "INSERT INTO personae "
-            "(name, agent_name, role, emoji, voice, personalia, character, skills, tools, secrets) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "(name, agent_name, role, emoji, voice, personalia, character, skills, tools, "
+            "secrets, bot_token, allowed_user_ids) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(name) DO UPDATE SET "
             "agent_name=excluded.agent_name, role=excluded.role, emoji=excluded.emoji, "
             "voice=excluded.voice, personalia=excluded.personalia, character=excluded.character, "
-            "skills=excluded.skills, tools=excluded.tools, "
-            "secrets=excluded.secrets, updated_at=datetime('now')",
+            "skills=excluded.skills, tools=excluded.tools, secrets=excluded.secrets, "
+            "bot_token=excluded.bot_token, allowed_user_ids=excluded.allowed_user_ids, "
+            "updated_at=datetime('now')",
             (
                 p.name,
                 p.agent_name,
@@ -193,6 +226,8 @@ class PersonaStore:
                 "\n".join(p.skills),
                 "\n".join(p.tools),
                 "\n".join(p.secrets),
+                p.bot_token,
+                "\n".join(str(i) for i in p.allowed_user_ids),
             ),
         )
 
@@ -209,6 +244,10 @@ class PersonaStore:
             skills=_as_list(row["skills"]),
             tools=_as_list(row["tools"]),
             secrets=_as_list(row["secrets"]),
+            bot_token=(row["bot_token"] if "bot_token" in row.keys() else "") or "",
+            allowed_user_ids=_as_int_list(
+                row["allowed_user_ids"] if "allowed_user_ids" in row.keys() else ""
+            ),
         )
 
     async def list_personae(self) -> list[Persona]:
@@ -251,6 +290,8 @@ tools:
   - run_command
   - send_message
 secrets: []
+bot_token: "123:ABC"
+allowed_user_ids: [111, 222]
 personalia: |
   You are Forge, a strength coach.
 character: |
@@ -264,6 +305,8 @@ Extra prose in the body.
     assert p.emoji == "🏋️"
     assert p.skills == ["scheduling", "memory"], p.skills
     assert p.tools == ["run_command", "send_message"], p.tools
+    assert p.bot_token == "123:ABC", p.bot_token
+    assert p.allowed_user_ids == [111, 222], p.allowed_user_ids
     assert "Forge" in p.personalia
     assert "motivating" in p.character and "Extra prose" in p.character  # body appended
     assert p.allows_skill("scheduling") and not p.allows_skill("email")
@@ -277,4 +320,5 @@ Extra prose in the body.
     p2 = parse_markdown(to_markdown(p), name="fitness-coach")
     assert p2.agent_name == p.agent_name and p2.skills == p.skills and p2.tools == p.tools
     assert p2.personalia.strip() == p.personalia.strip()
+    assert p2.bot_token == p.bot_token and p2.allowed_user_ids == p.allowed_user_ids
     print("personae.py self-check OK")
