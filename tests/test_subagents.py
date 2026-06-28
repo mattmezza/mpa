@@ -12,7 +12,15 @@ from core.config import Config
 from core.job_store import VALID_TYPES, JobStore
 from core.llm import LLMResponse, LLMToolCall
 from core.personae import Persona
-from core.subagents import SubagentRegistry, SubagentRun, narrow_scope, short_summary
+from core.subagents import (
+    FILE_HANDOFF_INSTRUCTION,
+    SubagentRegistry,
+    SubagentRun,
+    narrow_scope,
+    normalize_effort,
+    resolve_cap,
+    short_summary,
+)
 
 # ---------------------------------------------------------------------------
 # narrow_scope — inherit, never widen ([] / None == "all")
@@ -405,3 +413,96 @@ async def test_run_subagent_task_delivers_to_owner() -> None:
 
     agent.run_subagent.assert_awaited_once()
     channel.send.assert_awaited_once_with(7, "scheduled out")
+
+
+# ---------------------------------------------------------------------------
+# Caller-sized runs: max_steps / token_budget / thinking_effort + file handoff
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_cap_defaults_clamps_and_coerces() -> None:
+    assert resolve_cap(None, 12) == 12  # caller didn't choose → configured ceiling
+    assert resolve_cap(3, 12) == 3  # honoured below the ceiling
+    assert resolve_cap(999, 12) == 12  # config is a ceiling, never exceeded
+    assert resolve_cap(0, 12, floor=1) == 1  # floored
+    assert resolve_cap("nope", 12) == 12  # garbage degrades to the ceiling
+    assert resolve_cap("4", 12) == 4  # numeric string coerces
+    assert resolve_cap(float("inf"), 12) == 12  # int(inf) overflows → ceiling, no crash
+
+
+def test_normalize_effort_maps_and_inherits() -> None:
+    assert normalize_effort(None) is None  # inherit the caller's level
+    assert normalize_effort("") is None
+    assert normalize_effort("off") == ""  # reasoning off
+    assert normalize_effort("HIGH") == "high"  # case-insensitive
+    assert normalize_effort("medium") == "medium"
+    assert normalize_effort("bogus") is None  # unknown → safe inherit default
+
+
+class _RecordingLLM(_ScriptedLLM):
+    """A scripted LLM that also records the system prompt of each call."""
+
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        super().__init__(responses)
+        self.systems: list[str] = []
+
+    async def generate(self, *, system: str = "", **_kw) -> LLMResponse:
+        self.systems.append(system)
+        return await super().generate()
+
+
+@pytest.mark.asyncio
+async def test_subagent_system_prompt_carries_file_handoff(agent) -> None:
+    rec = _RecordingLLM([LLMResponse(text="done", tool_calls=[])])
+    agent.llm = rec
+    await agent.run_subagent(task="x")
+    assert any(FILE_HANDOFF_INSTRUCTION in s for s in rec.systems)
+
+
+@pytest.mark.asyncio
+async def test_run_subagent_caller_max_steps_is_the_limiter(agent) -> None:
+    agent.config.subagents.max_steps = 100  # high config ceiling …
+    call = LLMToolCall(id="1", name="web_search", arguments={"query": "q"})
+    agent.llm = _ScriptedLLM([LLMResponse(text="", tool_calls=[call]) for _ in range(10)])
+    result = await agent.run_subagent(task="loop", max_steps=1)  # … caller wants just 1
+    assert result["ok"] is True
+    assert "budget" in result["result"].lower()
+    assert agent.subagents.get(result["run_id"]).max_steps == 1
+
+
+@pytest.mark.asyncio
+async def test_run_subagent_clamps_caps_to_config_ceiling(agent) -> None:
+    agent.config.subagents.max_steps = 5
+    agent.config.subagents.token_budget = 9000
+    agent.llm = _ScriptedLLM([LLMResponse(text="done", tool_calls=[])])
+    result = await agent.run_subagent(task="x", max_steps=999, token_budget=10**9)
+    run = agent.subagents.get(result["run_id"])
+    assert run.max_steps == 5
+    assert run.token_budget == 9000
+
+
+@pytest.mark.asyncio
+async def test_run_subagent_effort_inherits_by_default(agent, monkeypatch) -> None:
+    agent.llm = _ScriptedLLM([LLMResponse(text="ok", tool_calls=[])])
+    monkeypatch.setattr(
+        agent, "_background_llm", lambda *a, **k: pytest.fail("should not clone when inheriting")
+    )
+    result = await agent.run_subagent(task="x")  # no thinking_effort
+    assert result["ok"] is True
+    assert agent.subagents.get(result["run_id"]).effort is None
+
+
+@pytest.mark.asyncio
+async def test_run_subagent_effort_uses_scoped_client(agent, monkeypatch) -> None:
+    agent.llm = _ScriptedLLM([LLMResponse(text="ok", tool_calls=[])])
+    captured: dict = {}
+
+    def spy(provider, level=""):
+        captured["level"] = level
+        return _ScriptedLLM([LLMResponse(text="ok", tool_calls=[])])
+
+    monkeypatch.setattr(agent, "_background_llm", spy)
+    result = await agent.run_subagent(task="x", thinking_effort="high")
+    assert result["ok"] is True
+    assert captured["level"] == "high"
+    assert agent.subagents.get(result["run_id"]).effort == "high"

@@ -32,7 +32,15 @@ from core.prompt_builder import build_prompt_sections
 from core.scheduler import AgentScheduler
 from core.secret_store import SecretStore
 from core.skills import SkillsEngine
-from core.subagents import SubagentRegistry, SubagentRun, narrow_scope, short_summary
+from core.subagents import (
+    FILE_HANDOFF_INSTRUCTION,
+    SubagentRegistry,
+    SubagentRun,
+    narrow_scope,
+    normalize_effort,
+    resolve_cap,
+    short_summary,
+)
 from core.task_reflection import ReflectionStore
 from core.tools import tool_env
 from voice.pipeline import VoicePipeline
@@ -276,16 +284,26 @@ TOOLS = [
         "name": "spawn_subagent",
         "description": (
             "Delegate a self-contained subtask to a subagent. The subagent runs "
-            "the full agent loop under a chosen persona, with a tool/skill/secret "
-            "scope that is never wider than yours, and returns a structured "
-            "result. It has NO memory of this conversation — put everything it "
-            "needs in 'task'.\n"
+            "the full agent loop under a persona, with a tool/skill/secret scope "
+            "that is never wider than yours, and returns a structured result. It "
+            "has NO memory of this conversation — put everything it needs in "
+            "'task'.\n"
+            "Persona: omit 'persona' to run the subagent as YOURSELF — same "
+            "identity, tools, and scope. That is the default; only name a persona "
+            "when the task clearly calls for a different specialist.\n"
+            "Sizing: by default the subagent runs at the configured ceilings. Size "
+            "it to the job with 'max_steps', 'token_budget', and 'thinking_effort' "
+            "— smaller for a quick lookup, larger / 'high' effort for hard "
+            "multi-step work. Requested values are capped at the configured maxima.\n"
+            "Files: you share a filesystem with the subagent, so it reports the "
+            "absolute paths of any files it creates in its result — you can then "
+            "read or send them.\n"
             "Use background=true for long-running work: you get a run id "
             "immediately and the result is posted to this chat when done (monitor "
             "or cancel it with /jobs or the admin Jobs page). Use background=false "
             "(default) to block and get the result back in this turn.\n"
-            "Subagents are depth-limited and budgeted, so prefer one focused "
-            "delegation over deep nesting."
+            "Subagents are depth-limited, so prefer one focused delegation over "
+            "deep nesting."
         ),
         "input_schema": {
             "type": "object",
@@ -300,8 +318,33 @@ TOOLS = [
                 "persona": {
                     "type": "string",
                     "description": (
-                        "Persona name to run as (e.g. 'coding-helper'). Omit to "
-                        "inherit your current identity and scope."
+                        "Persona name to run as (e.g. 'coding-helper'). Omit to run "
+                        "as yourself — same identity, tools, and scope. This is the "
+                        "default; use it unless the task needs a different specialist."
+                    ),
+                },
+                "max_steps": {
+                    "type": "integer",
+                    "description": (
+                        "Tool-call rounds the subagent may run before a hard stop. "
+                        "Omit for the configured default; capped at the maximum. "
+                        "Lower it for quick tasks, raise it for thorough ones."
+                    ),
+                },
+                "token_budget": {
+                    "type": "integer",
+                    "description": (
+                        "Approximate token ceiling for the whole run (minimum 1000). "
+                        "Omit for the configured default; capped at the maximum."
+                    ),
+                },
+                "thinking_effort": {
+                    "type": "string",
+                    "enum": ["off", "low", "medium", "high"],
+                    "description": (
+                        "How hard the subagent reasons each step. Omit to inherit "
+                        "your own level. Use 'high' for tricky reasoning, 'off'/'low' "
+                        "for simple mechanical work."
                     ),
                 },
                 "background": {
@@ -1850,6 +1893,9 @@ class AgentCore:
             origin_chat_id=str(origin.get("chat_id", "")),
             parent_state=request_state,
             background=bool(params.get("background", False)),
+            max_steps=params.get("max_steps"),
+            token_budget=params.get("token_budget"),
+            thinking_effort=params.get("thinking_effort"),
         )
 
     async def run_subagent(
@@ -1862,10 +1908,17 @@ class AgentCore:
         origin_chat_id: str = "",
         parent_state: dict | None = None,
         background: bool = False,
+        max_steps: object = None,
+        token_budget: object = None,
+        thinking_effort: str | None = None,
     ) -> dict:
         """Run a subagent — the one primitive behind both the tool and scheduled
         ``subagent`` jobs. Scope is narrowed from the caller (inherit-never-widen);
         recursion depth and per-run budgets are enforced.
+
+        ``max_steps`` / ``token_budget`` / ``thinking_effort`` let the caller size
+        the run; each defaults to the configured value and is clamped to it as a
+        ceiling (``thinking_effort`` defaults to inheriting the caller's level).
         """
         cfg = self.config.subagents
         if not cfg.enabled:
@@ -1907,6 +1960,9 @@ class AgentCore:
             task=task,
             depth=parent_depth + 1,
             background=background,
+            max_steps=resolve_cap(max_steps, cfg.max_steps),
+            token_budget=resolve_cap(token_budget, cfg.token_budget, floor=1000),
+            effort=normalize_effort(thinking_effort),
             origin_channel=origin_channel,
             origin_user_id=origin_user_id,
             origin_chat_id=origin_chat_id,
@@ -1986,7 +2042,7 @@ class AgentCore:
 
         Mirrors the main injection loop but runs from a clean slate (no history),
         skips approval/decomposition/memory/reflection (channel='system'), and
-        stops at the configured step/token budget.
+        stops at this run's step/token budget (sized by the spawning agent).
         """
         cfg = self.config.subagents
         tools = apply_feature_gates(
@@ -1999,11 +2055,19 @@ class AgentCore:
         if child_state["depth"] >= cfg.recursion_depth:
             tools = [t for t in tools if t["name"] != "spawn_subagent"]
 
-        system = await self._build_system_prompt(query=task, persona=child_persona)
-        preamble = self._turn_preamble(None)
+        system = await self._build_system_prompt(persona=child_persona)
+        system = f"{system}\n\n{FILE_HANDOFF_INSTRUCTION}"
+        # Memory/reflections inject per-turn via the preamble (#41), scoped to the
+        # child persona (#42); query=task keeps the injection relevant.
+        preamble = await self._turn_preamble(None, query=task, scope=_persona_scope(child_persona))
         messages: list[dict] = [await self._build_user_message(task, None, preamble)]
 
-        response = await self.llm.generate(
+        # effort None = inherit the main client's level; otherwise an effort-scoped
+        # clone (same provider/connection, overridden thinking level).
+        llm = self.llm
+        if run.effort is not None:
+            llm = self._background_llm(self.llm.provider, run.effort)
+        response = await llm.generate(
             model=self.config.agent.model,
             max_tokens=4096,
             system=system,
@@ -2012,7 +2076,7 @@ class AgentCore:
         )
         steps = 0
         tokens = self._usage_total(response.usage)
-        while response.tool_calls and steps < cfg.max_steps and tokens < cfg.token_budget:
+        while response.tool_calls and steps < run.max_steps and tokens < run.token_budget:
             steps += 1
             run.progress = f"step {steps}: {', '.join(c.name for c in response.tool_calls)}"[:120]
             tool_results = []
@@ -2027,9 +2091,9 @@ class AgentCore:
                         "content": json.dumps(result),
                     }
                 )
-            messages.append(self.llm.assistant_message(response))
-            messages.extend(self.llm.tool_result_messages(tool_results))
-            response = await self.llm.generate(
+            messages.append(llm.assistant_message(response))
+            messages.extend(llm.tool_result_messages(tool_results))
+            response = await llm.generate(
                 model=self.config.agent.model,
                 max_tokens=4096,
                 system=system,

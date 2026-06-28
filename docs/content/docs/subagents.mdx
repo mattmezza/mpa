@@ -39,13 +39,29 @@ The agent decides to delegate and calls the tool. Two modes:
 // spawn_subagent tool input
 {
   "task": "Research the top 3 Python HTTP clients and summarise trade-offs",
-  "persona": "coding-helper",   // optional — omit to inherit your identity & scope
+  "persona": "coding-helper",   // optional — omit to run as yourself (same identity & scope)
+  "max_steps": 6,                // optional — caller-chosen, capped at the configured max
+  "token_budget": 40000,         // optional — caller-chosen, min 1000, capped at the configured max
+  "thinking_effort": "high",     // optional — off | low | medium | high; omit to inherit yours
   "background": false            // true → run async, report back when done
 }
 ```
 
 The `task` is self-contained: a subagent has **no memory** of the conversation
 that spawned it, so everything it needs goes in `task`.
+
+The agent **sizes each run to the job**: `max_steps`, `token_budget`, and
+`thinking_effort` let it spend less on a quick lookup and more on hard,
+multi-step work. Each is optional — omit `max_steps`/`token_budget` for the
+configured ceiling, `thinking_effort` to inherit the caller's level — and the
+numeric caps are clamped to the [Guardrails](#guardrails) maxima, which the
+agent can dial *down* but never past. Omitting `persona` runs the subagent as
+the caller itself, with the same identity and scope.
+
+**Files hand back automatically.** The subagent shares the agent's filesystem,
+so any file it writes is already on disk where the caller can reach it — it just
+reports the absolute paths in its result, which the spawning agent then reads,
+sends, or attaches.
 
 ## Scheduled
 
@@ -87,8 +103,8 @@ limit, applied live without a restart), or under `subagents` in `config.yml`:
 |---------|---------|--------------|
 | `enabled` | `true` | Master switch; off hides the `spawn_subagent` tool everywhere |
 | `recursion_depth` | `3` | Max nesting (a top-level spawn is depth 1) |
-| `max_steps` | `12` | Max tool-call rounds per run — a hard stop |
-| `token_budget` | `100000` | Approx token ceiling per run (best-effort) |
+| `max_steps` | `12` | Ceiling on tool-call rounds per run — a hard stop; the agent may request fewer per spawn, never more |
+| `token_budget` | `100000` | Ceiling on tokens per run (best-effort); the agent may request fewer per spawn, never more |
 | `max_concurrent` | `3` | Max background runs at once |
 
 When disabled, the tool is hidden from the assistant and from the Personae tool

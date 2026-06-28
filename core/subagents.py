@@ -23,6 +23,53 @@ from dataclasses import dataclass, field
 # Keep at most this many finished runs for after-the-fact inspection.
 _MAX_FINISHED = 50
 
+# Appended to a subagent's system prompt so files it writes reach the spawning
+# agent. Subagents and the main agent share one process cwd / filesystem (see
+# core/executor.py — subprocesses inherit the cwd), so a file a subagent creates
+# is already on disk where the parent can read it; the only gap is the parent
+# knowing the path. This closes that gap by making the subagent report paths in
+# its result, which is folded into the parent's history.
+FILE_HANDOFF_INSTRUCTION = (
+    "You share a filesystem with the agent that spawned you: it can read any "
+    "file you leave behind, but only if it knows the path. So if you create or "
+    "modify any files, end your final reply with a line 'Files:' followed by "
+    "their absolute paths, one per line. If you made no files, omit it."
+)
+
+_EFFORT_LEVELS = {"off": "", "low": "low", "medium": "medium", "high": "high"}
+
+
+def normalize_effort(value: str | None) -> str | None:
+    """Map a tool-supplied thinking effort to an LLM thinking level.
+
+    ``None``/empty → ``None`` = *inherit the caller's level* (the default, so a
+    subagent thinks as hard as its parent unless told otherwise). ``"off"`` →
+    ``""`` (reasoning off); ``low``/``medium``/``high`` pass through. Anything
+    unrecognised → ``None``, degrading to the safe inherit default rather than
+    erroring on a bad value.
+    """
+    if not value:
+        return None
+    return _EFFORT_LEVELS.get(str(value).strip().lower())
+
+
+def resolve_cap(value: object, ceiling: int, floor: int = 1) -> int:
+    """Clamp a caller-requested run cap (steps / token budget) into bounds.
+
+    ``None`` (the caller didn't choose) → the configured ``ceiling``, preserving
+    prior behaviour. A chosen value is honoured up to the ceiling: the config is
+    a safety guardrail the agent may dial *down* but never exceed. A non-numeric
+    value coerces to the ceiling rather than raising.
+    """
+    if value is None:
+        return ceiling
+    try:
+        return max(floor, min(int(value), ceiling))  # type: ignore[arg-type]
+    except TypeError, ValueError, OverflowError:
+        # OverflowError: json.loads accepts the literal `Infinity`, and int(inf)
+        # overflows — degrade it to the ceiling like any other bad value.
+        return ceiling
+
 
 def narrow_scope(parent: list[str] | None, child: list[str] | None) -> list[str]:
     """Intersect a child scope with the parent's — inherit, never widen.
@@ -51,6 +98,12 @@ class SubagentRun:
     task: str
     depth: int = 1
     background: bool = False
+    # Per-run sizing the spawning agent chose, resolved/clamped via resolve_cap
+    # before the run starts (so always concrete on a live run; the 0 defaults are
+    # only placeholders for direct construction). effort None = inherit caller level.
+    max_steps: int = 0
+    token_budget: int = 0
+    effort: str | None = None
     status: str = "running"  # running | done | cancelled | error
     progress: str = ""
     result: str = ""
