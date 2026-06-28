@@ -471,3 +471,43 @@ async def test_single_write_is_not_batched(agent, monkeypatch) -> None:
     )
     assert prompts["n"] == 0  # nothing to batch for a single write
     assert state["write_decisions"] == {}
+
+
+# ---------------------------------------------------------------------------
+# recall_memory tool — deliberate full-store semantic lookup (#47)
+# ---------------------------------------------------------------------------
+
+
+def _recall_call(call_id: str, **params):
+    from core.llm import LLMToolCall
+
+    return LLMToolCall(id=call_id, name="recall_memory", arguments=dict(params))
+
+
+@pytest.mark.asyncio
+async def test_recall_memory_tool_dispatch(agent, monkeypatch) -> None:
+    """recall_memory routes to the store and shapes the result; no approval prompt."""
+    captured = {}
+
+    async def fake_recall(query, limit=None, scope=None):
+        captured["query"], captured["limit"], captured["scope"] = query, limit, scope
+        return [{"category": "health", "subject": "matteo", "content": "allergic to shellfish"}]
+
+    monkeypatch.setattr(agent.memory, "recall", fake_recall)
+    # The per-turn state carries the active persona's private memory scope,
+    # which recall must receive so it never crosses persona boundaries (#42).
+    state = agent._new_request_state()
+    state["persona_name"] = "coach"
+    result = await agent._execute_tool(
+        _recall_call("1", query="food allergies", limit=5), "telegram", "u1", state
+    )
+    assert captured == {"query": "food allergies", "limit": 5, "scope": "coach"}
+    assert result["count"] == 1
+    assert result["memories"][0]["content"] == "allergic to shellfish"
+
+
+@pytest.mark.asyncio
+async def test_recall_memory_requires_query(agent) -> None:
+    """A blank query is rejected before hitting the store."""
+    result = await agent._execute_tool(_recall_call("1", query="   "), "telegram", "u1")
+    assert "error" in result

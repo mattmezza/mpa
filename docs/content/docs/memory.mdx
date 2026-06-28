@@ -128,8 +128,20 @@ Set `memory.embedding.enabled: false` to fall back to **Tier-1 lexical** (word-o
 ### What embeddings power
 
 - **Relevance-ranked injection.** Instead of dumping the most recent `long_term_limit` rows into the prompt, only the `injection_top_k` (default 12) memories most relevant to the *current message* are injected. They're scored Generative-Agents style: `relevance + 0.5·importance + 0.3·recency`. Injection happens in the **per-turn preamble** (prepended to the current user message), not the static system prompt — so even in session mode (where the static prompt is snapshotted once) the current message is the query every turn, and a fact written mid-session is visible on the next turn without `/new`.
+- **On-demand recall** (the `recall_memory` tool, below).
 - **Dedup.** `update_memory` retrieves ADD/UPDATE/DELETE/NOOP candidates by cosine similarity (with a per-row lexical fallback for any memory that has no vector yet).
 - **Hygiene clustering** (Tier 4, below).
+
+### `recall_memory` — deliberate full-store lookup
+
+Relevance-ranked injection is a small always-on top-k: great for the obvious facts, but as the store grows it can't surface everything, and the agent *can't ask for a fact it doesn't suspect it has*. So injection is paired with a **`recall_memory` tool** the agent calls deliberately when it suspects a relevant stored fact isn't in the injected set (hybrid retrieval — always-on top-k **plus** on-demand recall).
+
+- Searches the agent's **entire** long-term store — **including archived** memories that injection never sees — ranked purely by semantic relevance to the agent's query (lexical-overlap fallback when embeddings are off).
+- Returns up to `recall_top_k` (default 10) matches above a small relevance floor.
+- Recalling **revives** the matched rows: they're reinforced (`access_count` / `last_accessed`) and any archived one is un-archived — a fact the agent looked up and used is warm again.
+- **Scope-aware** (#42): recall is filtered to `scope IN ('', <active persona>)` exactly like injection, so a persona only ever recalls shared facts plus its own private ones — never another persona's. The default identity recalls shared only.
+
+The tool is read-only (no approval prompt) and available to every persona (it can't surface anything injection couldn't already show that persona), alongside the sqlite CLI the memory skill teaches for exact-field queries and bulk edits.
 
 All of this is configurable live from the **admin Memory tab** (enable toggle, backend, model, top-k, plus Download / Test buttons).
 
@@ -230,6 +242,7 @@ memory:
     base_url: ""                       # API providers only; falls back to agent provider base URL
     dimensions: 0                      # 0 = provider default (API providers only)
     injection_top_k: 12                # relevance-ranked memories injected per turn
+    recall_top_k: 10                   # max memories returned by the recall_memory tool
 
   # Tier 3 — forgetting / importance / reinforcement
   default_importance: 5.0              # 1-10 scale assigned to new long-term memories

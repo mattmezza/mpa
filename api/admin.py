@@ -1300,6 +1300,7 @@ def create_admin_app(
             "emb_model": await _cfg("memory.embedding.model", "BAAI/bge-small-en-v1.5"),
             "emb_base_url": await _cfg("memory.embedding.base_url", ""),
             "emb_top_k": await _cfg("memory.embedding.injection_top_k", "12"),
+            "emb_recall_top_k": await _cfg("memory.embedding.recall_top_k", "10"),
             "hygiene_enabled": await _bool("memory.hygiene_enabled", "true"),
             "default_importance": await _cfg("memory.default_importance", "5.0"),
             "archive_after_days": await _cfg("memory.archive_after_days", "90"),
@@ -1656,6 +1657,7 @@ def create_admin_app(
                 # Tier 3/4 lifecycle knobs so memory config changes apply live.
                 agent.memory.embedder = agent._build_embedder()
                 agent.memory.injection_top_k = mem_cfg.embedding.injection_top_k
+                agent.memory.recall_top_k = mem_cfg.embedding.recall_top_k
                 agent.memory.default_importance = mem_cfg.default_importance
                 agent.memory.archive_after_days = mem_cfg.archive_after_days
                 agent.memory.archive_max_importance = mem_cfg.archive_max_importance
@@ -3322,8 +3324,10 @@ def _config_requires_restart(values: dict) -> bool:
 
 # Function-tools that a persona may scope. ``load_skill`` is intentionally
 # excluded — it is always available (the core mechanic personae use to read
-# their allowlisted skills). Kept here (not imported from core.agent) to avoid
-# pulling the agent's heavy import graph into the admin app.
+# their allowlisted skills); so are the vault tools and ``recall_memory``
+# (memory is injected for every persona, scope-filtered, so its on-demand
+# counterpart is always available too). Kept here (not imported from core.agent)
+# to avoid pulling the agent's heavy import graph into the admin app.
 GATEABLE_TOOLS = [
     "run_command",
     "send_email",

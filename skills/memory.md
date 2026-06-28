@@ -37,6 +37,22 @@ sqlite3 data/memory.db "UPDATE long_term SET content = 'New value', updated_at =
 
 ## Querying memories
 
+### Semantic recall (full store, by meaning)
+
+The sqlite queries below match on exact fields or `LIKE` substrings. To find a
+fact by **meaning** across your *entire* long-term store — including older,
+archived memories that aren't injected into the prompt — call the
+`recall_memory` tool instead of writing SQL:
+
+- Each turn only injects your few most-relevant memories. When you suspect a
+  stored fact exists beyond them (e.g. "didn't they mention a food allergy?"),
+  call `recall_memory` with a natural-language `query` describing the fact.
+- It ranks the whole store by semantic similarity and returns the best matches.
+  Recalling a memory also revives it (un-archives + reinforces it).
+
+Use `recall_memory` for fuzzy "do I know anything about X?" lookups; use the
+sqlite queries below when you need exact filtering, counts, or bulk edits.
+
 ### Search by subject
 
 ```bash

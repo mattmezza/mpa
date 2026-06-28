@@ -184,6 +184,86 @@ class TestEmbeddingWritePath:
         assert "lives in zurich" in block
 
 
+# -- recall_memory: deliberate full-store semantic lookup (issue #47) --
+
+
+async def _set_archived(store: MemoryStore, rid: int) -> None:
+    async with aiosqlite.connect(store.db_path) as db:
+        await db.execute("UPDATE long_term SET archived = 1 WHERE id = ?", (rid,))
+        await db.commit()
+
+
+class TestRecall:
+    async def test_empty_query_returns_nothing(self, embed_store):
+        await embed_store._insert_long_term("fact", "matteo", "lives in zurich")
+        assert await embed_store.recall("   ") == []
+
+    async def test_semantic_match_ranks_first(self, embed_store):
+        await embed_store._insert_long_term("health", "matteo", "allergic to shellfish")
+        await embed_store._insert_long_term("fact", "simge", "speaks turkish fluently")
+
+        out = await embed_store.recall("food allergies and shellfish")
+
+        assert out
+        assert out[0]["content"] == "allergic to shellfish"
+
+    async def test_searches_and_unarchives_archived_rows(self, embed_store):
+        # An archived memory is invisible to injection but recall must still find
+        # it — and recalling it brings it back (un-archives + reinforces).
+        emb = await _HashEmbedder().embed_one("allergic to shellfish")
+        rid = await _insert(
+            embed_store, "matteo", "allergic to shellfish", category="health", embedding=emb
+        )
+        await _set_archived(embed_store, rid)
+        assert await embed_store.get_long_term() == []  # archived → not injected
+
+        out = await embed_store.recall("shellfish allergy")
+
+        assert any(m["content"] == "allergic to shellfish" for m in out)
+        row = await _row(embed_store, rid)
+        assert row["archived"] == 0  # un-archived on recall
+        assert row["access_count"] >= 1  # reinforced
+
+    async def test_respects_limit(self, embed_store):
+        for i in range(6):
+            await embed_store._insert_long_term("fact", "matteo", f"likes hobby number {i}")
+        out = await embed_store.recall("matteo likes hobby", limit=3)
+        # All 6 rows clear the floor, so the limit slice must cap at exactly 3.
+        assert len(out) == 3
+
+    async def test_lexical_fallback_without_embedder(self, store):
+        # No embedder configured → recall falls back to token overlap, still works.
+        await store._insert_long_term("health", "matteo", "allergic to shellfish")
+        await store._insert_long_term("fact", "simge", "speaks turkish")
+        out = await store.recall("shellfish allergy")
+        assert any("shellfish" in m["content"] for m in out)
+        # The relevance floor drops the zero-overlap row (deterministic on the
+        # lexical path — guards _RECALL_MIN_RELEVANCE against being lowered to 0).
+        assert all("turkish" not in m["content"] for m in out)
+
+    async def test_scope_isolation(self, embed_store):
+        # Recall must honour persona scope (#42): a persona sees shared + its own
+        # private memories, never another persona's private rows.
+        await embed_store._insert_long_term("fact", "matteo", "allergic to dust", scope="")
+        await embed_store._insert_long_term(
+            "health", "matteo", "allergic to shellfish", scope="coach"
+        )
+        await embed_store._insert_long_term(
+            "health", "matteo", "allergic to peanuts", scope="finance"
+        )
+
+        coach = {
+            m["content"] for m in await embed_store.recall("allergic allergies", scope="coach")
+        }
+        assert "allergic to shellfish" in coach  # coach's own private
+        assert "allergic to dust" in coach  # shared
+        assert "allergic to peanuts" not in coach  # finance's private — never crosses
+
+        # The default identity (scope="") sees shared only.
+        owner = {m["content"] for m in await embed_store.recall("allergic allergies", scope="")}
+        assert owner == {"allergic to dust"}
+
+
 # -- Tier 3: forgetting / importance / reinforcement --
 
 
