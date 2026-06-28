@@ -126,8 +126,9 @@ def agent(tmp_path, monkeypatch):
     return AgentCore(Config())
 
 
-def test_turn_preamble_carries_datetime(agent) -> None:
-    preamble = agent._turn_preamble(None)
+@pytest.mark.asyncio
+async def test_turn_preamble_carries_datetime(agent) -> None:
+    preamble = await agent._turn_preamble(None)
     assert "Current date & time" in preamble
     # No execution plan when the goal was not decomposed.
     assert "execution_plan" not in preamble
@@ -135,7 +136,7 @@ def test_turn_preamble_carries_datetime(agent) -> None:
 
 @pytest.mark.asyncio
 async def test_build_user_message_prepends_preamble(agent) -> None:
-    preamble = agent._turn_preamble(None)
+    preamble = await agent._turn_preamble(None)
     msg = await agent._build_user_message("hello", None, preamble)
     assert msg["role"] == "user"
     assert msg["content"].startswith(preamble)
@@ -168,6 +169,36 @@ async def test_session_system_built_once_and_reused(agent, monkeypatch) -> None:
     third = await agent._session_system_prompt("telegram", "u1", "")
     assert third == "SYSTEM-2"
     assert calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_mid_session_memory_visible_next_turn_without_new(agent) -> None:
+    """A memory written mid-session must reach the model on the next turn (#41).
+
+    It rides the per-turn preamble, so it appears even though the static session
+    system prompt is snapshotted once and never rebuilt mid-session.
+    """
+    # Snapshot the static prompt as the session start would, then verify it does
+    # NOT carry the memory (the whole point: the snapshot stays static).
+    snapshot = await agent._session_system_prompt("telegram", "u1", "")
+    assert "Capital of France is Paris" not in snapshot
+
+    # Mid-session extraction stores a new long-term fact + a task reflection
+    # (the issue names all three of compaction/cross-chat/reflection staleness).
+    await agent.memory._insert_long_term("fact", "France", "Capital of France is Paris")
+    await agent.reflections._store_reflection(
+        {"lesson": "Prefer himalaya -o json over scraping text", "category": "tool"}
+    )
+
+    # Next turn's preamble surfaces both — no /new, no snapshot rebuild.
+    preamble = await agent._turn_preamble(None, query="What's the capital of France?")
+    assert "Capital of France is Paris" in preamble
+    assert "<memories>" in preamble
+    assert "Prefer himalaya -o json over scraping text" in preamble
+    assert "<task_reflections>" in preamble
+
+    # Snapshot is still the frozen one (cache intact, not rebuilt).
+    assert await agent._session_system_prompt("telegram", "u1", "") == snapshot
 
 
 # ---------------------------------------------------------------------------

@@ -1313,13 +1313,20 @@ def create_admin_app(
         long_term: list[dict] = []
         short_term: list[dict] = []
         if Path(memory_db).exists():
-            cols = "id, category, subject, content, source, confidence, created_at, updated_at"
+            # Idempotent migrate-on-read so a legacy DB has the scope column (#42)
+            # even when no agent is running to have migrated it on startup.
+            from core.memory import MemoryStore
+
+            await MemoryStore(db_path=memory_db)._ensure_schema()
+            cols = (
+                "id, category, subject, content, source, confidence, created_at, updated_at, scope"
+            )
             async with aiosqlite.connect(memory_db) as db:
                 db.row_factory = aiosqlite.Row
                 cursor = await db.execute(f"SELECT {cols} FROM long_term ORDER BY updated_at DESC")
                 long_term = [dict(row) for row in await cursor.fetchall()]
                 cursor = await db.execute(
-                    "SELECT id, content, context, expires_at, created_at "
+                    "SELECT id, content, context, expires_at, created_at, scope "
                     "FROM short_term WHERE expires_at > datetime('now') "
                     "ORDER BY created_at DESC"
                 )
@@ -2464,7 +2471,7 @@ def create_admin_app(
         import aiosqlite
 
         await agent.memory._ensure_schema()
-        cols = "id, category, subject, content, source, confidence, created_at, updated_at"
+        cols = "id, category, subject, content, source, confidence, created_at, updated_at, scope"
         query = f"SELECT {cols} FROM long_term"
         conditions = []
         params: list[str] = []
@@ -2495,7 +2502,7 @@ def create_admin_app(
         async with aiosqlite.connect(agent.memory.db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT id, content, context, expires_at, created_at "
+                "SELECT id, content, context, expires_at, created_at, scope "
                 "FROM short_term WHERE expires_at > datetime('now') "
                 "ORDER BY created_at DESC"
             )

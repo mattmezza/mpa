@@ -355,6 +355,15 @@ TOOLS = [
 ]
 
 
+def _persona_scope(persona: Persona | None) -> str:
+    """The memory scope key for an active persona (#42).
+
+    A persona's own name is its private scope; no persona (default identity) =
+    ``""`` = shared only.
+    """
+    return persona.name if persona else ""
+
+
 def scoped_tools(persona: Persona | None) -> list[dict]:
     """Filter the function-tool schemas by the active persona's tool scope.
 
@@ -484,9 +493,6 @@ class AgentCore:
         if self.config.goal_decomposition.enabled and channel != "system":
             decomposed_goal = await self._maybe_decompose(message)
 
-        # Per-turn preamble: live date/time + (optional) execution plan.
-        preamble = self._turn_preamble(decomposed_goal)
-
         # Resolve the active persona (its identity, skills + tool scope) — a
         # per-chat binding wins over the globally selected persona (#14). An
         # explicit override (scheduler) skips the ladder (#29).
@@ -494,6 +500,13 @@ class AgentCore:
             persona = await self._load_persona(persona_name)
         else:
             persona = await self._resolve_persona(channel, user_id, chat_id)
+
+        # Per-turn preamble: live date/time + fresh memory/reflections + plan.
+        # Memory is scoped to the active persona (#42): shared + its private.
+        preamble = await self._turn_preamble(
+            decomposed_goal, query=message, scope=_persona_scope(persona)
+        )
+
         tools = apply_feature_gates(
             scoped_tools(persona),
             secrets_available=self.secret_store is not None,
@@ -505,11 +518,9 @@ class AgentCore:
         # is only built once, not rebuilt and re-sent each turn). In injection
         # mode the prompt is windowed/stateless, so it is rebuilt per call.
         if self.history_mode == "session":
-            system = await self._session_system_prompt(
-                channel, user_id, chat_id, query=message, persona=persona
-            )
+            system = await self._session_system_prompt(channel, user_id, chat_id, persona=persona)
         else:
-            system = await self._build_system_prompt(query=message, persona=persona)
+            system = await self._build_system_prompt(persona=persona)
 
         if self.config.admin.capture_prompts:
             self._record_system_prompt(
@@ -604,15 +615,51 @@ class AgentCore:
                 return p.name
         return None
 
-    def _turn_preamble(self, decomposed_goal: DecomposedGoal | None) -> str:
+    async def _turn_preamble(
+        self,
+        decomposed_goal: DecomposedGoal | None,
+        query: str | None = None,
+        scope: str = "",
+    ) -> str:
         """Build the per-turn preamble prepended to the current user message.
 
         Always carries the live date/time (so the agent knows 'now' every turn);
-        also carries the execution plan when the request was decomposed.
+        also carries fresh, query-relevant memory + reflections and the
+        execution plan when the request was decomposed.
+
+        Memory/reflections live here, not in the static system prompt: in
+        session mode that prompt is snapshotted once and would freeze any
+        mid-session extraction out of view until ``/new`` (#41). The preamble is
+        rebuilt every turn and rides on the new (uncached) user message, so it
+        costs only the block's own tokens and is also relevance-ranked per turn.
+
+        ``scope`` is the active persona's memory scope (#42): ``""`` = shared
+        only, ``"<persona>"`` = shared + that persona's private memory.
         """
         now = datetime.now(ZoneInfo(self.config.agent.timezone))
         stamp = now.strftime("%A, %B %d, %Y %H:%M %Z")
         preamble = f"[Current date & time: {stamp}]"
+
+        # ponytail: in session mode this now runs a query embed + cosine scan +
+        # reinforce-write every turn (was once per session). Intended — that is
+        # what makes injection fresh and per-turn relevant — and cheap for a
+        # personal store. If the store grows huge, gate behind the recall_memory
+        # tool (issue #41 phase 2) instead of always-injecting top-k.
+        try:
+            memories = await self.memory.format_for_prompt(query=query, scope=scope)
+            if memories:
+                preamble += f"\n\n<memories>\n{memories}\n</memories>"
+        except Exception:
+            log.exception("Failed to load memories for turn preamble")
+
+        if self.config.task_reflection.enabled:
+            try:
+                reflections = await self.reflections.format_for_prompt()
+                if reflections:
+                    preamble += f"\n\n<task_reflections>\n{reflections}\n</task_reflections>"
+            except Exception:
+                log.exception("Failed to load task reflections for turn preamble")
+
         if decomposed_goal:
             preamble += (
                 "\n\n<execution_plan>\n"
@@ -629,20 +676,19 @@ class AgentCore:
         channel: str,
         user_id: str,
         chat_id: str,
-        query: str | None = None,
         persona: Persona | None = None,
     ) -> str:
         """Return the session's static system prompt, building it once if needed.
 
         Built fresh after a ``/new`` (when no snapshot exists), then reused for
         the lifetime of the session so the static content is sent only once.
-        Relevance-ranked memory injection therefore uses the first message of
-        the session as its query.
+        The prompt is purely static now — memory/reflections are injected per
+        turn in the preamble (#41), so the snapshot never goes stale.
         """
         cached = await self.history.get_session_system(channel, user_id, chat_id)
         if cached is not None:
             return cached
-        system = await self._build_system_prompt(query=query, persona=persona)
+        system = await self._build_system_prompt(persona=persona)
         await self.history.set_session_system(channel, user_id, system, chat_id)
         return system
 
@@ -868,7 +914,7 @@ class AgentCore:
         # Automatic memory extraction
         if channel != "system":
             asyncio.create_task(
-                self._extract_memories(message, final_text),
+                self._extract_memories(message, final_text, persona),
                 name=f"memory-extract-{user_id}",
             )
 
@@ -986,7 +1032,7 @@ class AgentCore:
         # Automatic memory extraction
         if channel != "system":
             asyncio.create_task(
-                self._extract_memories(message, final_text),
+                self._extract_memories(message, final_text, persona),
                 name=f"memory-extract-{user_id}",
             )
 
@@ -1719,13 +1765,18 @@ class AgentCore:
             self.permissions._pending.pop(request_id, None)
             return "skipped"
 
-    async def _extract_memories(self, user_msg: str, agent_msg: str) -> None:
+    async def _extract_memories(
+        self, user_msg: str, agent_msg: str, persona: Persona | None = None
+    ) -> None:
         """Run automatic memory extraction in the background.
 
         Uses a cheap/fast model to identify facts worth remembering
         from the conversation turn, then stores them in the memory DB.
         Exceptions are logged and swallowed — this must never crash the
         main agent loop.
+
+        ``persona`` scopes what is written (#42): facts the extractor marks
+        private land in that persona's scope, everything else stays shared.
         """
         try:
             llm = self._memory_llm(
@@ -1738,6 +1789,7 @@ class AgentCore:
                 user_msg=user_msg,
                 agent_msg=agent_msg,
                 cooldown_seconds=self.config.memory.extraction_cooldown_seconds,
+                persona_scope=_persona_scope(persona),
             )
             if stored:
                 log.info("Background memory extraction stored %d memories", stored)
@@ -1861,29 +1913,25 @@ class AgentCore:
     async def _build_system_prompt(
         self,
         decomposed_goal: DecomposedGoal | None = None,
-        query: str | None = None,
         persona: Persona | None = None,
     ) -> str:
         skills_index = await self.skills.get_index_block(allow=persona.skills if persona else None)
-        memories = await self.memory.format_for_prompt(query=query)
 
-        # Task reflections — lessons learned from past tasks
-        reflections = ""
-        if self.config.task_reflection.enabled:
-            try:
-                reflections = await self.reflections.format_for_prompt()
-            except Exception:
-                log.exception("Failed to load task reflections for prompt")
-
+        # Memory + reflections are NOT baked into the static prompt: in session
+        # mode it is snapshotted once and would freeze stale (#41). They are
+        # injected fresh per turn in the preamble instead (see _turn_preamble),
+        # which also makes them query-relevant on every turn.
         sections = build_prompt_sections(
             config=self.config,
             history_mode=self.history_mode,
             skills_index=skills_index,
-            memories=memories,
-            reflections=reflections,
+            memories="",
+            reflections="",
             decomposed_goal=decomposed_goal,
             persona=persona,
             secrets_available=self.secret_store is not None,
+            include_memories=False,
+            include_reflections=False,
         )
         return sections.full_prompt
 

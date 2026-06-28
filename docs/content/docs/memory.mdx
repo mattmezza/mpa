@@ -43,7 +43,8 @@ CREATE TABLE long_term (
     importance REAL NOT NULL DEFAULT 5.0,
     last_accessed DATETIME,
     access_count INTEGER NOT NULL DEFAULT 0,
-    archived INTEGER NOT NULL DEFAULT 0
+    archived INTEGER NOT NULL DEFAULT 0,
+    scope TEXT NOT NULL DEFAULT ''  -- '' = shared, '<persona>' = private (#42)
 );
 
 CREATE TABLE short_term (
@@ -51,11 +52,20 @@ CREATE TABLE short_term (
     content TEXT NOT NULL,
     context TEXT,                  -- why this was stored
     expires_at DATETIME NOT NULL,
-    created_at DATETIME DEFAULT (datetime('now'))
+    created_at DATETIME DEFAULT (datetime('now')),
+    scope TEXT NOT NULL DEFAULT ''  -- see long_term.scope
 );
 ```
 
-The Tier 2–4 columns (`embedding`, `importance`, `last_accessed`, `access_count`, `archived`) are added to pre-existing databases by an in-place `ALTER TABLE` migration on startup — upgrading needs no manual steps.
+The Tier 2–4 columns (`embedding`, `importance`, `last_accessed`, `access_count`, `archived`) and `scope` are added to pre-existing databases by an in-place `ALTER TABLE` migration on startup — upgrading needs no manual steps.
+
+### Scoped memory — shared pool + per-persona private
+
+Memory is **two-tier by scope**, mirroring the [secrets vault](/docs/secrets)'s shared-infra/per-persona model. The `scope` column is `''` for **shared** owner-level facts (preferences, relationships, biography — visible to every persona and the default identity) and `'<persona>'` for facts **private** to one persona (so a fitness coach and a finance assistant don't read each other's domain memory).
+
+- **Retrieval** at each turn filters to `scope IN ('', <active persona>)`. The active persona is resolved from the per-chat binding / [bot-per-persona](/docs/personae) channel; the default identity (no persona) reads **shared only**.
+- **Extraction** is persona-aware: when a persona is active the extractor may tag a fact private to it, defaulting to **shared when unsure** — so the owner doesn't have to re-teach each persona the same general facts.
+- **Isolation is enforced at the store, not just the prompt:** dedup/update/delete candidates are bounded to shared + the writer's own scope, consolidation promotes per scope, and the hygiene pass clusters within a scope only — a private memory can never merge into or delete another persona's. Existing memories migrate to `''` (shared), the correct default.
 
 ### Long-term categories
 
@@ -117,7 +127,7 @@ Set `memory.embedding.enabled: false` to fall back to **Tier-1 lexical** (word-o
 
 ### What embeddings power
 
-- **Relevance-ranked injection.** Instead of dumping the most recent `long_term_limit` rows into the prompt, only the `injection_top_k` (default 12) memories most relevant to the *current message* are injected. They're scored Generative-Agents style: `relevance + 0.5·importance + 0.3·recency`. (In session mode, where the static prompt is snapshotted once, the session's first message is the query.)
+- **Relevance-ranked injection.** Instead of dumping the most recent `long_term_limit` rows into the prompt, only the `injection_top_k` (default 12) memories most relevant to the *current message* are injected. They're scored Generative-Agents style: `relevance + 0.5·importance + 0.3·recency`. Injection happens in the **per-turn preamble** (prepended to the current user message), not the static system prompt — so even in session mode (where the static prompt is snapshotted once) the current message is the query every turn, and a fact written mid-session is visible on the next turn without `/new`.
 - **Dedup.** `update_memory` retrieves ADD/UPDATE/DELETE/NOOP candidates by cosine similarity (with a per-row lexical fallback for any memory that has no vector yet).
 - **Hygiene clustering** (Tier 4, below).
 
