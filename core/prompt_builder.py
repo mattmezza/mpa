@@ -116,6 +116,7 @@ def build_prompt_sections(
     secrets_available: bool = False,
     include_memories: bool = True,
     include_reflections: bool = True,
+    include_skills: bool = True,
 ) -> PromptSections:
     """Build all prompt sections with current config and dynamic context.
 
@@ -195,7 +196,7 @@ def build_prompt_sections(
         memory_section = f"<memories>\n{memories}\n</memories>"
 
     skills_section = ""
-    if skills_index:
+    if include_skills and skills_index:
         skills_section = f"<available_skills>\n{skills_index}\n</available_skills>"
 
     reflections_section = ""

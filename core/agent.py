@@ -529,10 +529,16 @@ class AgentCore:
         else:
             persona = await self._resolve_persona(channel, user_id, chat_id)
 
-        # Per-turn preamble: live date/time + fresh memory/reflections + plan.
-        # Memory is scoped to the active persona (#42): shared + its private.
+        # Per-turn preamble: live date/time + fresh memory/reflections + skills
+        # index + plan. Memory is scoped to the active persona (#42): shared +
+        # its private. Skills index is scoped to the persona's allowlist (#46).
+        session_key = (channel, user_id, chat_id) if self.history_mode == "session" else None
         preamble = await self._turn_preamble(
-            decomposed_goal, query=message, scope=_persona_scope(persona)
+            decomposed_goal,
+            query=message,
+            scope=_persona_scope(persona),
+            persona=persona,
+            session_key=session_key,
         )
 
         tools = apply_feature_gates(
@@ -648,25 +654,56 @@ class AgentCore:
         decomposed_goal: DecomposedGoal | None,
         query: str | None = None,
         scope: str = "",
+        persona: Persona | None = None,
+        session_key: tuple[str, str, str] | None = None,
     ) -> str:
         """Build the per-turn preamble prepended to the current user message.
 
         Always carries the live date/time (so the agent knows 'now' every turn);
-        also carries fresh, query-relevant memory + reflections and the
-        execution plan when the request was decomposed.
+        also carries fresh, query-relevant memory + reflections, the live skills
+        index, and the execution plan when the request was decomposed.
 
-        Memory/reflections live here, not in the static system prompt: in
+        Memory/reflections/skills live here, not in the static system prompt: in
         session mode that prompt is snapshotted once and would freeze any
-        mid-session extraction out of view until ``/new`` (#41). The preamble is
-        rebuilt every turn and rides on the new (uncached) user message, so it
-        costs only the block's own tokens and is also relevance-ranked per turn.
+        mid-session change out of view until ``/new`` (#41, #46) — e.g. a skill
+        added via the skill-creator stayed invisible. The preamble is rebuilt
+        every turn and rides on the new (uncached) user message, so it costs only
+        the block's own tokens and is also relevance-ranked per turn.
 
         ``scope`` is the active persona's memory scope (#42): ``""`` = shared
         only, ``"<persona>"`` = shared + that persona's private memory.
+        ``persona`` scopes the skills index to its allowlist. ``session_key``
+        gates skills re-injection (see below); ``None`` = always inject.
         """
         now = datetime.now(ZoneInfo(self.config.agent.timezone))
         stamp = now.strftime("%A, %B %d, %Y %H:%M %Z")
         preamble = f"[Current date & time: {stamp}]"
+
+        # Skills index, scoped to the persona's allowlist. Rebuilt fresh per turn
+        # so a skill added mid-session (e.g. via skill-creator) is immediately
+        # visible without a /new (#46). Cheap: a local DB read, like memory.
+        #
+        # In session mode (``session_key`` set) the preamble is persisted into the
+        # growing history, so re-sending an unchanged index every turn would just
+        # accumulate identical copies. We skip it only when the exact block is
+        # ALREADY present in the replayed history (so the model still sees it).
+        # Gating on the real history — not a side cache — keeps it correct by
+        # construction across /new, compaction, persona rebind and concurrent
+        # turns: any of those that drop or change the block simply won't find it,
+        # and the failure direction is a harmless re-send, never a blind turn.
+        # Injection mode and tests pass ``None`` → always include.
+        try:
+            skills_index = await self.skills.get_index_block(
+                allow=persona.skills if persona else None
+            )
+            if skills_index:
+                block = f"<available_skills>\n{skills_index}\n</available_skills>"
+                if session_key is None or not await self._skills_block_in_history(
+                    session_key, block
+                ):
+                    preamble += f"\n\n{block}"
+        except Exception:
+            log.exception("Failed to load skills index for turn preamble")
 
         # ponytail: in session mode this now runs a query embed + cosine scan +
         # reinforce-write every turn (was once per session). Intended — that is
@@ -698,6 +735,32 @@ class AgentCore:
                 "</execution_plan>"
             )
         return preamble
+
+    async def _skills_block_in_history(self, session_key: tuple[str, str, str], block: str) -> bool:
+        """True if the exact ``<available_skills>`` block is already present in the
+        replayed session history — so the model still sees it and we needn't
+        re-send it this turn (#46 follow-up).
+
+        Reads the same message array that will be sent to the model, so the
+        decision is correct by construction: after a /new or compaction the block
+        is gone (→ re-send), a persona rebind or new skill changes the block (→
+        re-send), and concurrent turns that haven't yet persisted both re-send
+        (harmless). Cheap: a substring scan over the (compaction-bounded) history.
+        """
+        try:
+            messages = await self.history.get_session(*session_key)
+        except Exception:
+            return False  # safe direction: re-send rather than risk a blind turn
+        for m in messages:
+            content = m.get("content")
+            if isinstance(content, str):
+                if block in content:
+                    return True
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and block in str(part.get("text", "")):
+                        return True
+        return False
 
     async def _session_system_prompt(
         self,
@@ -1968,16 +2031,15 @@ class AgentCore:
         decomposed_goal: DecomposedGoal | None = None,
         persona: Persona | None = None,
     ) -> str:
-        skills_index = await self.skills.get_index_block(allow=persona.skills if persona else None)
-
-        # Memory + reflections are NOT baked into the static prompt: in session
-        # mode it is snapshotted once and would freeze stale (#41). They are
-        # injected fresh per turn in the preamble instead (see _turn_preamble),
-        # which also makes them query-relevant on every turn.
+        # Memory, reflections AND the skills index are NOT baked into the static
+        # prompt: in session mode it is snapshotted once and would freeze stale —
+        # a skill added mid-session stayed invisible until /new (#41, #46). All
+        # three are injected fresh per turn in the preamble instead (see
+        # _turn_preamble), which also makes memory query-relevant every turn.
         sections = build_prompt_sections(
             config=self.config,
             history_mode=self.history_mode,
-            skills_index=skills_index,
+            skills_index="",
             memories="",
             reflections="",
             decomposed_goal=decomposed_goal,
@@ -1985,6 +2047,7 @@ class AgentCore:
             secrets_available=self.secret_store is not None,
             include_memories=False,
             include_reflections=False,
+            include_skills=False,
         )
         return sections.full_prompt
 
