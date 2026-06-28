@@ -9,6 +9,7 @@
     embModel: {{ emb_model|default('BAAI/bge-small-en-v1.5', true)|tojson|forceescape }},
     embBaseUrl: {{ emb_base_url|default('', true)|tojson|forceescape }},
     embTopK: {{ emb_top_k|default('12', true)|tojson|forceescape }},
+    embRecallTopK: {{ emb_recall_top_k|default('10', true)|tojson|forceescape }},
     embResult: '', embOk: false,
     embStatus: null, embBusy: false, embTestResult: '',
     // Lifecycle (Tier 3/4)
@@ -151,6 +152,12 @@
         <p class="text-muted text-xs mt-1">How many of the most relevant long-term memories to put in the prompt each message.</p>
       </div>
 
+      <div>
+        <label class="label">Recall results (recall_memory tool)</label>
+        <input type="number" class="input-sm" style="max-width:120px" x-model="embRecallTopK" :disabled="!embEnabled" min="1" max="25">
+        <p class="text-muted text-xs mt-1">Default number of memories the recall_memory tool returns when the agent searches its full long-term store on demand (the agent may request fewer/more per call, capped at 25).</p>
+      </div>
+
       <div class="text-xs" x-show="isLocal && embStatus">
         Model on disk:
         <span x-show="embStatus && embStatus.model_ready" class="text-success">yes ✓</span>
@@ -165,7 +172,8 @@
                 'memory.embedding.provider': embProvider,
                 'memory.embedding.model': embModel,
                 'memory.embedding.base_url': embBaseUrl,
-                'memory.embedding.injection_top_k': String(embTopK)
+                'memory.embedding.injection_top_k': String(embTopK),
+                'memory.embedding.recall_top_k': String(embRecallTopK)
               }, 'Embedding settings saved', 'embOk', 'embResult').then(loadEmbStatus)">
         Save embedding settings
       </button>

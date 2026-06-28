@@ -1300,6 +1300,7 @@ def create_admin_app(
             "emb_model": await _cfg("memory.embedding.model", "BAAI/bge-small-en-v1.5"),
             "emb_base_url": await _cfg("memory.embedding.base_url", ""),
             "emb_top_k": await _cfg("memory.embedding.injection_top_k", "12"),
+            "emb_recall_top_k": await _cfg("memory.embedding.recall_top_k", "10"),
             "hygiene_enabled": await _bool("memory.hygiene_enabled", "true"),
             "default_importance": await _cfg("memory.default_importance", "5.0"),
             "archive_after_days": await _cfg("memory.archive_after_days", "90"),
