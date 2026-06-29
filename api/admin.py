@@ -849,9 +849,12 @@ def create_admin_app(
         artifacts = await store_from_config(config_store)
         sub_enabled = await config_store.get("subagents.enabled")
         sub_on = sub_enabled is None or sub_enabled == "true"
+        ig_on = (await config_store.get("tools.imagegen.enabled")) == "true"
         return {
             "all_skills": all_skills,
-            "all_tools": gateable_tools_for(artifacts.enabled, subagents_enabled=sub_on),
+            "all_tools": gateable_tools_for(
+                artifacts.enabled, subagents_enabled=sub_on, imagegen_enabled=ig_on
+            ),
         }
 
     @app.get("/admin/personae/new", response_model=None)
@@ -3503,16 +3506,21 @@ GATEABLE_TOOLS = [
     "manage_jobs",
     "write_artifact",
     "spawn_subagent",
+    "generate_image",
 ]
 
 
-def gateable_tools_for(artifacts_enabled: bool, subagents_enabled: bool = True) -> list[str]:
+def gateable_tools_for(
+    artifacts_enabled: bool, subagents_enabled: bool = True, imagegen_enabled: bool = True
+) -> list[str]:
     """GATEABLE_TOOLS minus tools whose feature is globally disabled."""
     out = list(GATEABLE_TOOLS)
     if not artifacts_enabled:
         out = [t for t in out if t != "write_artifact"]
     if not subagents_enabled:
         out = [t for t in out if t != "spawn_subagent"]
+    if not imagegen_enabled:
+        out = [t for t in out if t != "generate_image"]
     return out
 
 

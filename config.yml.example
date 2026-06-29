@@ -131,6 +131,17 @@ artifacts:
   directory: "data/artifacts"  # where artifacts live
   ttl_hours: 168               # default lifetime; agent may pick its own (0 = forever)
 
+# Optional tools the agent can use. Configure via the admin UI (Settings → Tools)
+# or here. Image generation (generate_image) sends results as native photos:
+tools:
+  imagegen:
+    enabled: false
+    provider: "openrouter"   # openrouter | fal | openai
+    model: ""                # blank = provider default (flux.2-klein / flux/schnell / gpt-image-1-mini)
+    api_key: ""              # blank reuses the LLM key for openai/openrouter; else ${vault:IMAGEGEN_API_KEY}
+    daily_budget: 0          # max images/day (0 = unlimited)
+    monthly_budget: 0        # max images/month (0 = unlimited)
+
 # Subagents — the agent can delegate a scoped subtask to a sub-loop running
 # under a chosen persona, on demand (spawn_subagent tool) or on a schedule
 # (a "subagent" job above). A child's tools/skills/secrets are a subset of the

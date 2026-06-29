@@ -14,6 +14,7 @@ A self-hosted personal AI agent that runs in a single Docker container. MPA acts
 - **Scheduled tasks** — Cron-based jobs for morning briefings, email checks, contact sync, and custom tasks
 - **Subagents** — Delegate a scoped subtask to a sub-loop under a chosen persona, on demand or scheduled. Runs sync (result returned in-turn) or in the background; a finished background batch is distilled by a summary inference into a one-line chat notification + a concise context digest (raw output never reaches the user or the agent's context). The agent sizes each run (steps / token budget / thinking effort) and defaults the persona to its own; scope is a subset of the caller's (inherit-never-widen). Monitor and cancel from Telegram (`/jobs`) or the admin UI
 - **Voice** — Speech-to-text (faster-whisper) and text-to-speech (edge-tts)
+- **Image generation** — Optional `generate_image` tool (OpenRouter, fal.ai, or OpenAI) that creates images on request and sends them as native photos. Reuses an existing OpenRouter/OpenAI LLM key, with a daily/monthly budget cap (off by default)
 - **Web search** — Tavily integration for real-time information
 - **Browser automation** — Optional headless browser (Playwright) to read JS-heavy pages and act on sites, with persistent logged-in profiles and per-domain approval (off by default)
 - **Web artifacts** — The agent publishes pages, multi-file sites, or documents (PDF, image, slides) as shareable links at `/artifacts/<id>/`, with unguessable ids, a sandbox CSP, agent-chosen TTL cleanup, and approval before publishing an on-disk file
@@ -160,6 +161,7 @@ Example skills included:
 - `weather.md` — Weather lookups
 - `jq.md` — JSON processing
 - `browser.md` — Headless browser: read JS-heavy pages and act on sites
+- `image_generation.md` — Generate images and send them as native photos
 
 Create new skills by adding `.md` files to `skills/`, through the admin UI's skill editor, or via the skills CLI:
 
