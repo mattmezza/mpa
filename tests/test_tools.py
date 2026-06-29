@@ -124,6 +124,16 @@ def test_voice_capability_hidden_when_tts_disabled() -> None:
     assert "[respond_with_voice]" not in sections.full_prompt
 
 
+def test_strip_voice_marker_removes_marker_unconditionally() -> None:
+    # The marker is internal signalling: it must be removed from the reply text
+    # whether or not synthesis ran, so it can never leak to the user.
+    from core.agent import strip_voice_marker
+
+    assert strip_voice_marker("Hi there [respond_with_voice]") == "Hi there"
+    assert strip_voice_marker("[respond_with_voice]") == ""
+    assert strip_voice_marker("plain reply") == "plain reply"
+
+
 # ---------------------------------------------------------------------------
 # Session system snapshot
 # ---------------------------------------------------------------------------
