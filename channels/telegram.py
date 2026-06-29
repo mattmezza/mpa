@@ -391,7 +391,7 @@ class TelegramChannel:
     # posted — short enough to reassure on a slow turn, long enough that quick
     # replies (already covered by native typing dots) never flash a throwaway
     # bubble. Overridable in tests.
-    _PLACEHOLDER_DELAY = 2.0
+    _PLACEHOLDER_DELAY = 0.1
 
     @asynccontextmanager
     async def _typing(self, chat_id: int | str):
