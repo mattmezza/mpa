@@ -188,10 +188,10 @@ class EmbeddingConfig(BaseModel):
 class MemoryConfig(BaseModel):
     db_path: str = "data/memory.db"
     long_term_limit: int = 50
-    extraction_provider: str = "anthropic"
-    extraction_model: str = "claude-haiku-4-5"
-    consolidation_provider: str = "anthropic"
-    consolidation_model: str = "claude-haiku-4-5"
+    extraction_provider: str = "deepseek"
+    extraction_model: str = "deepseek-v4-flash"
+    consolidation_provider: str = "deepseek"
+    consolidation_model: str = "deepseek-v4-flash"
     extraction_thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     consolidation_thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     extraction_cooldown_seconds: int = 120  # minimum seconds between extractions
@@ -211,15 +211,15 @@ class MemoryConfig(BaseModel):
 
 class GoalDecompositionConfig(BaseModel):
     enabled: bool = True
-    provider: str = "anthropic"
-    model: str = "claude-haiku-4-5"
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"
     thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
 
 
 class TaskReflectionConfig(BaseModel):
     enabled: bool = True
-    provider: str = "anthropic"
-    model: str = "claude-haiku-4-5"
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"
     thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     db_path: str = "data/reflections.db"
     max_reflections: int = 50  # max reflections to keep for prompt injection
@@ -233,8 +233,8 @@ class CompactionConfig(BaseModel):
     """
 
     enabled: bool = True
-    provider: str = "anthropic"
-    model: str = "claude-haiku-4-5"
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"
     thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     threshold_type: str = "percent"  # "percent" (of context window) or "tokens" (absolute)
     threshold_percent: int = 80  # trigger at this % of the model's context window
@@ -318,6 +318,21 @@ class SubagentsConfig(BaseModel):
     max_concurrent: int = 3  # max background runs at once
 
 
+class SubagentSummaryConfig(BaseModel):
+    """Summarise a finished background subagent batch (issue #15).
+
+    Instead of dumping a subagent's raw output to the chat and the agent's
+    context, a small inference distils each batch into a one-sentence chat
+    *notification* and a concise *digest* for the agent's context. Mirrors the
+    other background inferences (memory / compaction / reflection).
+    """
+
+    enabled: bool = True
+    provider: str = "deepseek"  # fast + cheap is ideal for this distillation
+    model: str = "deepseek-v4-flash"
+    thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
+
+
 class Config(BaseModel):
     agent: AgentConfig = AgentConfig()
     channels: ChannelsConfig = ChannelsConfig()
@@ -337,6 +352,7 @@ class Config(BaseModel):
     tools: ToolsConfig = ToolsConfig()
     artifacts: ArtifactsConfig = ArtifactsConfig()
     subagents: SubagentsConfig = SubagentsConfig()
+    subagent_summary: SubagentSummaryConfig = SubagentSummaryConfig()
 
 
 def load_config(path: str | Path = "config.yml") -> Config:

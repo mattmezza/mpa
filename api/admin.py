@@ -1036,13 +1036,13 @@ def create_admin_app(
         deepseek_vaulted = _is_vault_ref(deepseek_api_key)
         model = await config_store.get("agent.model") or "claude-4-6-sonnet"
         thinking_level = await config_store.get("agent.thinking_level") or ""
-        extraction_provider = await config_store.get("memory.extraction_provider") or "anthropic"
-        extraction_model = await config_store.get("memory.extraction_model") or "claude-haiku-4-5"
+        extraction_provider = await config_store.get("memory.extraction_provider") or "deepseek"
+        extraction_model = await config_store.get("memory.extraction_model") or "deepseek-v4-flash"
         consolidation_provider = (
-            await config_store.get("memory.consolidation_provider") or "anthropic"
+            await config_store.get("memory.consolidation_provider") or "deepseek"
         )
         consolidation_model = (
-            await config_store.get("memory.consolidation_model") or "claude-haiku-4-5"
+            await config_store.get("memory.consolidation_model") or "deepseek-v4-flash"
         )
         extraction_thinking_level = await config_store.get("memory.extraction_thinking_level") or ""
         consolidation_thinking_level = (
@@ -1050,16 +1050,16 @@ def create_admin_app(
         )
         gd_enabled = await config_store.get("goal_decomposition.enabled")
         gd_enabled = gd_enabled if gd_enabled is not None else "true"
-        gd_provider = await config_store.get("goal_decomposition.provider") or "anthropic"
-        gd_model = await config_store.get("goal_decomposition.model") or "claude-haiku-4-5"
+        gd_provider = await config_store.get("goal_decomposition.provider") or "deepseek"
+        gd_model = await config_store.get("goal_decomposition.model") or "deepseek-v4-flash"
         tr_enabled = await config_store.get("task_reflection.enabled")
         tr_enabled = tr_enabled if tr_enabled is not None else "true"
-        tr_provider = await config_store.get("task_reflection.provider") or "anthropic"
-        tr_model = await config_store.get("task_reflection.model") or "claude-haiku-4-5"
+        tr_provider = await config_store.get("task_reflection.provider") or "deepseek"
+        tr_model = await config_store.get("task_reflection.model") or "deepseek-v4-flash"
         gd_thinking_level = await config_store.get("goal_decomposition.thinking_level") or ""
         tr_thinking_level = await config_store.get("task_reflection.thinking_level") or ""
-        compaction_provider = await config_store.get("compaction.provider") or "anthropic"
-        compaction_model = await config_store.get("compaction.model") or "claude-haiku-4-5"
+        compaction_provider = await config_store.get("compaction.provider") or "deepseek"
+        compaction_model = await config_store.get("compaction.model") or "deepseek-v4-flash"
         compaction_thinking_level = await config_store.get("compaction.thinking_level") or ""
         vision_enabled = await config_store.get("vision.enabled")
         vision_enabled = vision_enabled if vision_enabled is not None else "false"
@@ -1164,6 +1164,13 @@ def create_admin_app(
         sub_steps = await config_store.get("subagents.max_steps") or "12"
         sub_tokens = await config_store.get("subagents.token_budget") or "100000"
         sub_concurrent = await config_store.get("subagents.max_concurrent") or "3"
+        # Result-summary inference (notification + context digest) for finished
+        # background batches — fast/cheap model by default.
+        ss_enabled = await config_store.get("subagent_summary.enabled")
+        ss_enabled = ss_enabled if ss_enabled is not None else "true"
+        ss_provider = await config_store.get("subagent_summary.provider") or "deepseek"
+        ss_model = await config_store.get("subagent_summary.model") or "deepseek-v4-flash"
+        ss_thinking = await config_store.get("subagent_summary.thinking_level") or ""
 
         return _render_partial(
             "partials/tools.html",
@@ -1185,6 +1192,10 @@ def create_admin_app(
             subagents_max_steps=sub_steps,
             subagents_token_budget=sub_tokens,
             subagents_max_concurrent=sub_concurrent,
+            summary_enabled=ss_enabled,
+            summary_provider=ss_provider,
+            summary_model=ss_model,
+            summary_thinking_level=ss_thinking,
         )
 
     @app.post("/tools/gh/test", dependencies=[Depends(auth)])

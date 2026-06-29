@@ -30,11 +30,13 @@ The agent decides to delegate and calls the tool. Two modes:
   in the same turn.
 - **Background** (`background: true`): the tool returns a run id immediately and
   the subagent runs off-turn. A subagent works **for the agent, not the user** —
-  so its raw output is never shown to you. When the whole batch of background
-  runs for the chat has finished, the agent runs one **synthesis turn**: it
-  ingests the findings and writes a single, concise reply in its own voice, and
-  that is what you see. While a run is in flight, its status is shown to the
-  agent each turn so it never mistakes a pending run for a finished one.
+  its raw output is never shown to you. When the whole batch of background runs
+  for the chat has finished, a small [summary inference](#result-summary)
+  distils it into **two** things: a one-line *notification* sent to the chat, and
+  a concise *digest* kept in the agent's context so it can answer follow-ups
+  without the raw output polluting the conversation. While a run is in flight,
+  its status is shown to the agent each turn so it never mistakes a pending run
+  for a finished one.
 
 ```jsonc
 // spawn_subagent tool input
@@ -121,6 +123,24 @@ When disabled, the tool is hidden from the assistant and from the Personae tool
 scope. Assign it per persona in the **Personae** editor. A run that hits its step
 or token budget stops and returns what it has, with a note that the budget was
 reached.
+
+## Result summary
+
+A finished **background** batch isn't dumped on you raw. A small, fast inference
+(its own provider/model, like memory or compaction) distils the batch into a
+one-line chat **notification** and a concise **digest** that stays in the agent's
+context for follow-ups. Configure it in the **Tools** tab (the *Result summary*
+section of the Subagents card) or under `subagent_summary` in `config.yml`:
+
+| Setting | Default | What it does |
+|---------|---------|--------------|
+| `enabled` | `true` | Off falls back to a crude first-line truncation (no LLM call) |
+| `provider` | `deepseek` | Inference provider for the summary |
+| `model` | `deepseek-v4-flash` | Fast + cheap is ideal for this distillation |
+| `thinking_level` | `""` | `""` (off) / `low` / `medium` / `high` for reasoning models |
+
+Synchronous spawns are unaffected — the agent gets the full result inline as the
+tool result and weaves it into its own reply.
 
 ## Monitoring & cancelling
 

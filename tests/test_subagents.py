@@ -206,21 +206,20 @@ async def test_run_subagent_token_budget_stops_loop(agent) -> None:
 
 
 @pytest.mark.asyncio
-async def test_background_subagent_synthesises_instead_of_dumping(agent, monkeypatch) -> None:
-    from core.agent import AgentResponse
-
+async def test_background_subagent_notifies_user_digests_context(agent, monkeypatch) -> None:
     channel = AsyncMock()
     agent.channels["telegram"] = channel
-    agent.llm = _ScriptedLLM([LLMResponse(text="raw findings: CHF 599", tool_calls=[])])
+    agent.llm = _ScriptedLLM([LLMResponse(text="raw verbose findings: CHF 599 ...", tool_calls=[])])
 
-    # Capture the synthesis turn instead of running the whole agent loop.
-    captured: dict = {}
+    # Stub the summary inference: (chat notification, context digest).
+    async def fake_summary(batch):
+        return "Cheapest is CHF 599.", "iPhone 17e 256GB at CHF 599; entry model."
 
-    async def fake_process(message, channel, user_id, chat_id, decompose=True, **kw):
-        captured.update(message=message, decompose=decompose, chat_id=chat_id)
-        return AgentResponse(text="The cheapest is CHF 599.")
+    monkeypatch.setattr(agent, "_summarize_subagent_batch", fake_summary)
 
-    monkeypatch.setattr(agent, "process", fake_process)
+    # A trailing assistant turn for the digest to merge into (keeps alternation).
+    await agent.history.add_turn("telegram", "u1", "user", "price?", "555")
+    await agent.history.add_turn("telegram", "u1", "assistant", "On it.", "555")
 
     result = await agent.run_subagent(
         task="price check",
@@ -229,27 +228,28 @@ async def test_background_subagent_synthesises_instead_of_dumping(agent, monkeyp
         origin_chat_id="555",
         background=True,
     )
-    assert result["background"] is True
     run = agent.subagents.get(result["run_id"])
-    await run._task  # let the background loop + synthesis finish
+    await run._task
 
     assert run.status == "done"
-    assert run.synthesized is True
-    # The user sees the SYNTHESISED reply, never the raw subagent output.
-    channel.send.assert_awaited_once_with("555", "The cheapest is CHF 599.")
-    # The synthesis turn received the raw findings as a non-decomposed internal trigger.
-    assert "raw findings: CHF 599" in captured["message"]
-    assert captured["decompose"] is False
+    # Chat: the one-line NOTIFICATION only — never the raw output.
+    channel.send.assert_awaited_once_with("555", "Cheapest is CHF 599.")
+    # Context: the concise digest is kept (merged), the raw output never is.
+    turns = await agent.history.get_messages("telegram", "u1", "555")
+    blob = str(turns[-1]["content"])
+    assert [t["role"] for t in turns] == ["user", "assistant"]  # still alternating
+    assert "iPhone 17e 256GB at CHF 599" in blob
+    assert "raw verbose findings" not in blob
 
 
 @pytest.mark.asyncio
-async def test_background_batch_synthesises_once_when_all_done(agent, monkeypatch) -> None:
+async def test_background_batch_delivers_once_when_all_done(agent, monkeypatch) -> None:
     calls: list[list[str]] = []
 
-    async def fake_synth(channel, user_id, chat_id, batch):
+    async def fake_deliver(channel, user_id, chat_id, batch):
         calls.append([r.run_id for r in batch])
 
-    monkeypatch.setattr(agent, "_synthesize_and_reply", fake_synth)
+    monkeypatch.setattr(agent, "_summarize_and_deliver", fake_deliver)
 
     common = dict(background=True, origin_channel="telegram", origin_chat_id="c")
     r1 = SubagentRun(run_id="s1", persona="", task="a", origin_user_id="u", **common)
@@ -257,14 +257,14 @@ async def test_background_batch_synthesises_once_when_all_done(agent, monkeypatc
     agent.subagents.register(r1)
     agent.subagents.register(r2)
 
-    # First finishes → the other is still running → barrier holds, no synthesis.
+    # First finishes → the other is still running → barrier holds, no delivery.
     agent.subagents.finish("s1", "done", result="x")
-    await agent._maybe_synthesize_subagent_batch(r1)
+    await agent._maybe_deliver_subagent_batch(r1)
     assert calls == []
 
-    # Last finishes → barrier releases → ONE synthesis over the whole batch.
+    # Last finishes → barrier releases → ONE delivery over the whole batch.
     agent.subagents.finish("s2", "done", result="y")
-    await agent._maybe_synthesize_subagent_batch(r2)
+    await agent._maybe_deliver_subagent_batch(r2)
     assert len(calls) == 1
     assert sorted(calls[0]) == ["s1", "s2"]
     assert r1.synthesized and r2.synthesized
@@ -278,10 +278,10 @@ async def test_cancelling_a_sibling_releases_a_deferred_reply(agent, monkeypatch
 
     calls: list[list[str]] = []
 
-    async def fake_synth(channel, user_id, chat_id, batch):
+    async def fake_deliver(channel, user_id, chat_id, batch):
         calls.append(sorted(r.run_id for r in batch))
 
-    monkeypatch.setattr(agent, "_synthesize_and_reply", fake_synth)
+    monkeypatch.setattr(agent, "_summarize_and_deliver", fake_deliver)
 
     gate = asyncio.Event()
 
@@ -297,7 +297,7 @@ async def test_cancelling_a_sibling_releases_a_deferred_reply(agent, monkeypatch
     b_res = await agent.run_subagent(task="B-task", background=True, **origin)
     a_res = await agent.run_subagent(task="A-task", background=True, **origin)
 
-    # A completes but B is still running → A defers (not synthesised, not lost).
+    # A completes but B is still running → A defers (not delivered, not lost).
     await agent.subagents.get(a_res["run_id"])._task
     assert calls == []
     assert agent.subagents.get(a_res["run_id"]).synthesized is False
@@ -307,34 +307,38 @@ async def test_cancelling_a_sibling_releases_a_deferred_reply(agent, monkeypatch
     with pytest.raises(asyncio.CancelledError):
         await agent.subagents.get(b_res["run_id"])._task
 
-    # A's reply was synthesised (not lost), and only A — B was cancelled.
+    # A's reply was delivered (not lost), and only A — B was cancelled.
     assert calls == [[a_res["run_id"]]]
     assert agent.subagents.get(a_res["run_id"]).synthesized is True
 
 
+def test_summary_parsing_and_fallback() -> None:
+    from core.subagents import _parse_summary, fallback_summary
+
+    n, d = _parse_summary("NOTIFICATION: Cheapest is CHF 599.\nDIGEST: iPhone 17e 256GB CHF 599.")
+    assert n == "Cheapest is CHF 599."
+    assert "iPhone 17e" in d
+    # No markers → first non-empty line becomes the notification.
+    assert _parse_summary("Just one line")[0] == "Just one line"
+    assert _parse_summary("") == ("", "")
+    # Truncation fallback from raw items (no LLM).
+    items = [("task a", "line1\nline2", "", "done"), ("task b", "r b", "", "done")]
+    notif, digest = fallback_summary(items)
+    assert "line1" in notif and "r b" in notif
+    assert "- task a:" in digest
+
+
 @pytest.mark.asyncio
-async def test_allow_subagents_false_withholds_spawn_tool(agent) -> None:
-    """A synthesis turn (allow_subagents=False) must not be offered spawn_subagent,
-    so it can't fan out more background work behind a soft prompt guard."""
-    captured: list[set[str]] = []
+async def test_summarize_batch_calls_llm_and_parses() -> None:
+    from core.subagents import summarize_batch
 
-    class RecLLM(_ScriptedLLM):
-        async def generate(self, *, tools=(), **_kw) -> LLMResponse:
-            captured.append({t["name"] for t in tools})
-            return await super().generate()
+    class FakeLLM:
+        async def generate_text(self, *, model, prompt, max_tokens=600):
+            return "NOTIFICATION: Done — 3 results.\nDIGEST: A, B and C found."
 
-    # Default (allowed) → the tool is on the table.
-    agent.llm = RecLLM([LLMResponse(text="ok", tool_calls=[])])
-    await agent.process(message="hi", channel="telegram", user_id="u", chat_id="c1")
-    assert "spawn_subagent" in captured[0]
-
-    # Synthesis turn (disallowed) → it is withheld.
-    captured.clear()
-    agent.llm = RecLLM([LLMResponse(text="ok", tool_calls=[])])
-    await agent.process(
-        message="hi", channel="telegram", user_id="u", chat_id="c2", allow_subagents=False
-    )
-    assert "spawn_subagent" not in captured[0]
+    notif, digest = await summarize_batch(FakeLLM(), "m", [("t", "r", "", "done")])
+    assert notif == "Done — 3 results."
+    assert digest == "A, B and C found."
 
 
 @pytest.mark.asyncio
