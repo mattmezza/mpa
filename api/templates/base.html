@@ -82,7 +82,7 @@
     }
     window.restartAgentNow = restartAgentNow;
 
-    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel, rdEnabled, rdProvider, rdModel, rdThinkingLevel, rdGroupOnly, rdMaxReplies, rdWindowSeconds) {
       const currentProvider = provider || 'anthropic';
       return {
         providerOptions: [
@@ -146,6 +146,15 @@
         gdResultOk: false,
         trResult: '',
         trResultOk: false,
+        rdEnabled: rdEnabled === 'true' || rdEnabled === true,
+        rdProvider: rdProvider || 'deepseek',
+        rdModel: rdModel || 'deepseek-v4-flash',
+        rdThinkingLevel: rdThinkingLevel || '',
+        rdGroupOnly: rdGroupOnly === 'true' || rdGroupOnly === true,
+        rdMaxReplies: rdMaxReplies || '6',
+        rdWindowSeconds: rdWindowSeconds || '120',
+        rdResult: '',
+        rdResultOk: false,
         compactionProvider: compactionProvider || 'anthropic',
         compactionModel: compactionModel || 'claude-haiku-4-5',
         compactionResult: '',
@@ -401,6 +410,12 @@
             if (this.gdModel) return;
             const list = this.modelOptions(this.gdProvider);
             if (list.length) { this.gdModel = list[0].value; }
+            return;
+          }
+          if (kind === 'rd') {
+            if (this.rdModel) return;
+            const list = this.modelOptions(this.rdProvider);
+            if (list.length) { this.rdModel = list[0].value; }
             return;
           }
           if (this.trModel) return;
