@@ -214,10 +214,16 @@ class TelegramChannel:
 
         Telegram entity offsets/lengths are UTF-16 code units, so slicing the
         Python str by code point misaligns once a non-BMP char (emoji) precedes
-        the entity. Prefer python-telegram-bot's own ``parse_entity`` and fall
-        back to a code-point slice only for plain test doubles.
+        the entity. Prefer python-telegram-bot's own parser and fall back to a
+        code-point slice only for plain test doubles. A photo/document caption
+        has no ``.text``, and ``parse_entity`` raises there — use
+        ``parse_caption_entity`` for the entity that lives in the caption.
         """
-        parse = getattr(message, "parse_entity", None)
+        parse = (
+            getattr(message, "parse_caption_entity", None)
+            if not getattr(message, "text", None)
+            else getattr(message, "parse_entity", None)
+        )
         if callable(parse):
             try:
                 return parse(ent)

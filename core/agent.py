@@ -2488,7 +2488,11 @@ class AgentCore:
             return
         text = self._history_message_text(message, attachments)
         # Cap a single folded run so a high-traffic, never-addressed group can't
-        # grow one turn without bound; a fresh turn then ages out via windowing.
+        # grow one turn without bound. A fresh turn then ages out via windowing in
+        # injection mode; in session mode it persists until the next reply triggers
+        # _maybe_compact, so a sustained never-addressed flood can bloat the session
+        # — acceptable behind the opt-in group_chat flag. ponytail: add a per-chat
+        # record budget only if a real room ever shows write abuse.
         cap = _SILENT_FOLD_MAX_CHARS
         try:
             if self.history_mode == "session":

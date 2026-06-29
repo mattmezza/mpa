@@ -221,10 +221,10 @@ def _channel(
     return ch
 
 
-def _ent(type_, text="", *, user=None):
-    """A MessageEntity-ish double; offset/length span the LAST occurrence of
-    ``text`` so a single mention is found wherever it sits in the message."""
-    return SimpleNamespace(type=type_, offset=0, length=len(text), user=user, _seg=text)
+def _ent(type_, text="", *, user=None, offset=0):
+    """A MessageEntity-ish double. ``_seg`` is what PTB's UTF-16-safe parser
+    returns; ``offset/length`` drive the raw code-point slice fallback."""
+    return SimpleNamespace(type=type_, offset=offset, length=len(text), user=user, _seg=text)
 
 
 def _msg(
@@ -236,7 +236,13 @@ def _msg(
     caption_entities=None,
     is_topic_message=False,
 ):
-    # parse_entity returns the stashed segment, mirroring PTB's UTF-16-safe helper.
+    # Mirror PTB: parse_entity raises on a caption-only message (no .text); the
+    # caption entity must be read via parse_caption_entity instead.
+    def _parse_entity(ent):
+        if not text:
+            raise RuntimeError("This Message has no 'text'.")
+        return getattr(ent, "_seg", "")
+
     return SimpleNamespace(
         text=text,
         caption=caption,
@@ -244,7 +250,8 @@ def _msg(
         caption_entities=caption_entities or [],
         reply_to_message=reply_to,
         is_topic_message=is_topic_message,
-        parse_entity=lambda ent: getattr(ent, "_seg", ""),
+        parse_entity=_parse_entity,
+        parse_caption_entity=lambda ent: getattr(ent, "_seg", ""),
     )
 
 
@@ -287,6 +294,18 @@ def test_addressed_via_mention_entity() -> None:
 def test_addressed_via_command_entity() -> None:
     ch = _channel()
     msg = _msg("/jobs@coachbot", entities=[_ent("bot_command", "/jobs@coachbot")])
+    assert ch._addressed_to_me(msg) is True
+
+
+def test_addressed_via_photo_caption_mention() -> None:
+    """A photo caption @mention must be read via parse_caption_entity (a caption
+    message has no .text, where parse_entity raises) — and stay UTF-16-safe so an
+    emoji before the mention doesn't misalign the slice."""
+    ch = _channel()
+    # Emoji prefix: a raw code-point slice at the UTF-16 offset would be wrong;
+    # only parse_caption_entity yields the correct "@coachbot".
+    ent = _ent("mention", "@coachbot", offset=3)
+    msg = _msg(text="", caption="😀 @coachbot hi", caption_entities=[ent])
     assert ch._addressed_to_me(msg) is True
 
 
