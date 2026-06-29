@@ -615,12 +615,26 @@ class TelegramChannel:
         await self._send_response(chat_id, response)
 
     async def _send_response(self, chat_id: int | str, response) -> None:
-        """Send an AgentResponse back — voice if present, otherwise text."""
+        """Send an AgentResponse back — voice, generated images, and/or text."""
+        cid, kw = self._route(chat_id)
+        text = response.text or ""
+        images = [a for a in (getattr(response, "attachments", None) or []) if a.is_image]
         if response.voice:
-            cid, kw = self._route(chat_id)
             await self.app.bot.send_voice(cid, response.voice, **kw)
-        elif response.text:
-            await self.send(chat_id, response.text)
+            for att in images:
+                await self.app.bot.send_photo(cid, att.data, **kw)
+        elif images:
+            # The first photo carries the text as its caption when it fits
+            # (Telegram's hard limit is 1024); otherwise the text goes first.
+            caption = text if 0 < len(text) <= 1024 else ""
+            if text and not caption:
+                await self.send(chat_id, text)
+            for i, att in enumerate(images):
+                await self.app.bot.send_photo(
+                    cid, att.data, caption=(caption if i == 0 and caption else None), **kw
+                )
+        elif text:
+            await self.send(chat_id, text)
         else:
             log.warning("Skipping empty response for chat_id=%s", chat_id)
         # Out-of-band system notice (e.g. context compaction), sent separately.

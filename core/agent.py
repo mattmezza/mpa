@@ -12,17 +12,20 @@ import time
 import uuid
 from collections import OrderedDict, deque
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from tavily import TavilyClient
 
+from core import imagegen
 from core.compaction import compact_messages, should_compact
 from core.config import Config
 from core.embeddings import LOCAL_PROVIDERS, EmbeddingClient, LocalEmbeddingClient
 from core.executor import ToolExecutor
 from core.goal_decomposition import DecomposedGoal, classify_complexity, decompose_goal
 from core.history import ConversationHistory
+from core.imagegen import ImageBudget
 from core.job_store import JobStore
 from core.llm import LLMClient, LLMToolCall, model_supports_vision
 from core.memory import MemoryStore
@@ -187,6 +190,34 @@ TOOLS = [
                 "query": {"type": "string", "description": "Search query"},
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "generate_image",
+        "description": (
+            "Generate an image from a text prompt and deliver it to the user as a "
+            "native photo in the chat. Use when the user asks for a picture, "
+            "illustration, diagram, concept art, logo, or any visual. The image is "
+            "sent to the user automatically — do NOT put the file path or base64 in "
+            "your reply, just briefly say what you made. Load the 'image_generation' "
+            "skill for prompting tips."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Detailed description of the image to generate",
+                },
+                "size": {
+                    "type": "string",
+                    "description": (
+                        "Optional WIDTHxHEIGHT, e.g. '1024x1024'. Honored by OpenAI; "
+                        "other providers use the model's default aspect."
+                    ),
+                },
+            },
+            "required": ["prompt"],
         },
     },
     {
@@ -553,6 +584,7 @@ def apply_feature_gates(
     artifacts_enabled: bool,
     skills_on_demand: bool = False,
     subagents_enabled: bool = True,
+    imagegen_enabled: bool = False,
 ) -> list[dict]:
     """Drop tools whose backing feature is unavailable/disabled, so the model is
     never offered a capability it can't use (defence in depth — the tool handlers
@@ -568,6 +600,8 @@ def apply_feature_gates(
         out = [t for t in out if t["name"] not in ("search_skills", "list_skills")]
     if not subagents_enabled:
         out = [t for t in out if t["name"] != "spawn_subagent"]
+    if not imagegen_enabled:
+        out = [t for t in out if t["name"] != "generate_image"]
     return out
 
 
@@ -587,6 +621,9 @@ class AgentCore:
             seed_dir=config.agent.personae_dir,
         )
         self.executor = ToolExecutor(tool_env=tool_env(config))
+        # Image-generation usage guardrail (issue #55). Cheap to construct; the
+        # SQLite table is created lazily on first use.
+        self.image_budget = ImageBudget(config.tools.imagegen.db_path)
         self.history = ConversationHistory(
             db_path=config.history.db_path,
             max_turns=config.history.max_turns,
@@ -857,6 +894,7 @@ class AgentCore:
             artifacts_enabled=self.config.artifacts.enabled,
             skills_on_demand=self.config.agent.skills_index_mode == "on_demand",
             subagents_enabled=self.config.subagents.enabled,
+            imagegen_enabled=self.config.tools.imagegen.enabled,
         )
 
     async def _turn_preamble(
@@ -1307,7 +1345,11 @@ class AgentCore:
                 name=f"task-reflect-{user_id}",
             )
 
-        return AgentResponse(text=final_text, voice=voice_bytes)
+        return AgentResponse(
+            text=final_text,
+            voice=voice_bytes,
+            attachments=request_state.get("pending_attachments", []),
+        )
 
     async def _process_session(
         self,
@@ -1427,7 +1469,12 @@ class AgentCore:
                 name=f"task-reflect-{user_id}",
             )
 
-        return AgentResponse(text=final_text, voice=voice_bytes, system_notice=system_notice)
+        return AgentResponse(
+            text=final_text,
+            voice=voice_bytes,
+            attachments=request_state.get("pending_attachments", []),
+            system_notice=system_notice,
+        )
 
     @staticmethod
     def _history_message_text(message: str, attachments: list[Attachment] | None = None) -> str:
@@ -1584,6 +1631,9 @@ class AgentCore:
             log.info("Tool call: web_search — %s", params.get("query", ""))
             return await self._tool_web_search(params)
 
+        if name == "generate_image":
+            return await self._tool_generate_image(params, request_state)
+
         if name == "load_skill":
             skill_name = str(params.get("name", "")).strip()
             if not skill_name:
@@ -1679,6 +1729,8 @@ class AgentCore:
             "executed_writes": set(),
             "write_decisions": {},
             "approvals": {},
+            # Media produced mid-turn (e.g. generate_image) to deliver natively (#55).
+            "pending_attachments": [],
             "allowed_skills": persona.skills if persona else None,
             # Secret scope for {{secret:}} ACL in run_command (issue #19).
             "persona_secrets": list(persona.secrets) if persona else [],
@@ -2469,6 +2521,45 @@ class AgentCore:
         return {
             "query": query,
             "results": results,
+        }
+
+    async def _tool_generate_image(self, params: dict, request_state: dict) -> dict:
+        """Generate an image and queue it for native-media delivery (issue #55).
+
+        The bytes ride back on the turn's ``AgentResponse.attachments`` (the
+        channel sends them as a photo) — never as a path/base64 in the model's
+        text. The budget guardrail is checked before spending, recorded after.
+        """
+        ig = self.config.tools.imagegen
+        if not ig.enabled:
+            return {"error": "Image generation is disabled. Enable it in the admin settings."}
+        prompt = str(params.get("prompt", "")).strip()
+        if not prompt:
+            return {"error": "A prompt is required."}
+        over = await self.image_budget.check(ig.daily_budget, ig.monthly_budget)
+        if over:
+            return {"error": over}
+        try:
+            data, mime = await imagegen.generate(
+                self.config, prompt, str(params.get("size", "")).strip()
+            )
+        except Exception as exc:
+            log.exception("Image generation failed")
+            return {"error": f"Image generation failed: {exc}"}
+        await self.image_budget.record()
+        path = imagegen.save(data, mime)
+        request_state.setdefault("pending_attachments", []).append(
+            Attachment(data=data, mime_type=mime, filename=Path(path).name)
+        )
+        log.info("Generated image (%d bytes, %s) → %s", len(data), mime, path)
+        return {
+            "ok": True,
+            "path": path,
+            "note": (
+                "Image generated and queued for delivery to the user as a photo. "
+                "Do not include the path or base64 in your reply — just say briefly "
+                "what you made."
+            ),
         }
 
     async def _request_approval(

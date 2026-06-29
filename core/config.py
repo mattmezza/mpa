@@ -314,11 +314,25 @@ class BrowserToolConfig(BaseModel):
     user_agent: str = ""
 
 
+class ImageGenToolConfig(BaseModel):
+    """On-demand image generation (issue #55) — see core/imagegen.py."""
+
+    enabled: bool = False
+    provider: str = "openrouter"  # openrouter | fal | openai
+    model: str = ""  # blank = provider default (core.imagegen.DEFAULT_MODELS)
+    # Blank reuses the LLM key for openai/openrouter; else stored in the vault.
+    api_key: str = ""
+    daily_budget: int = 0  # max images/day; 0 = unlimited
+    monthly_budget: int = 0  # max images/month; 0 = unlimited
+    db_path: str = "data/imagegen.db"  # usage counter store
+
+
 class ToolsConfig(BaseModel):
     """Optional external CLI tools the agent can use (see core/tools.py)."""
 
     gh: GhToolConfig = GhToolConfig()
     browser: BrowserToolConfig = BrowserToolConfig()
+    imagegen: ImageGenToolConfig = ImageGenToolConfig()
 
 
 class ArtifactsConfig(BaseModel):

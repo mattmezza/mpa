@@ -92,6 +92,7 @@ INFRA_VAULT_KEYS: dict[str, str] = {
     "channels.telegram.bot_token": "TELEGRAM_BOT_TOKEN",
     "search.api_key": "TAVILY_API_KEY",
     "tools.gh.token": "GH_TOKEN",
+    "tools.imagegen.api_key": "IMAGEGEN_API_KEY",
 }
 
 
