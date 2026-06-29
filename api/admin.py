@@ -1848,6 +1848,7 @@ def create_admin_app(
             secrets_available=secret_store is not None,
             include_memories=body.include_memories,
             include_reflections=body.include_reflections,
+            skills_on_demand=config.agent.skills_index_mode == "on_demand",
         )
         full_prompt = sections.full_prompt
         section_map = sections.as_dict()
@@ -3412,7 +3413,8 @@ def _config_requires_restart(values: dict) -> bool:
 
 # Function-tools that a persona may scope. ``load_skill`` is intentionally
 # excluded — it is always available (the core mechanic personae use to read
-# their allowlisted skills); so are the vault tools and ``recall_memory``
+# their allowlisted skills); so are ``search_skills``/``list_skills`` (its
+# on-demand discovery counterparts — #50), the vault tools, and ``recall_memory``
 # (memory is injected for every persona, scope-filtered, so its on-demand
 # counterpart is always available too). Kept here (not imported from core.agent)
 # to avoid pulling the agent's heavy import graph into the admin app.
