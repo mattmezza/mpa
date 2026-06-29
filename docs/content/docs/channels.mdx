@@ -25,8 +25,8 @@ channels:
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
     topics_enabled: false   # opt-in: one persona-bound context per forum topic
-    group_chat:             # multi-agent group rooms (turn-taking + loop guard)
-      enabled: true
+    group_chat:             # opt-in: multi-agent group rooms (turn-taking + loop guard)
+      enabled: false
       reply_when_addressed_only: true
       ignore_bots: true
 ```
@@ -60,12 +60,14 @@ would loop replying to each other forever. The `group_chat` block fixes the turn
 channels:
   telegram:
     group_chat:
-      enabled: true                    # group-room behaviour (default on)
+      enabled: false                   # opt-in; off by default
       reply_when_addressed_only: true  # reply only when @mentioned or replied-to
       ignore_bots: true                # never reply to another bot (loop guard)
 ```
 
-In a group or supergroup each bot:
+Group rooms are **off by default** (like `topics_enabled`), so existing single-bot
+groups are unchanged on upgrade. Turn it on for a group where you've added several
+persona-bots. In a group or supergroup each bot then:
 
 - **replies only when addressed** — @mentioned, or you reply to one of its messages.
   Otherwise it stays silent but still records the message, so it has the full
@@ -86,6 +88,17 @@ In a group or supergroup each bot:
 > [@BotFather](https://t.me/BotFather): `/setprivacy` → pick the bot → **Disable**.
 > With privacy mode on, the gate still works — each bot simply only ever sees the
 > messages aimed at it.
+
+A few details worth knowing:
+
+- **Clearing context** — in a group, clear a specific bot with `/new@botname` (a bare
+  `/new` is not addressed to any one bot, so it's recorded as context, not a clear).
+- **Forum topics** — if you also use `topics_enabled`, genuine forum-topic messages keep
+  their per-topic 1:1 behaviour (the bound persona replies without an @mention); group
+  turn-taking applies to the rest of the group.
+- **Upgrade note** — enabling group rooms re-keys a group's history from per-sender to
+  per-group, so a previously-active group starts fresh (old per-sender history is left in
+  place, just not carried forward).
 
 The autonomous "bots debate each other" loop is intentionally out of scope — start
 with human-addressed turns. Group rooms are Telegram-only (WhatsApp uses a single

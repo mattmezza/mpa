@@ -27,10 +27,13 @@ channels:
     # Multi-agent group rooms (#30) — turn-taking + loop guard + speaker tags.
     # Lets several persona-bots share one group without all answering every
     # message or looping replies at each other. Inherited by per-persona bots.
+    # Opt-in (off by default): enabling it makes a bot reply only when addressed
+    # and re-keys group history from per-sender to per-group (no migration; prior
+    # group history is not carried forward).
     # NOTE: a bot only receives *unaddressed* group messages (the shared context)
     # when its Telegram privacy mode is OFF (set via @BotFather → /setprivacy).
     group_chat:
-      enabled: true
+      enabled: false
       # Reply only when addressed (@mentioned or replying to this bot). Set false
       # to reply to every human message in the group.
       reply_when_addressed_only: true

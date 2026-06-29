@@ -158,23 +158,38 @@ class TelegramChannel:
 
     # -- Group multi-agent rooms (#30) ---------------------------------------
 
-    def _is_group(self, chat) -> bool:
-        """True for a Telegram group/supergroup with group-room behaviour on."""
-        return (
-            bool(chat)
+    def _is_group(self, chat, message=None) -> bool:
+        """True for a Telegram group/supergroup with group-room behaviour on.
+
+        A genuine forum topic under ``topics_enabled`` is exempt: a topic is its
+        own persona-bound 1:1-style context (#14), so group turn-taking would
+        wrongly silence its bound persona. Group rooms (#30) apply to the rest of
+        the group/supergroup.
+        """
+        if not (
+            chat
             and getattr(chat, "type", "") in ("group", "supergroup")
             and self.config.group_chat.enabled
-        )
+        ):
+            return False
+        if (
+            self.config.topics_enabled
+            and message is not None
+            and getattr(message, "is_topic_message", False)
+        ):
+            return False
+        return True
 
-    def _convo_user_id(self, chat, sender_id: int) -> str:
+    def _convo_user_id(self, chat, sender_id: int, message=None) -> str:
         """The ``user_id`` key the agent stores history/bindings under.
 
         In a group room every participant shares one conversation per bot, so the
         group itself is the key — that is what lets a bot see other people's (and
-        other bots') messages as inbound turns. In a 1:1 DM it stays the sender
-        (where ``chat_id == user_id`` anyway), so the plain flow is unchanged.
+        other bots') messages as inbound turns. In a 1:1 DM (or an exempt forum
+        topic) it stays the sender (where ``chat_id == user_id`` anyway), so the
+        plain flow is unchanged.
         """
-        if self._is_group(chat):
+        if self._is_group(chat, message):
             return str(chat.id)
         return str(sender_id)
 
@@ -188,10 +203,27 @@ class TelegramChannel:
             uname = bot.username
             self._bot_username = uname.lower() if uname else None
         except RuntimeError, AttributeError:
-            # Bot info not populated yet — leave unset; reply-to detection still
-            # works, and the next update retries.
+            # Bot info not populated yet — leave unset; addressing checks return
+            # False this once and the next update retries once it is available.
             self._bot_id = None
             self._bot_username = None
+
+    @staticmethod
+    def _entity_text(message, text: str, ent) -> str:
+        """The substring an entity spans, UTF-16-safe.
+
+        Telegram entity offsets/lengths are UTF-16 code units, so slicing the
+        Python str by code point misaligns once a non-BMP char (emoji) precedes
+        the entity. Prefer python-telegram-bot's own ``parse_entity`` and fall
+        back to a code-point slice only for plain test doubles.
+        """
+        parse = getattr(message, "parse_entity", None)
+        if callable(parse):
+            try:
+                return parse(ent)
+            except Exception:
+                pass
+        return text[ent.offset : ent.offset + ent.length]
 
     @staticmethod
     def _speaker_name(user) -> str:
@@ -206,7 +238,15 @@ class TelegramChannel:
 
     def _addressed_to_me(self, message) -> bool:
         """True when this message is addressed to THIS bot: a reply to one of the
-        bot's own messages, or an @mention / text-mention of it."""
+        bot's own messages, an @mention, a text-mention, or a ``/cmd@bot`` command.
+
+        Addressing is decided by Telegram's own entities (exact handle match, not
+        a substring) so a sibling bot whose @username merely contains or extends
+        this one's — ``@coach`` vs ``@coachbot``, an email ``x@coachbot.com`` —
+        never makes the wrong bot reply, which would re-open the N×-reply storm
+        the respond-gate exists to close. A loose substring match is used only as
+        a last resort when Telegram supplied no entities at all.
+        """
         reply = getattr(message, "reply_to_message", None)
         if reply is not None:
             rf = getattr(reply, "from_user", None)
@@ -219,16 +259,22 @@ class TelegramChannel:
         handle = f"@{self._bot_username}" if self._bot_username else ""
         for ent in entities:
             etype = getattr(ent, "type", "")
-            if etype == "mention" and handle:
-                seg = text[ent.offset : ent.offset + ent.length]
-                if seg.lower() == handle:
+            if etype in ("mention", "bot_command") and handle:
+                seg = self._entity_text(message, text, ent).lower()
+                # "@coachbot" (mention) is an exact match; "/jobs@coachbot"
+                # (bot_command) ends with the handle.
+                if seg == handle or seg.endswith(handle):
                     return True
             elif etype == "text_mention":
                 u = getattr(ent, "user", None)
                 if u is not None and self._bot_id is not None and u.id == self._bot_id:
                     return True
-        # Fallback: covers "/cmd@bot" and a plain "@bot" when entities are absent.
-        return bool(handle) and handle in text.lower()
+        # Entity-less last resort (forwards / odd clients): when Telegram gave us
+        # entities we trust them — an absent match means not addressed. Require a
+        # boundary so "@coach" can't match inside "@coachbot".
+        if entities or not handle:
+            return False
+        return re.search(rf"(?<![\w@]){re.escape(handle)}(?![\w])", text.lower()) is not None
 
     def _turn_routing(self, update: Update, message, context) -> dict:
         """Decide how to handle an inbound message in a group room (#30).
@@ -242,7 +288,7 @@ class TelegramChannel:
         user = update.effective_user
         chat = update.effective_chat
         sender_id = user.id if user else 0
-        if not self._is_group(chat):
+        if not self._is_group(chat, message):
             return {"user_id": str(sender_id), "speaker_tag": "", "respond": True}
 
         self._ensure_bot_identity(context)
@@ -279,7 +325,11 @@ class TelegramChannel:
         routing = self._turn_routing(update, message, context)
         convo_user = routing["user_id"]
         self._remember_chat(convo_user, folded)
-        if not self._is_allowed(sender_id):
+        # The whitelist gates who can make the bot *reply/act*; a record-only turn
+        # (respond=False) writes to history but runs no inference and takes no
+        # action, so it bypasses the gate — that is what lets the loop guard
+        # record other bots and the shared history tag every speaker (#30).
+        if routing["respond"] and not self._is_allowed(sender_id):
             return
 
         chat_id = folded if folded is not None else sender_id
@@ -306,7 +356,11 @@ class TelegramChannel:
         routing = self._turn_routing(update, message, context)
         convo_user = routing["user_id"]
         self._remember_chat(convo_user, folded)
-        if not self._is_allowed(sender_id):
+        # The whitelist gates who can make the bot *reply/act*; a record-only turn
+        # (respond=False) writes to history but runs no inference and takes no
+        # action, so it bypasses the gate — that is what lets the loop guard
+        # record other bots and the shared history tag every speaker (#30).
+        if routing["respond"] and not self._is_allowed(sender_id):
             return
 
         chat_id = folded if folded is not None else sender_id
@@ -352,7 +406,11 @@ class TelegramChannel:
         routing = self._turn_routing(update, message, context)
         convo_user = routing["user_id"]
         self._remember_chat(convo_user, folded)
-        if not self._is_allowed(sender_id):
+        # The whitelist gates who can make the bot *reply/act*; a record-only turn
+        # (respond=False) writes to history but runs no inference and takes no
+        # action, so it bypasses the gate — that is what lets the loop guard
+        # record other bots and the shared history tag every speaker (#30).
+        if routing["respond"] and not self._is_allowed(sender_id):
             return
 
         chat_id = folded if folded is not None else sender_id
@@ -475,9 +533,11 @@ class TelegramChannel:
         if user_id is None or not self._is_allowed(user_id):
             return
         chat_id = f"{chat.id}:{thread}"
-        # Bind under the same conversational id messages resolve with, so a group
-        # room's shared history finds the topic binding (#30).
-        convo_user = self._convo_user_id(chat, user_id)
+        # Bind under the same conversational id messages resolve with. A forum
+        # topic under topics_enabled is exempt from group rooms (#30), so this
+        # resolves to the sender id — matching how messages in the topic key,
+        # keeping the per-topic persona binding intact.
+        convo_user = self._convo_user_id(chat, user_id, message)
         bound = await self.agent.bind_chat_persona_by_label(
             self.channel_name, convo_user, chat_id, name
         )

@@ -109,9 +109,14 @@ class GroupChatConfig(BaseModel):
     mode on (the default) a bot only receives messages addressed to it, so the
     gate is moot and no shared context accumulates. Telegram-only: WhatsApp uses a
     single number, so multi-bot rooms don't apply there.
+
+    Off by default (like ``topics_enabled``) so existing single-bot group flows
+    are unchanged on upgrade: enabling it makes a bot reply only when addressed
+    and re-keys a group's history from per-sender to per-group (no migration —
+    prior group history is simply not carried forward).
     """
 
-    enabled: bool = True
+    enabled: bool = False
     # Respond-gate: only reply when addressed. False = reply to every human message
     # in the group (still ignoring bots / tagging speakers).
     reply_when_addressed_only: bool = True

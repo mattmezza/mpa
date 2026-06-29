@@ -282,7 +282,13 @@ class ConversationHistory:
             await db.commit()
 
     async def append_to_last_turn(
-        self, channel: str, user_id: str, role: str, suffix: str, chat_id: str = ""
+        self,
+        channel: str,
+        user_id: str,
+        role: str,
+        suffix: str,
+        chat_id: str = "",
+        max_len: int | None = None,
     ) -> bool:
         """Append ``suffix`` to the most recent turn iff it has ``role`` and text
         content. Returns False when there is no such turn (caller adds a fresh one).
@@ -290,6 +296,10 @@ class ConversationHistory:
         Used to fold an out-of-band assistant message (a background subagent's
         result) into the trailing assistant turn so the replayed history keeps
         strict user/assistant alternation. (injection mode)
+
+        ``max_len`` refuses the fold (returns False) once the turn would exceed
+        that many characters, so a long run of folded turns can't grow one row
+        without bound — the caller then starts a fresh turn (#30).
         """
         await self._ensure_schema()
         async with aiosqlite.connect(self.db_path) as db:
@@ -305,6 +315,8 @@ class ConversationHistory:
             content = json.loads(row["content"])
             if not isinstance(content, str):
                 return False
+            if max_len is not None and len(content) + len(suffix) > max_len:
+                return False
             await db.execute(
                 "UPDATE conversation_turns SET content = ? WHERE id = ?",
                 (json.dumps(content + suffix), row["id"]),
@@ -313,10 +325,23 @@ class ConversationHistory:
         return True
 
     async def append_to_last_session_message(
-        self, channel: str, user_id: str, suffix: str, chat_id: str = "", role: str = "assistant"
+        self,
+        channel: str,
+        user_id: str,
+        suffix: str,
+        chat_id: str = "",
+        role: str = "assistant",
+        text_only: bool = False,
+        max_len: int | None = None,
     ) -> bool:
         """Session-mode counterpart of :meth:`append_to_last_turn`: fold ``suffix``
-        into the last session message iff it has ``role``. Returns False otherwise."""
+        into the last session message iff it has ``role``. Returns False otherwise.
+
+        ``text_only`` refuses to fold into a non-string (list) content — used by
+        the silent group-record path so it never mutates a structured message such
+        as an in-flight Anthropic ``tool_result`` turn (#30). ``max_len`` bounds
+        the folded turn's growth like :meth:`append_to_last_turn`.
+        """
         await self._ensure_schema()
         key = (channel, user_id, chat_id)
         if key not in self._sessions:
@@ -327,8 +352,12 @@ class ConversationHistory:
         msg = session[-1]
         content = msg.get("content")
         if isinstance(content, str):
+            if max_len is not None and len(content) + len(suffix) > max_len:
+                return False
             msg["content"] = content + suffix
         elif isinstance(content, list):
+            if text_only:
+                return False
             content.append({"type": "text", "text": suffix})
         else:
             return False

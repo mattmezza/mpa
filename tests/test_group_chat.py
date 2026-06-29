@@ -10,6 +10,7 @@ LLM call) and the /new@bot command normalisation.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -197,9 +198,20 @@ async def test_addressed_new_with_bot_suffix_clears(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _channel(group_chat: GroupChatConfig | None = None, channel_name: str = "telegram"):
+def _channel(
+    group_chat: GroupChatConfig | None = None,
+    channel_name: str = "telegram",
+    *,
+    topics_enabled: bool = False,
+    allowed_user_ids=None,
+):
+    # group_chat defaults OFF (opt-in); the tests want it ON to exercise the path.
     cfg = TelegramConfig(
-        enabled=True, bot_token="123456:TESTTOKEN", group_chat=group_chat or GroupChatConfig()
+        enabled=True,
+        bot_token="123456:TESTTOKEN",
+        topics_enabled=topics_enabled,
+        allowed_user_ids=allowed_user_ids or [],
+        group_chat=group_chat or GroupChatConfig(enabled=True),
     )
     from channels.telegram import TelegramChannel
 
@@ -209,13 +221,30 @@ def _channel(group_chat: GroupChatConfig | None = None, channel_name: str = "tel
     return ch
 
 
-def _msg(text="", *, entities=None, reply_to=None, caption=None, caption_entities=None):
+def _ent(type_, text="", *, user=None):
+    """A MessageEntity-ish double; offset/length span the LAST occurrence of
+    ``text`` so a single mention is found wherever it sits in the message."""
+    return SimpleNamespace(type=type_, offset=0, length=len(text), user=user, _seg=text)
+
+
+def _msg(
+    text="",
+    *,
+    entities=None,
+    reply_to=None,
+    caption=None,
+    caption_entities=None,
+    is_topic_message=False,
+):
+    # parse_entity returns the stashed segment, mirroring PTB's UTF-16-safe helper.
     return SimpleNamespace(
         text=text,
         caption=caption,
         entities=entities or [],
         caption_entities=caption_entities or [],
         reply_to_message=reply_to,
+        is_topic_message=is_topic_message,
+        parse_entity=lambda ent: getattr(ent, "_seg", ""),
     )
 
 
@@ -251,8 +280,14 @@ def test_speaker_name_fallbacks() -> None:
 
 def test_addressed_via_mention_entity() -> None:
     ch = _channel()
-    ent = SimpleNamespace(type="mention", offset=0, length=len("@coachbot"))
-    assert ch._addressed_to_me(_msg("@coachbot help me", entities=[ent])) is True
+    msg = _msg("@coachbot help me", entities=[_ent("mention", "@coachbot")])
+    assert ch._addressed_to_me(msg) is True
+
+
+def test_addressed_via_command_entity() -> None:
+    ch = _channel()
+    msg = _msg("/jobs@coachbot", entities=[_ent("bot_command", "/jobs@coachbot")])
+    assert ch._addressed_to_me(msg) is True
 
 
 def test_addressed_via_reply_to_bot() -> None:
@@ -263,22 +298,45 @@ def test_addressed_via_reply_to_bot() -> None:
 
 def test_addressed_via_text_mention() -> None:
     ch = _channel()
-    ent = SimpleNamespace(type="text_mention", user=SimpleNamespace(id=999))
+    ent = _ent("text_mention", user=SimpleNamespace(id=999))
     assert ch._addressed_to_me(_msg("hey you", entities=[ent])) is True
 
 
 def test_not_addressed_to_another_bot() -> None:
     ch = _channel()
-    ent = SimpleNamespace(type="mention", offset=0, length=len("@chefbot"))
-    assert ch._addressed_to_me(_msg("@chefbot hi", entities=[ent])) is False
+    assert ch._addressed_to_me(_msg("@chefbot hi", entities=[_ent("mention", "@chefbot")])) is False
     reply = SimpleNamespace(from_user=SimpleNamespace(id=12345))  # someone else's msg
     assert ch._addressed_to_me(_msg("ok", reply_to=reply)) is False
 
 
-def test_addressed_substring_fallback_for_command() -> None:
+def test_not_addressed_when_handle_is_prefix_of_another_bot() -> None:
+    """@coachbot must NOT consider itself addressed by a mention of @coachbotpro."""
     ch = _channel()
-    # No entities (e.g. forwarded/edge) but the handle appears verbatim.
-    assert ch._addressed_to_me(_msg("/jobs@coachbot")) is True
+    msg = _msg("@coachbotpro do X", entities=[_ent("mention", "@coachbotpro")])
+    assert ch._addressed_to_me(msg) is False
+
+
+def test_not_addressed_when_shorter_handle_is_prefix() -> None:
+    """A bot named @coach must NOT match a mention of the longer @coachbot."""
+    ch = _channel()
+    ch._bot_username = "coach"
+    msg = _msg("@coachbot hi", entities=[_ent("mention", "@coachbot")])
+    assert ch._addressed_to_me(msg) is False
+
+
+def test_not_addressed_by_email_substring() -> None:
+    """An email containing the handle (its own entity) must not address the bot."""
+    ch = _channel()
+    msg = _msg("mail me at admin@coachbot.com", entities=[_ent("email", "admin@coachbot.com")])
+    assert ch._addressed_to_me(msg) is False
+
+
+def test_entity_less_fallback_matches_with_boundary() -> None:
+    ch = _channel()
+    # No entities at all (forwarded / odd client): a bare handle still addresses.
+    assert ch._addressed_to_me(_msg("@coachbot help")) is True
+    # ...but a longer handle as a bare substring does not.
+    assert ch._addressed_to_me(_msg("@coachbotpro help")) is False
 
 
 def _route(ch, *, chat=GROUP, user=None, message=None):
@@ -305,26 +363,22 @@ def test_routing_group_unaddressed_human_records_silently() -> None:
 
 def test_routing_group_addressed_human_replies() -> None:
     ch = _channel()
-    ent = SimpleNamespace(type="mention", offset=0, length=len("@coachbot"))
-    r = _route(ch, user=_user(name="Alice"), message=_msg("@coachbot hi", entities=[ent]))
+    msg = _msg("@coachbot hi", entities=[_ent("mention", "@coachbot")])
+    r = _route(ch, user=_user(name="Alice"), message=msg)
     assert r["respond"] is True
     assert r["speaker_tag"] == "[from Alice]\n"
 
 
 def test_routing_loop_guard_ignores_bots_even_if_addressed() -> None:
     ch = _channel()
-    ent = SimpleNamespace(type="mention", offset=0, length=len("@coachbot"))
-    r = _route(
-        ch,
-        user=_user(name="Chef", is_bot=True),
-        message=_msg("@coachbot hello fellow bot", entities=[ent]),
-    )
+    msg = _msg("@coachbot hello fellow bot", entities=[_ent("mention", "@coachbot")])
+    r = _route(ch, user=_user(name="Chef", is_bot=True), message=msg)
     assert r["respond"] is False  # never reply to another bot
     assert r["speaker_tag"] == "[from Chef (bot)]\n"  # but tagged + recorded
 
 
 def test_routing_reply_to_all_humans_when_gate_disabled() -> None:
-    ch = _channel(GroupChatConfig(reply_when_addressed_only=False))
+    ch = _channel(GroupChatConfig(enabled=True, reply_when_addressed_only=False))
     r = _route(ch, user=_user(name="Bob"), message=_msg("anything"))
     assert r["respond"] is True
     # bots still ignored even with the address-gate off
@@ -333,11 +387,24 @@ def test_routing_reply_to_all_humans_when_gate_disabled() -> None:
 
 
 def test_routing_keep_bots_when_ignore_disabled() -> None:
-    ch = _channel(GroupChatConfig(ignore_bots=False))
-    ent = SimpleNamespace(type="mention", offset=0, length=len("@coachbot"))
+    ch = _channel(GroupChatConfig(enabled=True, ignore_bots=False))
     chef = _user(name="Chef", is_bot=True)
-    r = _route(ch, user=chef, message=_msg("@coachbot hi", entities=[ent]))
+    msg = _msg("@coachbot hi", entities=[_ent("mention", "@coachbot")])
+    r = _route(ch, user=chef, message=msg)
     assert r["respond"] is True  # addressed bot reply allowed when ignore_bots off
+
+
+def test_routing_forum_topic_exempt_from_group_gate() -> None:
+    """A genuine forum-topic message under topics_enabled keeps 1:1 behaviour."""
+    ch = _channel(topics_enabled=True)
+    msg = _msg("just chatting", is_topic_message=True)
+    r = _route(ch, user=_user(uid=7, name="Bob"), message=msg)
+    # No group gate: replies, no speaker tag, keyed by the sender (per-topic).
+    assert r == {"user_id": "7", "speaker_tag": "", "respond": True}
+    # A non-topic message in the same supergroup still gets group treatment.
+    r2 = _route(ch, user=_user(name="Bob"), message=_msg("hi"))
+    assert r2["respond"] is False
+    assert r2["user_id"] == "-100"
 
 
 # ---------------------------------------------------------------------------
@@ -355,3 +422,109 @@ async def test_handle_text_silent_calls_process_respond_false() -> None:
     assert kwargs["respond"] is False
     assert kwargs["user_id"] == "-100"
     assert kwargs["message"] == "[from Bob]\nhi"
+
+
+# ---------------------------------------------------------------------------
+# _on_text gate — whitelist applies to replies, not to record-only turns
+# ---------------------------------------------------------------------------
+
+
+async def _drive_on_text(ch, user, message, chat=GROUP):
+    upd = SimpleNamespace(effective_user=user, effective_chat=chat, message=message)
+    ctx = SimpleNamespace(bot=SimpleNamespace(id=999, username="coachbot"))
+    before = set(asyncio.all_tasks())
+    await ch._on_text(upd, ctx)
+    spawned = [t for t in asyncio.all_tasks() if t not in before]
+    if spawned:
+        await asyncio.gather(*spawned)
+
+
+@pytest.mark.asyncio
+async def test_whitelist_still_records_other_bots_for_context() -> None:
+    """A whitelist gates replies, but a bot's message (respond=False) is still
+    recorded — otherwise the loop guard + cross-bot speaker tags would be dead."""
+    ch = _channel(allowed_user_ids=[1])  # only human id 1 may drive the bot
+    ch.agent.process = AsyncMock()
+    chef = _user(uid=555, name="Chef", is_bot=True)
+    await _drive_on_text(ch, chef, _msg("hello fellow bot"))
+    ch.agent.process.assert_awaited_once()
+    kwargs = ch.agent.process.await_args.kwargs
+    assert kwargs["respond"] is False
+    assert kwargs["message"] == "[from Chef (bot)]\nhello fellow bot"
+
+
+@pytest.mark.asyncio
+async def test_whitelist_blocks_non_allowed_human_reply() -> None:
+    """A non-whitelisted human addressing the bot is still blocked from replies."""
+    ch = _channel(allowed_user_ids=[1])
+    ch.agent.process = AsyncMock()
+    intruder = _user(uid=2, name="Mallory")
+    msg = _msg("@coachbot do X", entities=[_ent("mention", "@coachbot")])
+    await _drive_on_text(ch, intruder, msg)
+    ch.agent.process.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_allowed_human_reply_still_works(tmp_path) -> None:
+    ch = _channel(allowed_user_ids=[1])
+    ch.agent.process = AsyncMock(
+        return_value=SimpleNamespace(voice=None, text="", system_notice=None)
+    )
+    msg = _msg("@coachbot hi", entities=[_ent("mention", "@coachbot")])
+    await _drive_on_text(ch, _user(uid=1, name="Owner"), msg)
+    ch.agent.process.assert_awaited_once()
+    # The reply path omits the respond kwarg (defaults True).
+    assert ch.agent.process.await_args.kwargs.get("respond", True) is True
+
+
+# ---------------------------------------------------------------------------
+# History safety — session tool_result fold guard + fold cap
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_fold_refuses_tool_result_message(tmp_path) -> None:
+    """A silent user record must not be spliced into an in-flight tool_result
+    (a role=user message whose content is a list)."""
+    hist = ConversationHistory(db_path=str(tmp_path / "h.db"))
+    tool_result = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tu1"}]}
+    await hist.append_session_message("telegram", "g1", tool_result, "g1")
+    merged = await hist.append_to_last_session_message(
+        "telegram", "g1", "\n\n[from Bob]\nchatter", "g1", role="user", text_only=True
+    )
+    assert merged is False
+    session = await hist.get_session("telegram", "g1", "g1")
+    # The tool_result block list is untouched (no stray text block appended).
+    assert session[0]["content"] == [{"type": "tool_result", "tool_use_id": "tu1"}]
+
+
+@pytest.mark.asyncio
+async def test_fold_cap_refuses_when_oversized(tmp_path) -> None:
+    hist = ConversationHistory(db_path=str(tmp_path / "h.db"))
+    await hist.add_turn("telegram", "g1", "user", "x" * 100, "g1")
+    refused = await hist.append_to_last_turn("telegram", "g1", "user", "y" * 50, "g1", max_len=120)
+    assert refused is False  # 100 + 50 > 120
+    ok = await hist.append_to_last_turn("telegram", "g1", "user", "z" * 5, "g1", max_len=120)
+    assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# Integration: silent records then a reply stay alternation-safe via coalesce
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_silent_then_reply_array_is_alternation_safe(tmp_path) -> None:
+    agent = _bare_agent(tmp_path, "injection")
+    await _silent(agent, "[from Bob]\none")
+    await _silent(agent, "[from Cy]\ntwo")
+    # Build the message array the way _process_injection does for the reply turn:
+    history = await agent.history.get_messages("telegram", "g1", "g1")
+    messages = [{"role": t["role"], "content": t["content"]} for t in history]
+    messages.append({"role": "user", "content": "preamble\n\n[from Alice]\n@coachbot help"})
+    # The raw array has a consecutive user/user pair (the silent run + the reply)...
+    raw = [m["role"] for m in messages]
+    assert any(raw[i] == raw[i + 1] == "user" for i in range(len(raw) - 1))
+    # ...which the coalescer (called inside llm.generate) collapses before the API.
+    collapsed = [m["role"] for m in _coalesce_user_messages(messages)]
+    assert all(not (collapsed[i] == collapsed[i + 1] == "user") for i in range(len(collapsed) - 1))

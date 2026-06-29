@@ -56,6 +56,12 @@ log = logging.getLogger(__name__)
 # hash so repeated identical images don't re-hit the vision model.
 _VISION_CACHE_MAX = 256
 
+# Max characters a single folded run of silent group turns (#30) may reach
+# before a fresh turn is started, so a busy never-addressed room can't grow one
+# history row without bound. ponytail: generous char cap; raise if one
+# un-addressed run legitimately needs more context than this.
+_SILENT_FOLD_MAX_CHARS = 16000
+
 
 def _shell_quote(s: str) -> str:
     """Quote a string for safe shell interpolation."""
@@ -2468,15 +2474,32 @@ class AgentCore:
         so a run of un-answered group messages stays a single turn and the
         replayed history keeps strict user/assistant alternation. ``message``
         already carries its ``[from <author>]`` speaker tag, so the bot sees who
-        said what when it is later addressed.
+        said what when it is later addressed. A refused fold (trailing turn is an
+        assistant reply, a structured tool turn, or the cap below is hit) just
+        starts a fresh user turn — ``_coalesce_user_messages`` merges the run back
+        into one before the next LLM call, so alternation always holds.
+
+        ponytail: the fold is a non-locked read-modify-write, so two silent
+        records racing in one busy group can drop a line of ambient context (never
+        a reply). Add a per-(channel,user,chat) asyncio.Lock around process() if a
+        room ever shows missing turns.
         """
         if channel == "system":
             return
         text = self._history_message_text(message, attachments)
+        # Cap a single folded run so a high-traffic, never-addressed group can't
+        # grow one turn without bound; a fresh turn then ages out via windowing.
+        cap = _SILENT_FOLD_MAX_CHARS
         try:
             if self.history_mode == "session":
                 merged = await self.history.append_to_last_session_message(
-                    channel, user_id, f"\n\n{text}", chat_id, role="user"
+                    channel,
+                    user_id,
+                    f"\n\n{text}",
+                    chat_id,
+                    role="user",
+                    text_only=True,
+                    max_len=cap,
                 )
                 if not merged:
                     await self.history.append_session_message(
@@ -2484,7 +2507,7 @@ class AgentCore:
                     )
             else:
                 merged = await self.history.append_to_last_turn(
-                    channel, user_id, "user", f"\n\n{text}", chat_id
+                    channel, user_id, "user", f"\n\n{text}", chat_id, max_len=cap
                 )
                 if not merged:
                     await self.history.add_turn(channel, user_id, "user", text, chat_id)
