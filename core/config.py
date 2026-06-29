@@ -230,6 +230,27 @@ class TaskReflectionConfig(BaseModel):
     max_reflections: int = 50  # max reflections to keep for prompt injection
 
 
+class ReplyDecisionConfig(BaseModel):
+    """Decide whether to reply in shared/group chats (#36).
+
+    Off by default: 1:1 chats always warrant a reply, and the extra LLM call
+    adds latency. Turn it on for group chats that mix multiple bots/people,
+    where the agent should stay quiet for messages aimed at someone else or
+    caught in a bot-to-bot reaction loop.
+    """
+
+    enabled: bool = False
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"  # fast + cheap is ideal for the yes/no reply call
+    thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
+    group_only: bool = True  # only gate group chats; DMs always get a reply
+    # Hard backstop: never send more than this many auto-replies into one chat
+    # per rolling window — guarantees a runaway loop terminates even if the LLM
+    # gate keeps voting "reply".
+    max_replies_per_window: int = 6
+    window_seconds: int = 120
+
+
 class CompactionConfig(BaseModel):
     """Conversation compaction — summarise old turns when the context grows.
 
@@ -349,6 +370,7 @@ class Config(BaseModel):
     memory: MemoryConfig = MemoryConfig()
     goal_decomposition: GoalDecompositionConfig = GoalDecompositionConfig()
     task_reflection: TaskReflectionConfig = TaskReflectionConfig()
+    reply_decision: ReplyDecisionConfig = ReplyDecisionConfig()
     compaction: CompactionConfig = CompactionConfig()
     search: SearchConfig = SearchConfig()
     vision: VisionConfig = VisionConfig()

@@ -222,6 +222,15 @@ class TestPartialRoutes:
         assert "enableVisionFallback()" in resp.text
         assert "modelSupportsVision" in resp.text
 
+    def test_llm_partial_has_reply_decision(self):
+        client = _client(setup_complete=True)
+        resp = client.get("/partials/llm", headers=AUTH)
+        assert resp.status_code == 200
+        assert "Reply Decision" in resp.text
+        # The save button wires the full config block, incl. the rate-cap knobs.
+        assert "reply_decision.enabled" in resp.text
+        assert "reply_decision.max_replies_per_window" in resp.text
+
     def test_logs_partial(self):
         client = _client(setup_complete=True)
         resp = client.get("/partials/logs", headers=AUTH)
