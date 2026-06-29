@@ -129,6 +129,9 @@ class WhatsAppChannel:
         # silent rather than sending a blank WhatsApp message.
         if response.text:
             await self.send(sender, response.text)
+        # ponytail: WhatsApp media send not wired — a generated image (#55) is
+        # delivered natively on Telegram only. Add bot media upload here if
+        # WhatsApp image delivery matters.
         if getattr(response, "system_notice", None):
             await self.send(sender, response.system_notice)
         return {"ok": True}

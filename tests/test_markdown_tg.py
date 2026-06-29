@@ -97,7 +97,7 @@ def test_table_with_header():
 
 def test_pipe_in_inline_code_not_mistaken_for_table():
     """A pipe inside inline code should not trigger table conversion."""
-    src = f"Use `|` as a pipe."
+    src = "Use `|` as a pipe."
     out = to_telegram_html(src)
     assert "|" in out
 

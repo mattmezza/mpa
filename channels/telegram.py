@@ -615,14 +615,21 @@ class TelegramChannel:
         await self._send_response(chat_id, response)
 
     async def _send_response(self, chat_id: int | str, response) -> None:
-        """Send an AgentResponse back — voice if present, otherwise text."""
+        """Send an AgentResponse back — voice or text, then any generated images.
+
+        Text goes through ``send()`` so Markdown is rendered (HTML), and photos are
+        sent bare afterwards — simpler and correct, vs. a raw-Markdown caption.
+        """
+        cid, kw = self._route(chat_id)
+        images = [a for a in (getattr(response, "attachments", None) or []) if a.is_image]
         if response.voice:
-            cid, kw = self._route(chat_id)
             await self.app.bot.send_voice(cid, response.voice, **kw)
         elif response.text:
             await self.send(chat_id, response.text)
-        else:
+        elif not images:
             log.warning("Skipping empty response for chat_id=%s", chat_id)
+        for att in images:
+            await self.app.bot.send_photo(cid, att.data, **kw)
         # Out-of-band system notice (e.g. context compaction), sent separately.
         if getattr(response, "system_notice", None):
             await self.send(chat_id, response.system_notice)
