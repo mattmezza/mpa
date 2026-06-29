@@ -55,6 +55,24 @@ async def test_embedding_config_roundtrips_to_nested_model(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_group_chat_config_roundtrips_to_nested_model(tmp_path) -> None:
+    """UI-saved flat channels.telegram.group_chat.* keys reconstruct GroupChatConfig (#30)."""
+    store = ConfigStore(db_path=str(tmp_path / "config.db"))
+    await store.set_many(
+        {
+            "channels.telegram.group_chat.enabled": "true",
+            "channels.telegram.group_chat.reply_when_addressed_only": "false",
+            "channels.telegram.group_chat.ignore_bots": "true",
+        }
+    )
+    config = await store.export_to_config()
+    gc = config.channels.telegram.group_chat
+    assert gc.enabled is True
+    assert gc.reply_when_addressed_only is False
+    assert gc.ignore_bots is True
+
+
+@pytest.mark.asyncio
 async def test_set_get_delete(tmp_path) -> None:
     store = ConfigStore(db_path=str(tmp_path / "config.db"))
 

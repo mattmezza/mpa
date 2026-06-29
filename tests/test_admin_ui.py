@@ -231,6 +231,16 @@ class TestPartialRoutes:
         assert "reply_decision.enabled" in resp.text
         assert "reply_decision.max_replies_per_window" in resp.text
 
+    def test_telegram_wizard_has_group_chat(self):
+        client = _client(setup_complete=True)
+        resp = client.get("/channels/wizard?channel=telegram", headers=AUTH)
+        assert resp.status_code == 200
+        assert "Group multi-agent rooms" in resp.text
+        # All three toggles are wired so the save can POST them.
+        assert "ch-tg-group" in resp.text
+        assert "ch-tg-group-addressed" in resp.text
+        assert "ch-tg-group-ignorebots" in resp.text
+
     def test_logs_partial(self):
         client = _client(setup_complete=True)
         resp = client.get("/partials/logs", headers=AUTH)
