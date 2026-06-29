@@ -153,7 +153,10 @@ class PermissionEngine:
         self._ready = False
         # Pending approval requests: request_id → PendingApproval
         self._pending: dict[str, PendingApproval] = {}
+        # YOLO scopes (channels) with the approval prompt bypassed — see is_yolo.
+        self._yolo: set[str] = set()
         self._load_persisted_rules()
+        self._load_yolo()
 
     def _ensure_schema(self) -> None:
         if self._ready:
@@ -166,6 +169,7 @@ class PermissionEngine:
                 "created_at DATETIME DEFAULT (datetime('now'))"
                 ")"
             )
+            db.execute("CREATE TABLE IF NOT EXISTS yolo (scope TEXT PRIMARY KEY)")
         self._ready = True
 
     def _load_persisted_rules(self) -> None:
@@ -185,6 +189,34 @@ class PermissionEngine:
                 (pattern, level),
             )
             db.commit()
+
+    def _load_yolo(self) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.db_path) as db:
+            rows = db.execute("SELECT scope FROM yolo").fetchall()
+        self._yolo = {scope for (scope,) in rows}
+
+    def set_yolo(self, scope: str, on: bool) -> None:
+        """Turn the approval-bypass (YOLO) on/off for a scope (a channel name).
+
+        A scope in YOLO has ASK actions auto-approved without a prompt. NEVER
+        rules still hold — this is "act without asking", not "self-destruct".
+        Persisted so the choice survives a restart until explicitly turned off.
+        """
+        self._ensure_schema()
+        with sqlite3.connect(self.db_path) as db:
+            if on:
+                db.execute("INSERT OR IGNORE INTO yolo (scope) VALUES (?)", (scope,))
+                self._yolo.add(scope)
+            else:
+                db.execute("DELETE FROM yolo WHERE scope = ?", (scope,))
+                self._yolo.discard(scope)
+            db.commit()
+        log.warning("YOLO mode %s for scope %r", "ON" if on else "OFF", scope)
+
+    def is_yolo(self, scope: str) -> bool:
+        """True if the scope (channel) currently bypasses approval prompts."""
+        return scope in self._yolo
 
     def _build_match_key(self, tool_name: str, params: dict | None = None) -> str:
         if tool_name == "run_command" and params and "command" in params:

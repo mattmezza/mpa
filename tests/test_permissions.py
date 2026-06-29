@@ -87,6 +87,23 @@ def test_rule_pattern_keeps_dangerous_single_token_exact() -> None:
         assert PermissionEngine._rule_pattern(key) == key  # exact, no wildcard
 
 
+def test_yolo_toggle_persists_and_scopes_by_channel(tmp_path) -> None:
+    db = str(tmp_path / "config.db")
+    engine = PermissionEngine(db_path=db)
+    assert not engine.is_yolo("telegram:coach")
+
+    engine.set_yolo("telegram:coach", True)
+    assert engine.is_yolo("telegram:coach")
+    assert not engine.is_yolo("telegram:finance")  # other agent unaffected
+
+    # Survives a restart (reloaded from the db).
+    assert PermissionEngine(db_path=db).is_yolo("telegram:coach")
+
+    engine.set_yolo("telegram:coach", False)
+    assert not engine.is_yolo("telegram:coach")
+    assert not PermissionEngine(db_path=db).is_yolo("telegram:coach")
+
+
 def test_format_approval_message_run_command_includes_purpose() -> None:
     engine = PermissionEngine()
     text = engine.format_approval_message(

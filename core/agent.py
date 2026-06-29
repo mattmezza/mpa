@@ -727,10 +727,30 @@ class AgentCore:
             await self._record_inbound(channel, user_id, chat_id, message, attachments)
             return AgentResponse(text="")
 
+        command = _strip_command_suffix(message)
+
+        # YOLO toggle — /yolo-on grants this agent a free pass (ASK actions run
+        # without a prompt); /yolo-off restores prompting. We only reach here when
+        # respond=True, i.e. the message was addressed to THIS bot (the same group
+        # respond-gate that routes /new), so in a multi-agent room only the
+        # addressed agent toggles — scoped by its channel ("telegram:<persona>").
+        if command in ("/yolo-on", "/yolo-off"):
+            on = command == "/yolo-on"
+            self.permissions.set_yolo(channel, on)
+            if on:
+                return AgentResponse(
+                    text=(
+                        "🔓 YOLO mode ON — I'll act without asking for approval. "
+                        "Hard-blocked actions (e.g. dropping tables) still won't run. "
+                        "Send /yolo-off to restore prompts."
+                    )
+                )
+            return AgentResponse(text="🔒 YOLO mode OFF — I'll ask before risky actions again.")
+
         # Handle /new (alias /clear) command — clear conversational context. In a
         # group the command arrives as "/new@botname"; strip the @-suffix so the
         # addressed bot still honours it.
-        if _strip_command_suffix(message) in ("/new", "/clear"):
+        if command in ("/new", "/clear"):
             if self.history_mode == "session":
                 await self.history.clear_session(channel, user_id, chat_id)
             else:
@@ -1583,6 +1603,17 @@ class AgentCore:
         if level == PermissionLevel.NEVER:
             log.warning("Permission DENIED (NEVER): %s — %s", name, params)
             return {"error": "This action is not allowed."}
+
+        # YOLO bypass: an agent the owner put in YOLO (scoped by channel) skips the
+        # approval prompt for ASK actions — auto-approved without persisting a rule.
+        # Runs after the NEVER check so hard rails still hold even in YOLO.
+        if (
+            level == PermissionLevel.ASK
+            and channel != "system"
+            and self.permissions.is_yolo(channel)
+        ):
+            log.warning("YOLO auto-approve: %s on channel=%s", name, channel)
+            level = PermissionLevel.ALWAYS
 
         if level == PermissionLevel.ASK and channel != "system":
             match_key = self.permissions.match_key(name, params)
@@ -2704,8 +2735,8 @@ class AgentCore:
         A lone write is left to the per-call path — batching only helps when
         there are two or more. The decision is all-or-nothing across the batch.
         """
-        if channel == "system":
-            return
+        if channel == "system" or self.permissions.is_yolo(channel):
+            return  # YOLO: writes fall through to _execute_tool's auto-approve
         write_decisions = request_state.setdefault("write_decisions", {})
         pending: list[tuple[str, str]] = []  # (signature, description)
         seen: set[str] = set()
