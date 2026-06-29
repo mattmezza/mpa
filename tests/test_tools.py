@@ -64,6 +64,37 @@ def test_static_prompt_has_no_datetime() -> None:
     assert cfg.agent.timezone in sections.intro
 
 
+def test_skills_on_demand_renders_pointer_not_index() -> None:
+    # The on-demand branch backs the admin prompt-preview; it must show the
+    # discovery pointer and never the full index, even when an index is supplied.
+    sections = build_prompt_sections(
+        config=Config(),
+        history_mode="session",
+        skills_index="- weather: fetch the forecast\n- email: send mail",
+        memories="",
+        reflections="",
+        decomposed_goal=None,
+        skills_on_demand=True,
+    )
+    assert "<available_skills>" in sections.available_skills
+    assert "search_skills" in sections.available_skills
+    assert "list_skills" in sections.available_skills
+    assert "- weather: fetch the forecast" not in sections.available_skills  # index omitted
+    # Default (inject) still renders the index.
+    assert "- weather: fetch the forecast" in _sections_with_index().available_skills
+
+
+def _sections_with_index():
+    return build_prompt_sections(
+        config=Config(),
+        history_mode="session",
+        skills_index="- weather: fetch the forecast",
+        memories="",
+        reflections="",
+        decomposed_goal=None,
+    )
+
+
 def test_tools_section_only_when_enabled() -> None:
     cfg = Config()
     assert _sections(cfg).tools == ""
@@ -365,6 +396,42 @@ async def test_search_and_list_skills_dispatch_scoped(agent) -> None:
         rs,
     )
     assert "send and read email" in loaded["content"]
+
+
+@pytest.mark.asyncio
+async def test_search_skills_limit_coercion_at_dispatch(agent) -> None:
+    """`limit` is LLM-controlled: a non-numeric value must fall back, and 0 must
+    not silently return nothing (the max(1, ...) floor)."""
+    from core.llm import LLMToolCall
+
+    await agent.skills.store.upsert_skill("email", "send and read email")
+
+    async def call(**limit_arg):
+        res = await agent._execute_tool(
+            LLMToolCall(id="x", name="search_skills", arguments={"query": "email", **limit_arg}),
+            "system",
+            "u",
+            agent._new_request_state(),
+        )
+        return res["skills"]
+
+    assert [s["name"] for s in await call(limit="not-a-number")] == ["email"]  # graceful fallback
+    assert [s["name"] for s in await call(limit=0)] == ["email"]  # floored, not empty
+    assert [s["name"] for s in await call()] == ["email"]  # missing limit → default
+
+
+def test_tools_for_turn_gates_discovery_on_config(agent) -> None:
+    """The config -> tools seam: skills_index_mode flips whether the discovery
+    tools are offered to the model (catches a typo'd comparison string)."""
+
+    def names():
+        return {t["name"] for t in agent._tools_for_turn(None)}
+
+    agent.config.agent.skills_index_mode = "inject"
+    assert "search_skills" not in names() and "list_skills" not in names()
+
+    agent.config.agent.skills_index_mode = "on_demand"
+    assert "search_skills" in names() and "list_skills" in names()
 
 
 # ---------------------------------------------------------------------------

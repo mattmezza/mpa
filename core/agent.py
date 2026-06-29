@@ -701,13 +701,7 @@ class AgentCore:
             if note:
                 preamble = f"{preamble}\n\n{note}"
 
-        tools = apply_feature_gates(
-            scoped_tools(persona),
-            secrets_available=self.secret_store is not None,
-            artifacts_enabled=self.config.artifacts.enabled,
-            skills_on_demand=self.config.agent.skills_index_mode == "on_demand",
-            subagents_enabled=self.config.subagents.enabled,
-        )
+        tools = self._tools_for_turn(persona)
 
         # Static system prompt. In session mode it is snapshotted once at the
         # start of the session and reused for every turn (so the static content
@@ -810,6 +804,19 @@ class AgentCore:
                 await self.bind_chat_persona(channel, user_id, chat_id, p.name)
                 return p.name
         return None
+
+    def _tools_for_turn(self, persona: Persona | None) -> list[dict]:
+        """The function-tool schemas offered to the model this turn: the persona's
+        tool scope, with feature-gated tools dropped — including the skill-discovery
+        tools when the index is not in on-demand mode (#50). The single seam that
+        translates ``skills_index_mode`` into the advertised tool set."""
+        return apply_feature_gates(
+            scoped_tools(persona),
+            secrets_available=self.secret_store is not None,
+            artifacts_enabled=self.config.artifacts.enabled,
+            skills_on_demand=self.config.agent.skills_index_mode == "on_demand",
+            subagents_enabled=self.config.subagents.enabled,
+        )
 
     async def _turn_preamble(
         self,
