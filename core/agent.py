@@ -746,7 +746,10 @@ class AgentCore:
         # per (channel, chat_id): a bot's free pass is confined to the chat it was
         # granted in, never silently extended to its other chats.
         if command in ("/yolo-on", "/yolo-off"):
-            if not addressed:
+            # Ignore unless explicitly addressed, and never on the system/scheduler
+            # path (channel='system' is exempt from prompts anyway, so a YOLO scope
+            # there would be a dead, unread row).
+            if not addressed or channel == "system":
                 return AgentResponse(text="")
             on = command == "/yolo-on"
             self.permissions.set_yolo(self._yolo_scope(channel, chat_id), on)

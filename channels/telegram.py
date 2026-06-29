@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Plain-text commands the agent handles in process() (not Telegram CommandHandlers).
+# _on_text sends these bare (no speaker tag / reply-quote) and honours an explicit
+# "@bot" target so a command never acts on the wrong bot in a multi-agent room.
+_AGENT_COMMANDS = frozenset({"/new", "/clear", "/yolo-on", "/yolo-off"})
+
 # Callback data prefix for approval buttons
 _APPROVE_PREFIX = "perm_approve:"
 _DENY_PREFIX = "perm_deny:"
@@ -352,18 +357,22 @@ class TelegramChannel:
 
         chat_id = folded if folded is not None else sender_id
         text = (message.text or "").strip()
-        # Slash commands are explicit: drop BOTH the speaker tag and the reply-quote
-        # prefix, either of which would stop the bare "/new"/"/yolo-on" match (e.g.
-        # a "/yolo-on" sent as a reply to the bot would otherwise arrive as
-        # "[reply_to]…\n/yolo-on"). The @bot suffix is stripped agent-side.
-        if text.startswith("/"):
+        respond = routing["respond"]
+        first = text.split(maxsplit=1)[0] if text else ""
+        base, _, target = first.partition("@") if first.startswith("/") else ("", "", "")
+        if base.lower() in _AGENT_COMMANDS:
+            # A recognised command is explicit and self-contained: send it bare, with
+            # no speaker tag or reply-quote (either would stop the agent-side match).
+            # But "/cmd@otherbot" is aimed at a DIFFERENT bot — even when this message
+            # is a reply to us — so this bot must not act on it (which would toggle or
+            # clear the wrong agent); record it for context instead.
             payload = text
+            if target and self._bot_username and target.lower() != self._bot_username:
+                respond = False
         else:
             payload = f"{routing['speaker_tag']}{self._reply_context(message)}{text}"
         asyncio.create_task(
-            self._handle_text(
-                payload, convo_user, str(chat_id), routing["respond"], routing["addressed"]
-            ),
+            self._handle_text(payload, convo_user, str(chat_id), respond, routing["addressed"]),
             name=f"tg-text-{convo_user}",
         )
 
