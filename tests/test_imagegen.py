@@ -126,7 +126,7 @@ async def test_openai_dalle_forces_b64_and_omits_quality():
 async def test_openrouter_parses_b64():
     payload = {"data": [{"b64_json": _b64(b"IMG"), "media_type": "image/webp"}]}
     client = FakeClient([FakeResp(200, payload)])
-    data, mime = await imagegen._openrouter(client, "k", "black-forest-labs/flux.2-klein", "a dog")
+    data, mime = await imagegen._openrouter(client, "k", "google/gemini-2.5-flash-image", "a dog")
     assert data == b"IMG" and mime == "image/webp"
     assert client.calls[0][1] == "https://openrouter.ai/api/v1/images"
 

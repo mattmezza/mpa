@@ -557,9 +557,9 @@
 
   function imagegenTab(enabled, provider, model, apiKey, keyVaulted, daily, monthly) {
     const truthy = (v) => v === true || v === 'true';
-    const DEFAULTS = { openrouter: 'black-forest-labs/flux.2-klein', fal: 'fal-ai/flux/schnell', openai: 'gpt-image-1-mini' };
+    const DEFAULTS = { openrouter: 'google/gemini-2.5-flash-image', fal: 'fal-ai/flux/schnell', openai: 'gpt-image-1-mini' };
     const HINTS = {
-      openrouter: ['black-forest-labs/flux.2-klein', 'google/gemini-2.5-flash-image', 'bytedance-seed/seedream-4.5'],
+      openrouter: ['google/gemini-2.5-flash-image', 'google/gemini-3.1-flash-image', 'openai/gpt-5-image-mini'],
       fal: ['fal-ai/flux/schnell', 'fal-ai/flux/dev', 'fal-ai/flux-pro'],
       openai: ['gpt-image-1-mini', 'gpt-image-1']
     };

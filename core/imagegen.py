@@ -30,7 +30,9 @@ from core.config import Config
 # Sensible default model per provider (issue #55). All are user-editable in the
 # admin UI; the Test button validates the chosen model before it's relied on.
 DEFAULT_MODELS: dict[str, str] = {
-    "openrouter": "black-forest-labs/flux.2-klein",  # ~$0.014, zero new auth
+    # OpenRouter's image API carries no FLUX models — Google/OpenAI only. Nano
+    # Banana is the cheapest available default. (List: GET /api/v1/models.)
+    "openrouter": "google/gemini-2.5-flash-image",  # zero new auth, reuses LLM key
     "fal": "fal-ai/flux/schnell",  # ~$0.003, sub-second
     "openai": "gpt-image-1-mini",  # $0.005 low, best text rendering
 }

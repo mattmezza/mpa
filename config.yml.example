@@ -137,7 +137,7 @@ tools:
   imagegen:
     enabled: false
     provider: "openrouter"   # openrouter | fal | openai
-    model: ""                # blank = provider default (flux.2-klein / flux/schnell / gpt-image-1-mini)
+    model: ""                # blank = provider default (gemini-2.5-flash-image / flux/schnell / gpt-image-1-mini)
     api_key: ""              # blank reuses the LLM key for openai/openrouter; else ${vault:IMAGEGEN_API_KEY}
     daily_budget: 0          # max images/day (0 = unlimited)
     monthly_budget: 0        # max images/month (0 = unlimited)

@@ -40,7 +40,7 @@ For reference:
 
 | Provider | Default model | Strength |
 |---|---|---|
-| OpenRouter | FLUX.2 Klein | Cheap, zero new auth (reuses LLM key) |
+| OpenRouter | Gemini 2.5 Flash Image (Nano Banana) | Cheap, zero new auth (reuses LLM key) |
 | fal.ai | Flux Schnell | Cheapest (~$0.003), sub-second |
 | OpenAI | GPT Image Mini | Best text-in-image, strong prompt understanding |
 
