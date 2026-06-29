@@ -29,7 +29,7 @@ from core.imagegen import ImageBudget
 from core.job_store import JobStore
 from core.llm import LLMClient, LLMToolCall, model_supports_vision
 from core.memory import MemoryStore
-from core.models import AgentResponse, Attachment
+from core.models import IMAGE_MIME_TYPES, AgentResponse, Attachment
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
 from core.personae import Persona, PersonaStore
 from core.prompt_builder import SKILLS_DISCOVERY_POINTER, build_prompt_sections
@@ -2291,6 +2291,10 @@ class AgentCore:
         # At the depth ceiling a subagent may not spawn further — don't even offer it.
         if child_state["depth"] >= cfg.recursion_depth:
             tools = [t for t in tools if t["name"] != "spawn_subagent"]
+        # Subagents have no native-media delivery path (#55): a subagent returns
+        # only text, so a generated image would be billed + saved + silently
+        # dropped. Don't offer the tool at all.
+        tools = [t for t in tools if t["name"] != "generate_image"]
 
         system = await self._build_system_prompt(persona=child_persona)
         system = f"{system}\n\n{RESULT_FOR_AGENT_INSTRUCTION}\n\n{FILE_HANDOFF_INSTRUCTION}"
@@ -2546,13 +2550,22 @@ class AgentCore:
         except Exception as exc:
             log.exception("Image generation failed")
             return {"error": f"Image generation failed: {exc}"}
+        if mime not in IMAGE_MIME_TYPES:
+            # A vector/other output (e.g. SVG from some OpenRouter models) can't be
+            # sent as a photo. Fail before billing/saving so nothing is wasted.
+            return {
+                "error": (
+                    f"The configured image model returned {mime}, which can't be sent "
+                    "as a photo. Pick a model that outputs PNG/JPEG/GIF/WebP."
+                )
+            }
         await self.image_budget.record()
         path = imagegen.save(data, mime)
         request_state.setdefault("pending_attachments", []).append(
             Attachment(data=data, mime_type=mime, filename=Path(path).name)
         )
         log.info("Generated image (%d bytes, %s) → %s", len(data), mime, path)
-        return {
+        result = {
             "ok": True,
             "path": path,
             "note": (
@@ -2561,6 +2574,11 @@ class AgentCore:
                 "what you made."
             ),
         }
+        # Issue #55 cost controls: warn the user when nearing a budget cap.
+        warning = await self.image_budget.warning(ig.daily_budget, ig.monthly_budget)
+        if warning:
+            result["warning"] = warning
+        return result
 
     async def _request_approval(
         self, tool_name: str, params: dict, channel: str, user_id: str

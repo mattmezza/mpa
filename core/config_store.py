@@ -56,6 +56,7 @@ SECRET_KEYS = frozenset(
         "admin.password_salt",
         "search.api_key",
         "tools.gh.token",
+        "tools.imagegen.api_key",
         "calendar.providers",
         "calendar.google_oauth_client_id",
         "calendar.google_oauth_client_secret",

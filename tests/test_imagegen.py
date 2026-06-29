@@ -114,11 +114,13 @@ async def test_openai_parses_b64_and_sends_low_quality():
     assert body["model"] == "gpt-image-1-mini"
 
 
-async def test_openai_omits_quality_for_non_gpt_image():
+async def test_openai_dalle_forces_b64_and_omits_quality():
     client = FakeClient([FakeResp(200, {"data": [{"b64_json": _b64(b"X")}]})])
     await imagegen._openai(client, "k", "dall-e-3", "a cat", "")
     body = client.calls[0][2]["json"]
     assert "quality" not in body and "size" not in body
+    # dall-e defaults to url responses → we must force b64_json so the parse works.
+    assert body["response_format"] == "b64_json"
 
 
 async def test_openrouter_parses_b64():
@@ -183,3 +185,13 @@ async def test_budget_monthly_cap(tmp_path):
     await b.record()
     assert await b.check(0, 1) is not None  # monthly reached
     assert await b.check(0, 2) is None
+
+
+async def test_budget_warning_near_limit(tmp_path):
+    b = ImageBudget(db_path=str(tmp_path / "ig.db"))
+    for _ in range(8):
+        await b.record()
+    assert await b.warning(0, 0) is None  # unlimited → no warning
+    assert await b.warning(20, 0) is None  # 8/20 → not near
+    assert await b.warning(10, 0) is not None  # 8/10 ≥ 80% → near
+    assert await b.warning(8, 0) is None  # 8/8 is at cap, not "approaching"

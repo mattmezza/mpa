@@ -98,6 +98,10 @@ async def _openai(
         body["size"] = size
     if model.startswith("gpt-image"):
         body["quality"] = "low"  # cheapest tier; the configured model picks the family
+    else:
+        # dall-e-* default response_format to "url" (no b64_json); force base64 so
+        # the parse below works. gpt-image always returns base64 and rejects this param.
+        body["response_format"] = "b64_json"
     r = await client.post(
         "https://api.openai.com/v1/images/generations",
         headers={"Authorization": f"Bearer {key}"},
@@ -148,7 +152,9 @@ def _check(r: httpx.Response) -> None:
         msg = msg or j.get("detail")
     except Exception:
         msg = None
-    raise ImageGenError(msg or f"Provider returned HTTP {r.status_code}: {r.text[:200]}")
+    # Use only the structured message — never echo the raw body, which could in
+    # principle reflect the Authorization header on some gateways (#55 review).
+    raise ImageGenError(msg or f"Provider returned HTTP {r.status_code}")
 
 
 def save(data: bytes, mime: str, directory: str = "data/images") -> str:
@@ -210,6 +216,17 @@ class ImageBudget:
             return f"Monthly image budget reached ({this_month}/{monthly})."
         return None
 
+    async def warning(self, daily: int, monthly: int, threshold: float = 0.8) -> str | None:
+        """Return a non-blocking heads-up when usage is near (>=80%) a cap, else None."""
+        if daily <= 0 and monthly <= 0:
+            return None
+        today, this_month = await self.usage()
+        if daily > 0 and today < daily and today >= daily * threshold:
+            return f"Approaching the daily image budget ({today}/{daily})."
+        if monthly > 0 and this_month < monthly and this_month >= monthly * threshold:
+            return f"Approaching the monthly image budget ({this_month}/{monthly})."
+        return None
+
     async def record(self) -> None:
         day = datetime.now(UTC).strftime("%Y-%m-%d")
         db = await self._conn()
@@ -240,6 +257,10 @@ if __name__ == "__main__":
             assert await b.check(2, 0) is not None  # daily cap hit
             assert await b.check(0, 2) is not None  # monthly cap hit
             assert await b.check(0, 3) is None  # higher monthly cap ok
+            for _ in range(6):
+                await b.record()  # → 8 today
+            assert await b.warning(10, 0) is not None  # 8/10 ≥ 80% → near limit
+            assert await b.warning(20, 0) is None  # 8/20 → not near
         print("imagegen.py budget self-check OK")
 
     asyncio.run(_demo())
