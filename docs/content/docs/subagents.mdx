@@ -29,11 +29,12 @@ The agent decides to delegate and calls the tool. Two modes:
   and `{ summary, result }` comes back as the tool result — the agent continues
   in the same turn.
 - **Background** (`background: true`): the tool returns a run id immediately and
-  the subagent runs off-turn. When it finishes, the result is **posted back to
-  the chat it was started from** *and* folded into that conversation's history —
-  so the spawning agent both shows it to you now and remembers it on later turns.
-  While a background run is in flight, its status is shown to the agent each turn
-  so it never mistakes a pending run for a finished one.
+  the subagent runs off-turn. A subagent works **for the agent, not the user** —
+  so its raw output is never shown to you. When the whole batch of background
+  runs for the chat has finished, the agent runs one **synthesis turn**: it
+  ingests the findings and writes a single, concise reply in its own voice, and
+  that is what you see. While a run is in flight, its status is shown to the
+  agent each turn so it never mistakes a pending run for a finished one.
 
 ```jsonc
 // spawn_subagent tool input

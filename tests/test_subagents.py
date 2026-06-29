@@ -206,39 +206,110 @@ async def test_run_subagent_token_budget_stops_loop(agent) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_subagent_background_reports_to_origin(agent) -> None:
+async def test_background_subagent_synthesises_instead_of_dumping(agent, monkeypatch) -> None:
+    from core.agent import AgentResponse
+
     channel = AsyncMock()
     agent.channels["telegram"] = channel
-    agent.llm = _ScriptedLLM([LLMResponse(text="bg result", tool_calls=[])])
+    agent.llm = _ScriptedLLM([LLMResponse(text="raw findings: CHF 599", tool_calls=[])])
 
-    # The spawning turn already left a user+assistant pair in history.
-    await agent.history.add_turn("telegram", "u1", "user", "do it async", "555")
-    await agent.history.add_turn("telegram", "u1", "assistant", "started in the background", "555")
+    # Capture the synthesis turn instead of running the whole agent loop.
+    captured: dict = {}
+
+    async def fake_process(message, channel, user_id, chat_id, decompose=True, **kw):
+        captured.update(message=message, decompose=decompose, chat_id=chat_id)
+        return AgentResponse(text="The cheapest is CHF 599.")
+
+    monkeypatch.setattr(agent, "process", fake_process)
 
     result = await agent.run_subagent(
-        task="async work",
+        task="price check",
         origin_channel="telegram",
         origin_user_id="u1",
         origin_chat_id="555",
         background=True,
     )
     assert result["background"] is True
-    assert result["status"] == "running"
-
     run = agent.subagents.get(result["run_id"])
-    await run._task  # let the background loop finish
+    await run._task  # let the background loop + synthesis finish
 
     assert run.status == "done"
-    # Delivered to the chat...
-    channel.send.assert_awaited_once()
-    sent_chat, sent_text = channel.send.await_args.args
-    assert sent_chat == "555"
-    assert "bg result" in sent_text
-    # ...and folded into the trailing assistant turn (history stays alternating).
-    turns = await agent.history.get_messages("telegram", "u1", "555")
-    assert [t["role"] for t in turns] == ["user", "assistant"]
-    assert "started in the background" in str(turns[-1]["content"])
-    assert "bg result" in str(turns[-1]["content"])
+    assert run.synthesized is True
+    # The user sees the SYNTHESISED reply, never the raw subagent output.
+    channel.send.assert_awaited_once_with("555", "The cheapest is CHF 599.")
+    # The synthesis turn received the raw findings as a non-decomposed internal trigger.
+    assert "raw findings: CHF 599" in captured["message"]
+    assert captured["decompose"] is False
+
+
+@pytest.mark.asyncio
+async def test_background_batch_synthesises_once_when_all_done(agent, monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    async def fake_synth(channel, user_id, chat_id, batch):
+        calls.append([r.run_id for r in batch])
+
+    monkeypatch.setattr(agent, "_synthesize_and_reply", fake_synth)
+
+    common = dict(background=True, origin_channel="telegram", origin_chat_id="c")
+    r1 = SubagentRun(run_id="s1", persona="", task="a", origin_user_id="u", **common)
+    r2 = SubagentRun(run_id="s2", persona="", task="b", origin_user_id="u", **common)
+    agent.subagents.register(r1)
+    agent.subagents.register(r2)
+
+    # First finishes → the other is still running → barrier holds, no synthesis.
+    agent.subagents.finish("s1", "done", result="x")
+    await agent._maybe_synthesize_subagent_batch(r1)
+    assert calls == []
+
+    # Last finishes → barrier releases → ONE synthesis over the whole batch.
+    agent.subagents.finish("s2", "done", result="y")
+    await agent._maybe_synthesize_subagent_batch(r2)
+    assert len(calls) == 1
+    assert sorted(calls[0]) == ["s1", "s2"]
+    assert r1.synthesized and r2.synthesized
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_sibling_releases_a_deferred_reply(agent, monkeypatch) -> None:
+    """Regression: a done run that deferred to a still-running sibling must not be
+    orphaned when the user cancels that sibling (the lost-reply blocker)."""
+    import asyncio
+
+    calls: list[list[str]] = []
+
+    async def fake_synth(channel, user_id, chat_id, batch):
+        calls.append(sorted(r.run_id for r in batch))
+
+    monkeypatch.setattr(agent, "_synthesize_and_reply", fake_synth)
+
+    gate = asyncio.Event()
+
+    async def fake_loop(task, persona, state, run):
+        if task == "B-task":
+            await gate.wait()  # block so this run is "still running" when A finishes
+            return "B done"
+        return "A done"
+
+    monkeypatch.setattr(agent, "_run_subagent_loop", fake_loop)
+
+    origin = dict(origin_channel="telegram", origin_user_id="u", origin_chat_id="c")
+    b_res = await agent.run_subagent(task="B-task", background=True, **origin)
+    a_res = await agent.run_subagent(task="A-task", background=True, **origin)
+
+    # A completes but B is still running → A defers (not synthesised, not lost).
+    await agent.subagents.get(a_res["run_id"])._task
+    assert calls == []
+    assert agent.subagents.get(a_res["run_id"]).synthesized is False
+
+    # User cancels B → its cancel path must release A's deferred reply.
+    agent.subagents.cancel(b_res["run_id"])
+    with pytest.raises(asyncio.CancelledError):
+        await agent.subagents.get(b_res["run_id"])._task
+
+    # A's reply was synthesised (not lost), and only A — B was cancelled.
+    assert calls == [[a_res["run_id"]]]
+    assert agent.subagents.get(a_res["run_id"]).synthesized is True
 
 
 @pytest.mark.asyncio
@@ -305,29 +376,9 @@ def test_subagent_status_note_lists_only_running_runs(agent) -> None:
     # Scoped to the chat: a different chat sees nothing.
     assert agent._subagent_status_note("repl", "other-chat") == ""
 
-    # Once finished it leaves the preamble (its result is in history instead).
+    # Once finished it leaves the preamble (the agent synthesises a reply instead).
     agent.subagents.finish("r1", "done", result="the iPhone 17e is CHF 599")
     assert agent._subagent_status_note("repl", "repl") == ""
-
-
-@pytest.mark.asyncio
-async def test_record_subagent_in_history_merges_into_assistant_turn(agent) -> None:
-    run = SubagentRun(
-        run_id="r9",
-        persona="coding-helper",
-        task="t",
-        origin_channel="repl",
-        origin_user_id="repl",
-        origin_chat_id="repl",
-    )
-    # No prior assistant turn → a fresh assistant turn is added.
-    await agent.history.add_turn("repl", "repl", "user", "hello", "repl")
-    await agent.history.add_turn("repl", "repl", "assistant", "on it", "repl")
-    await agent._record_subagent_in_history(run, "🤖 done: CHF 599")
-
-    turns = await agent.history.get_messages("repl", "repl", "repl")
-    assert [t["role"] for t in turns] == ["user", "assistant"]  # merged, not appended
-    assert "CHF 599" in str(turns[-1]["content"])
 
 
 # ---------------------------------------------------------------------------

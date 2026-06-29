@@ -34,6 +34,7 @@ from core.secret_store import SecretStore
 from core.skills import SkillsEngine
 from core.subagents import (
     FILE_HANDOFF_INSTRUCTION,
+    RESULT_FOR_AGENT_INSTRUCTION,
     SubagentRegistry,
     SubagentRun,
     narrow_scope,
@@ -288,9 +289,11 @@ TOOLS = [
             "that is never wider than yours, and returns a structured result. It "
             "has NO memory of this conversation — put everything it needs in "
             "'task'.\n"
-            "Persona: omit 'persona' to run the subagent as YOURSELF — same "
-            "identity, tools, and scope. That is the default; only name a persona "
-            "when the task clearly calls for a different specialist.\n"
+            "Persona: by DEFAULT omit 'persona' — the subagent runs as YOU (your "
+            "identity, tools, scope). This is almost always what you want. Set "
+            "'persona' ONLY when the user explicitly asked for a named specialist, "
+            "or the subtask plainly belongs to a different one. Never pick a "
+            "persona just because the roster lists some.\n"
             "Sizing: by default the subagent runs at the configured ceilings. Size "
             "it to the job with 'max_steps', 'token_budget', and 'thinking_effort' "
             "— smaller for a quick lookup, larger / 'high' effort for hard "
@@ -318,9 +321,10 @@ TOOLS = [
                 "persona": {
                     "type": "string",
                     "description": (
-                        "Persona name to run as (e.g. 'coding-helper'). Omit to run "
-                        "as yourself — same identity, tools, and scope. This is the "
-                        "default; use it unless the task needs a different specialist."
+                        "Persona name to run as. OMIT THIS by default — the subagent "
+                        "then runs as you (same identity, tools, scope), which is "
+                        "almost always correct. Only set it when the user explicitly "
+                        "named a specialist or the subtask clearly belongs to one."
                     ),
                 },
                 "max_steps": {
@@ -582,6 +586,7 @@ class AgentCore:
         attachments: list[Attachment] | None = None,
         chat_id: str = "",
         persona_name: str | None = None,
+        decompose: bool = True,
     ) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop.
 
@@ -614,7 +619,7 @@ class AgentCore:
         # The resulting plan is request-specific, so it is injected per turn
         # (in the user-message preamble), not baked into the static prompt.
         decomposed_goal: DecomposedGoal | None = None
-        if self.config.goal_decomposition.enabled and channel != "system":
+        if decompose and self.config.goal_decomposition.enabled and channel != "system":
             decomposed_goal = await self._maybe_decompose(message)
 
         # Resolve the active persona (its identity, skills + tool scope) — a
@@ -878,9 +883,10 @@ class AgentCore:
         body = "\n".join(lines)
         return (
             "<personae>\n"
-            "Personae you may run a subagent as via spawn_subagent's 'persona'. "
-            "Omit 'persona' to run as yourself (the default) — name one only when "
-            "the subtask clearly fits that specialist.\n"
+            "These personae exist ONLY so you can honour an explicit request for a "
+            "specialist. By default, spawn_subagent with NO 'persona' so the "
+            "subagent runs as you — do not assign one of these unless the user "
+            "asked for it or the subtask plainly belongs to it.\n"
             f"{body}\n"
             "</personae>"
         )
@@ -913,9 +919,9 @@ class AgentCore:
 
     def _subagent_status_note(self, channel: str, chat_id: str) -> str:
         """List background subagents from this chat that are *still running*, for
-        the turn preamble — so the agent knows what is pending. A run's result is
-        folded into the chat history when it finishes, so completed runs are part
-        of the conversation itself and need no mention here. (#15)
+        the turn preamble — so the agent knows what is pending. When the whole
+        batch finishes you'll be prompted to answer the user with their results,
+        so finished runs need no mention here. (#15)
         """
         runs = self.subagents.running_for(channel, chat_id)
         if not runs:
@@ -927,11 +933,11 @@ class AgentCore:
         body = "\n".join(lines)
         return (
             "<background_subagents>\n"
-            "Background subagents you spawned from this chat are still running. "
-            "Their results are posted to this chat (and added to this conversation) "
-            "automatically when each finishes, so you needn't relay them.\n"
+            "Background helpers you spawned from this chat are still running. When "
+            "they finish you'll be prompted to fold their results into a reply, so "
+            "don't pre-empt or invent their results now, and don't claim one is "
+            "finished while it shows here.\n"
             f"{body}\n"
-            "Don't claim one of these is finished until its result appears above.\n"
             "</background_subagents>"
         )
 
@@ -2111,7 +2117,7 @@ class AgentCore:
             tools = [t for t in tools if t["name"] != "spawn_subagent"]
 
         system = await self._build_system_prompt(persona=child_persona)
-        system = f"{system}\n\n{FILE_HANDOFF_INSTRUCTION}"
+        system = f"{system}\n\n{RESULT_FOR_AGENT_INSTRUCTION}\n\n{FILE_HANDOFF_INSTRUCTION}"
         # Memory/reflections inject per-turn via the preamble (#41), scoped to the
         # child persona (#42); query=task keeps the injection relevant.
         preamble = await self._turn_preamble(None, query=task, scope=_persona_scope(child_persona))
@@ -2166,69 +2172,107 @@ class AgentCore:
     async def _run_subagent_background(
         self, run: SubagentRun, child_persona: Persona | None, child_state: dict
     ) -> None:
-        """Run a subagent off-turn and post the result back to its origin chat."""
+        """Run a subagent off-turn. When the chat's whole batch of background runs
+        has finished, the spawning agent ingests their results and writes one reply
+        — the user never sees raw subagent output; it works for the agent (#15)."""
         try:
             text = await self._run_subagent_loop(run.task, child_persona, child_state, run)
         except asyncio.CancelledError:
+            # User-initiated stop (registry.cancel already flipped the status, so
+            # finish() is a no-op here). Mark it synthesised so a sibling's batch
+            # doesn't report on a run the user deliberately cancelled.
             self.subagents.finish(run.run_id, "cancelled")
-            await self._deliver_subagent_result(run, "Subagent was cancelled.")
+            run.synthesized = True
+            # This may have been the last running sibling: a done/error run that
+            # deferred earlier would otherwise be orphaned (its reply lost), since
+            # cancellation is the one terminal path that never re-checks the
+            # barrier. Release it before unwinding. (Safe to await here: the
+            # cancellation was already delivered once and won't re-fire.)
+            await self._maybe_synthesize_subagent_batch(run)
             raise
         except Exception as exc:
             log.exception("Background subagent %s failed", run.run_id)
-            self.subagents.finish(run.run_id, "error", error=str(exc))
-            await self._deliver_subagent_result(run, f"Subagent failed: {exc}")
+            if self.subagents.finish(run.run_id, "error", error=str(exc)):
+                await self._maybe_synthesize_subagent_batch(run)
             return
-        # Only deliver the result if this completion is what finalised the run —
-        # a run cancelled in the final moment must not also post its result.
+        # finish() returns False if a late cancellation already finalised the run,
+        # in which case this completion must not also trigger a reply.
         if self.subagents.finish(run.run_id, "done", result=text):
-            await self._deliver_subagent_result(run, text)
+            await self._maybe_synthesize_subagent_batch(run)
 
-    async def _deliver_subagent_result(self, run: SubagentRun, text: str) -> None:
-        """Post a background subagent's result to the chat that started it AND fold
-        it into that chat's history, so the spawning agent both shows it to the
-        user now and remembers it natively on later turns (#15)."""
-        label = run.persona or "default"
-        framed = f"🤖 Subagent ({label}) finished:\n\n{text}"
-        ch = self.channels.get(run.origin_channel)
-        if ch and run.origin_chat_id:
-            try:
-                await ch.send(run.origin_chat_id, framed)
-            except Exception:
-                log.exception("Failed to deliver subagent %s result", run.run_id)
-        else:
-            log.warning(
-                "Subagent %s result not delivered (channel=%r, chat=%r)",
-                run.run_id,
-                run.origin_channel,
-                run.origin_chat_id,
-            )
-        await self._record_subagent_in_history(run, framed)
-
-    async def _record_subagent_in_history(self, run: SubagentRun, framed: str) -> None:
-        """Record a background subagent's result as an assistant turn in the
-        originating chat — merged into the trailing assistant turn so replayed
-        history stays strictly alternating for providers that require it."""
+    async def _maybe_synthesize_subagent_batch(self, run: SubagentRun) -> None:
+        """Once every background run for this chat is done, run ONE agent turn that
+        ingests the batch and answers the user. The barrier collapses a fan-out of
+        parallel spawns into a single synthesised reply (#15)."""
         channel, user_id, chat_id = run.origin_channel, run.origin_user_id, run.origin_chat_id
-        # Only real user chats have a history; skip system/scheduler-origin runs.
         if not chat_id or channel == "system":
+            return  # scheduler / system-origin runs have no user chat to answer
+        # Barrier — race-free because there is no await between this check and
+        # marking the batch below: while another background run for the chat is
+        # still running, defer; that last finisher does the synthesis. (Sync runs
+        # are ignored: they return inline and never reach this path.)
+        runs = self.subagents.list_runs()
+        if any(
+            r.background
+            and r.status == "running"
+            and r.origin_channel == channel
+            and r.origin_chat_id == chat_id
+            for r in runs
+        ):
             return
+        batch = [
+            r
+            for r in runs
+            if r.background
+            and not r.synthesized
+            and r.origin_channel == channel
+            and r.origin_chat_id == chat_id
+            and r.status in ("done", "error")
+        ]
+        if not batch:
+            return
+        for r in batch:
+            r.synthesized = True
+        await self._synthesize_and_reply(channel, user_id, chat_id, batch)
+
+    async def _synthesize_and_reply(
+        self, channel: str, user_id: str, chat_id: str, batch: list[SubagentRun]
+    ) -> None:
+        """Run a synthesis turn over a finished batch and deliver the agent's reply.
+
+        The findings go in as an INTERNAL trigger message (not from the user); the
+        agent's reply — in its own persona/voice — is what the user actually sees.
+        """
+        findings = []
+        for r in batch:
+            outcome = r.result if r.status == "done" else f"[failed: {r.error or 'unknown error'}]"
+            who = r.persona or "you"
+            findings.append(f"• helper for «{r.task[:100]}» (persona: {who}):\n{outcome}")
+        instruction = (
+            "[INTERNAL — not from the user] The background helper(s) you spawned "
+            "earlier have finished. Their raw findings are below; they worked for "
+            "you, not the user, so do NOT paste them verbatim or mention "
+            "'subagents'. Using these findings together with the user's original "
+            "request in this conversation, write ONE concise, natural reply to the "
+            "user now. Do not spawn more subagents.\n\n" + "\n\n".join(findings)
+        )
         try:
-            if self.history_mode == "session":
-                merged = await self.history.append_to_last_session_message(
-                    channel, user_id, f"\n\n{framed}", chat_id
-                )
-                if not merged:
-                    await self.history.append_session_message(
-                        channel, user_id, {"role": "assistant", "content": framed}, chat_id
-                    )
-            else:
-                merged = await self.history.append_to_last_turn(
-                    channel, user_id, "assistant", f"\n\n{framed}", chat_id
-                )
-                if not merged:
-                    await self.history.add_turn(channel, user_id, "assistant", framed, chat_id)
+            response = await self.process(
+                message=instruction,
+                channel=channel,
+                user_id=user_id,
+                chat_id=chat_id,
+                decompose=False,
+            )
         except Exception:
-            log.exception("Failed to record subagent %s result in history", run.run_id)
+            log.exception("Subagent synthesis turn failed (chat=%s)", chat_id)
+            return
+        ch = self.channels.get(channel)
+        if ch and chat_id and response.text:
+            try:
+                await ch.send(chat_id, response.text)
+            except Exception:
+                log.exception("Failed to deliver synthesised subagent reply (chat=%s)", chat_id)
 
     @staticmethod
     def _usage_total(usage: dict | None) -> int:

@@ -36,6 +36,17 @@ FILE_HANDOFF_INSTRUCTION = (
     "their absolute paths, one per line. If you made no files, omit it."
 )
 
+# Appended to a subagent's system prompt. A subagent reports to the agent that
+# spawned it, never to a human — the agent synthesises the user-facing answer
+# from this result, so prose, greetings, and big formatted tables here are just
+# noise the agent has to wade through. Keep the result a dense fact dump.
+RESULT_FOR_AGENT_INSTRUCTION = (
+    "Your final reply is read by the agent that spawned you, NOT by a human. "
+    "It synthesises the user's answer from it. So return only the findings — "
+    "dense and factual, no greeting, no preamble, no offers to help further, no "
+    "elaborate tables. Just the facts the agent asked for, as briefly as possible."
+)
+
 _EFFORT_LEVELS = {"off": "", "low": "low", "medium": "medium", "high": "high"}
 
 
@@ -108,6 +119,9 @@ class SubagentRun:
     progress: str = ""
     result: str = ""
     error: str = ""
+    # True once a background run's result has been folded into a synthesis turn,
+    # so it is not picked up again by a later batch (#15).
+    synthesized: bool = False
     started_at: float = field(default_factory=time.time)
     finished_at: float = 0.0
     origin_channel: str = ""
