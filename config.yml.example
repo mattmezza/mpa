@@ -158,8 +158,8 @@ subagent_summary:
 # Enable it for group chats that mix multiple bots.
 reply_decision:
   enabled: false
-  provider: "anthropic"
-  model: "claude-haiku-4-5"   # cheap model for the yes/no reply decision
+  provider: "deepseek"
+  model: "deepseek-v4-flash"  # fast + cheap model for the yes/no reply decision
   group_only: true            # only gate group chats; DMs always get a reply
   max_replies_per_window: 6   # hard backstop: cap auto-replies per chat per window
   window_seconds: 120         # rolling window for the cap — guarantees loops end

@@ -240,8 +240,8 @@ class ReplyDecisionConfig(BaseModel):
     """
 
     enabled: bool = False
-    provider: str = "anthropic"
-    model: str = "claude-haiku-4-5"
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"  # fast + cheap is ideal for the yes/no reply call
     thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     group_only: bool = True  # only gate group chats; DMs always get a reply
     # Hard backstop: never send more than this many auto-replies into one chat
