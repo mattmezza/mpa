@@ -587,6 +587,7 @@ class AgentCore:
         chat_id: str = "",
         persona_name: str | None = None,
         decompose: bool = True,
+        allow_subagents: bool = True,
     ) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop.
 
@@ -640,7 +641,7 @@ class AgentCore:
             scope=_persona_scope(persona),
             persona=persona,
             session_key=session_key,
-            offer_personae=True,
+            offer_personae=allow_subagents,
         )
         # Append the status of still-running background subagents from this chat,
         # so the agent always knows what is pending (their results are folded into
@@ -654,7 +655,7 @@ class AgentCore:
             scoped_tools(persona),
             secrets_available=self.secret_store is not None,
             artifacts_enabled=self.config.artifacts.enabled,
-            subagents_enabled=self.config.subagents.enabled,
+            subagents_enabled=self.config.subagents.enabled and allow_subagents,
         )
 
         # Static system prompt. In session mode it is snapshotted once at the
@@ -2254,7 +2255,7 @@ class AgentCore:
             "you, not the user, so do NOT paste them verbatim or mention "
             "'subagents'. Using these findings together with the user's original "
             "request in this conversation, write ONE concise, natural reply to the "
-            "user now. Do not spawn more subagents.\n\n" + "\n\n".join(findings)
+            "user now.\n\n" + "\n\n".join(findings)
         )
         try:
             response = await self.process(
@@ -2263,6 +2264,7 @@ class AgentCore:
                 user_id=user_id,
                 chat_id=chat_id,
                 decompose=False,
+                allow_subagents=False,  # a synthesis turn must not fan out more work
             )
         except Exception:
             log.exception("Subagent synthesis turn failed (chat=%s)", chat_id)

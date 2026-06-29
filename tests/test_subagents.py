@@ -313,6 +313,31 @@ async def test_cancelling_a_sibling_releases_a_deferred_reply(agent, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_allow_subagents_false_withholds_spawn_tool(agent) -> None:
+    """A synthesis turn (allow_subagents=False) must not be offered spawn_subagent,
+    so it can't fan out more background work behind a soft prompt guard."""
+    captured: list[set[str]] = []
+
+    class RecLLM(_ScriptedLLM):
+        async def generate(self, *, tools=(), **_kw) -> LLMResponse:
+            captured.append({t["name"] for t in tools})
+            return await super().generate()
+
+    # Default (allowed) → the tool is on the table.
+    agent.llm = RecLLM([LLMResponse(text="ok", tool_calls=[])])
+    await agent.process(message="hi", channel="telegram", user_id="u", chat_id="c1")
+    assert "spawn_subagent" in captured[0]
+
+    # Synthesis turn (disallowed) → it is withheld.
+    captured.clear()
+    agent.llm = RecLLM([LLMResponse(text="ok", tool_calls=[])])
+    await agent.process(
+        message="hi", channel="telegram", user_id="u", chat_id="c2", allow_subagents=False
+    )
+    assert "spawn_subagent" not in captured[0]
+
+
+@pytest.mark.asyncio
 async def test_run_subagent_background_respects_concurrency(agent) -> None:
     agent.config.subagents.max_concurrent = 1
     # Pre-fill one running slot.
