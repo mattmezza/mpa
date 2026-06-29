@@ -549,7 +549,7 @@ def apply_feature_gates(
     *,
     secrets_available: bool,
     artifacts_enabled: bool,
-    skills_on_demand: bool,
+    skills_on_demand: bool = False,
     subagents_enabled: bool = True,
 ) -> list[dict]:
     """Drop tools whose backing feature is unavailable/disabled, so the model is
@@ -2192,12 +2192,9 @@ class AgentCore:
         stops at this run's step/token budget (sized by the spawning agent).
         """
         cfg = self.config.subagents
-        tools = apply_feature_gates(
-            scoped_tools(child_persona),
-            secrets_available=self.secret_store is not None,
-            artifacts_enabled=self.config.artifacts.enabled,
-            subagents_enabled=cfg.enabled,
-        )
+        # Same gating as the main loop (incl. the #50 skill-discovery tools, which a
+        # subagent needs in on-demand mode — its preamble carries the pointer too).
+        tools = self._tools_for_turn(child_persona)
         # At the depth ceiling a subagent may not spawn further — don't even offer it.
         if child_state["depth"] >= cfg.recursion_depth:
             tools = [t for t in tools if t["name"] != "spawn_subagent"]
