@@ -63,6 +63,30 @@ async def test_approval_skipped() -> None:
     assert await future == "skipped"
 
 
+def test_rule_pattern_generalizes_safe_multi_token() -> None:
+    # program + subcommand → wildcard the args (the intended "always" generalization).
+    assert (
+        PermissionEngine._rule_pattern("run_command:git commit -m 'x'") == "run_command:git commit*"
+    )
+    assert (
+        PermissionEngine._rule_pattern("run_command:python3 /app/tools/jobs.py list now")
+        == "run_command:python3 /app/tools/jobs.py list*"
+    )
+
+
+def test_rule_pattern_keeps_dangerous_single_token_exact() -> None:
+    # A single kept token (next is a flag/URL/quoted arg) must NOT become `prog*` —
+    # that was the bypass where one approval of `python3 -c …` allowed all python.
+    for cmd in (
+        'python3 -c "import os"',
+        "curl https://evil.example/x",
+        "sed -n '1,5p' f",
+        'echo "{{secret:TOKEN}}"',
+    ):
+        key = f"run_command:{cmd}"
+        assert PermissionEngine._rule_pattern(key) == key  # exact, no wildcard
+
+
 def test_format_approval_message_run_command_includes_purpose() -> None:
     engine = PermissionEngine()
     text = engine.format_approval_message(

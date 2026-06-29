@@ -201,9 +201,12 @@ class PermissionEngine:
         Keeps the leading program/script/subcommand tokens (e.g.
         `python3 /app/tools/browser.py explore`) and wildcards the arguments, so
         approving once covers every later call of the same command shape. Stops at
-        the first flag/URL/quoted/redirect token and caps at 3 tokens so the rule
-        is neither over-narrow (the whole command) nor over-broad (just the
-        interpreter). Non run_command keys are returned unchanged.
+        the first flag/URL/quoted/redirect token and caps at 3 tokens. Requires at
+        least 2 kept tokens (program + subcommand) to wildcard at all — a single
+        token (`python3 -c …`, `curl https://…`) would generalize to `python3*` /
+        `curl*`, a blanket arbitrary-code/any-URL bypass of the engine, so those
+        keep their exact command and re-ask on the next distinct call. Non
+        run_command keys are returned unchanged.
         """
         prefix = "run_command:"
         if not match_key.startswith(prefix):
@@ -215,8 +218,14 @@ class PermissionEngine:
             kept.append(tok)
             if len(kept) == 3:
                 break
-        if not kept:
-            return match_key  # nothing safe to generalize → keep exact
+        # Need program + subcommand (≥2 tokens) before wildcarding the rest.
+        # A single kept token means the very next token was a flag/URL/quoted arg
+        # (`python3 -c …`, `curl https://…`, `sed -n …`, `echo "…"`), and
+        # generalizing to `python3*` / `curl*` would auto-approve arbitrary code or
+        # any URL — turning one "always" click into a blanket bypass of the engine.
+        # Keep the exact command instead; the next distinct invocation re-asks.
+        if len(kept) < 2:
+            return match_key
         return prefix + " ".join(kept) + "*"
 
     def match_key(self, tool_name: str, params: dict | None = None) -> str:
