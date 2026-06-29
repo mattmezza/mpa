@@ -24,6 +24,18 @@ channels:
     allowed_user_ids: "${TELEGRAM_ALLOWED_USER_IDS}"
     # Opt-in: treat each forum topic as its own persona-bound context (#14).
     topics_enabled: false
+    # Multi-agent group rooms (#30) — turn-taking + loop guard + speaker tags.
+    # Lets several persona-bots share one group without all answering every
+    # message or looping replies at each other. Inherited by per-persona bots.
+    # NOTE: a bot only receives *unaddressed* group messages (the shared context)
+    # when its Telegram privacy mode is OFF (set via @BotFather → /setprivacy).
+    group_chat:
+      enabled: true
+      # Reply only when addressed (@mentioned or replying to this bot). Set false
+      # to reply to every human message in the group.
+      reply_when_addressed_only: true
+      # Never reply to another bot's messages (still recorded for context).
+      ignore_bots: true
   whatsapp:
     enabled: false
     bridge_url: "local-wacli"

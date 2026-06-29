@@ -62,6 +62,17 @@ def _shell_quote(s: str) -> str:
     return shlex.quote(s)
 
 
+def _strip_command_suffix(message: str) -> str:
+    """Normalise a slash command for matching: lower-cased and with any
+    ``@botname`` suffix removed (Telegram appends it to group commands, e.g.
+    ``/new@coach``). Non-commands are returned lower-cased and stripped, so a
+    normal message is matched verbatim by the caller."""
+    text = message.strip()
+    if text.startswith("/"):
+        text = text.split("@", 1)[0]
+    return text.lower()
+
+
 # -- Tool definitions the LLM can call --
 
 TOOLS = [
@@ -646,6 +657,7 @@ class AgentCore:
         attachments: list[Attachment] | None = None,
         chat_id: str = "",
         persona_name: str | None = None,
+        respond: bool = True,
     ) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop.
 
@@ -658,10 +670,24 @@ class AgentCore:
         channel/binding ladder — used by the scheduler so a ``telegram:<persona>``
         job is generated *as* that persona while keeping the ``system`` execution
         mode (auto-approved writes, no memory/reflection) (#29).
+
+        ``respond=False`` records the message into history for context but
+        generates no reply — the respond-gate for group rooms (#30): a bot stays
+        silent for messages not addressed to it (and for other bots' messages),
+        yet still sees them as inbound turns when it is later addressed. No
+        persona, preamble, or LLM call runs on this path.
         """
 
-        # Handle /new (alias /clear) command — clear conversational context.
-        if message.strip().lower() in ("/new", "/clear"):
+        # Respond-gate (#30): record the turn for context, but do not reply. Runs
+        # before everything else so a suppressed message costs only a DB write.
+        if not respond:
+            await self._record_inbound(channel, user_id, chat_id, message, attachments)
+            return AgentResponse(text="")
+
+        # Handle /new (alias /clear) command — clear conversational context. In a
+        # group the command arrives as "/new@botname"; strip the @-suffix so the
+        # addressed bot still honours it.
+        if _strip_command_suffix(message) in ("/new", "/clear"):
             if self.history_mode == "session":
                 await self.history.clear_session(channel, user_id, chat_id)
             else:
@@ -2426,6 +2452,44 @@ class AgentCore:
                     await self.history.add_turn(channel, user_id, "assistant", framed, chat_id)
         except Exception:
             log.exception("Failed to record subagent context (chat=%s)", chat_id)
+
+    async def _record_inbound(
+        self,
+        channel: str,
+        user_id: str,
+        chat_id: str,
+        message: str,
+        attachments: list[Attachment] | None = None,
+    ) -> None:
+        """Record an inbound message as a user turn without generating a reply —
+        the respond-gate's silent path for group rooms (#30).
+
+        Folds into the trailing user turn (mirroring ``_record_subagent_context``)
+        so a run of un-answered group messages stays a single turn and the
+        replayed history keeps strict user/assistant alternation. ``message``
+        already carries its ``[from <author>]`` speaker tag, so the bot sees who
+        said what when it is later addressed.
+        """
+        if channel == "system":
+            return
+        text = self._history_message_text(message, attachments)
+        try:
+            if self.history_mode == "session":
+                merged = await self.history.append_to_last_session_message(
+                    channel, user_id, f"\n\n{text}", chat_id, role="user"
+                )
+                if not merged:
+                    await self.history.append_session_message(
+                        channel, user_id, {"role": "user", "content": text}, chat_id
+                    )
+            else:
+                merged = await self.history.append_to_last_turn(
+                    channel, user_id, "user", f"\n\n{text}", chat_id
+                )
+                if not merged:
+                    await self.history.add_turn(channel, user_id, "user", text, chat_id)
+        except Exception:
+            log.exception("Failed to record silent inbound turn (chat=%s)", chat_id)
 
     @staticmethod
     def _usage_total(usage: dict | None) -> int:

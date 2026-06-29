@@ -61,6 +61,11 @@ class TelegramChannel:
         # Last chat a user wrote from, used to route approval prompts. Holds a
         # folded "<chat>:<thread>" string when the message came from a topic.
         self._last_chat_for_user: dict[int, int | str] = {}
+        # This bot's own identity, cached lazily from the first update (the Bot
+        # API has it only once polling is initialised). Used to detect @mentions
+        # and replies aimed at this bot in group rooms (#30).
+        self._bot_id: int | None = None
+        self._bot_username: str | None = None
         self.app = Application.builder().token(config.bot_token).concurrent_updates(8).build()
         # Commands are checked before the text handler so "/jobs" doesn't reach the
         # agent as an ordinary message. (Plain text — incl. /new, /clear — still
@@ -151,26 +156,142 @@ class TelegramChannel:
 
         return f"[reply_to]\n{author}: {text}\n[/reply_to]\n"
 
+    # -- Group multi-agent rooms (#30) ---------------------------------------
+
+    def _is_group(self, chat) -> bool:
+        """True for a Telegram group/supergroup with group-room behaviour on."""
+        return (
+            bool(chat)
+            and getattr(chat, "type", "") in ("group", "supergroup")
+            and self.config.group_chat.enabled
+        )
+
+    def _convo_user_id(self, chat, sender_id: int) -> str:
+        """The ``user_id`` key the agent stores history/bindings under.
+
+        In a group room every participant shares one conversation per bot, so the
+        group itself is the key — that is what lets a bot see other people's (and
+        other bots') messages as inbound turns. In a 1:1 DM it stays the sender
+        (where ``chat_id == user_id`` anyway), so the plain flow is unchanged.
+        """
+        if self._is_group(chat):
+            return str(chat.id)
+        return str(sender_id)
+
+    def _ensure_bot_identity(self, context) -> None:
+        """Cache this bot's id + username from the first update that needs them."""
+        if self._bot_id is not None:
+            return
+        bot = getattr(context, "bot", None) or self.app.bot
+        try:
+            self._bot_id = bot.id
+            uname = bot.username
+            self._bot_username = uname.lower() if uname else None
+        except RuntimeError, AttributeError:
+            # Bot info not populated yet — leave unset; reply-to detection still
+            # works, and the next update retries.
+            self._bot_id = None
+            self._bot_username = None
+
+    @staticmethod
+    def _speaker_name(user) -> str:
+        if user is None:
+            return "Unknown"
+        name = (
+            getattr(user, "full_name", None)
+            or getattr(user, "username", None)
+            or str(getattr(user, "id", ""))
+        )
+        return name or "Unknown"
+
+    def _addressed_to_me(self, message) -> bool:
+        """True when this message is addressed to THIS bot: a reply to one of the
+        bot's own messages, or an @mention / text-mention of it."""
+        reply = getattr(message, "reply_to_message", None)
+        if reply is not None:
+            rf = getattr(reply, "from_user", None)
+            if rf is not None and self._bot_id is not None and rf.id == self._bot_id:
+                return True
+        text = getattr(message, "text", None) or getattr(message, "caption", None) or ""
+        entities = list(getattr(message, "entities", None) or []) + list(
+            getattr(message, "caption_entities", None) or []
+        )
+        handle = f"@{self._bot_username}" if self._bot_username else ""
+        for ent in entities:
+            etype = getattr(ent, "type", "")
+            if etype == "mention" and handle:
+                seg = text[ent.offset : ent.offset + ent.length]
+                if seg.lower() == handle:
+                    return True
+            elif etype == "text_mention":
+                u = getattr(ent, "user", None)
+                if u is not None and self._bot_id is not None and u.id == self._bot_id:
+                    return True
+        # Fallback: covers "/cmd@bot" and a plain "@bot" when entities are absent.
+        return bool(handle) and handle in text.lower()
+
+    def _turn_routing(self, update: Update, message, context) -> dict:
+        """Decide how to handle an inbound message in a group room (#30).
+
+        Returns ``user_id`` (the shared conversation key — the group, or the
+        sender for a DM), the ``speaker_tag`` to prepend so the persona knows who
+        spoke, and ``respond`` (reply now, or just record for context). Outside a
+        group room every message gets ``respond=True`` and no tag, so 1:1 DMs are
+        untouched.
+        """
+        user = update.effective_user
+        chat = update.effective_chat
+        sender_id = user.id if user else 0
+        if not self._is_group(chat):
+            return {"user_id": str(sender_id), "speaker_tag": "", "respond": True}
+
+        self._ensure_bot_identity(context)
+        gc = self.config.group_chat
+        is_bot = bool(getattr(user, "is_bot", False))
+        marker = " (bot)" if is_bot else ""
+        speaker_tag = f"[from {self._speaker_name(user)}{marker}]\n"
+        if is_bot and gc.ignore_bots:
+            respond = False  # loop guard — record only, never reply to another bot
+        elif gc.reply_when_addressed_only and not self._addressed_to_me(message):
+            respond = False  # respond-gate — not addressed, stay silent but record
+        else:
+            respond = True
+        return {"user_id": str(chat.id), "speaker_tag": speaker_tag, "respond": respond}
+
+    def _remember_chat(self, convo_user: str, folded) -> None:
+        """Note the chat to route an approval prompt back to (keyed by the
+        conversational id, so a group's approval lands in the group)."""
+        if folded is None:
+            return
+        try:
+            self._last_chat_for_user[int(convo_user)] = folded
+        except TypeError, ValueError:
+            pass
+
     async def _on_text(self, update: Update, context) -> None:
         user = update.effective_user
         message = update.message
         chat = update.effective_chat
         if not user or not message:
             return
-        user_id = user.id
+        sender_id = user.id
         folded = self._fold(chat, message)
-        if folded is not None:
-            self._last_chat_for_user[user_id] = folded
-        if not self._is_allowed(user_id):
+        routing = self._turn_routing(update, message, context)
+        convo_user = routing["user_id"]
+        self._remember_chat(convo_user, folded)
+        if not self._is_allowed(sender_id):
             return
 
-        chat_id = folded if folded is not None else user_id
+        chat_id = folded if folded is not None else sender_id
         reply_context = self._reply_context(message)
         text = (message.text or "").strip()
-        payload = f"{reply_context}{text}" if reply_context else text
+        # Don't tag slash-commands — they're explicit and the tag would break the
+        # bare "/new" / "/clear" match (which already strips the @bot suffix).
+        tag = "" if text.startswith("/") else routing["speaker_tag"]
+        payload = f"{tag}{reply_context}{text}"
         asyncio.create_task(
-            self._handle_text(payload, user_id, chat_id),
-            name=f"tg-text-{user_id}",
+            self._handle_text(payload, convo_user, str(chat_id), routing["respond"]),
+            name=f"tg-text-{convo_user}",
         )
 
     async def _on_voice(self, update: Update, context) -> None:
@@ -180,14 +301,30 @@ class TelegramChannel:
         chat = update.effective_chat
         if not user or not message:
             return
-        user_id = user.id
+        sender_id = user.id
         folded = self._fold(chat, message)
-        if folded is not None:
-            self._last_chat_for_user[user_id] = folded
-        if not self._is_allowed(user_id):
+        routing = self._turn_routing(update, message, context)
+        convo_user = routing["user_id"]
+        self._remember_chat(convo_user, folded)
+        if not self._is_allowed(sender_id):
             return
 
-        chat_id = folded if folded is not None else user_id
+        chat_id = folded if folded is not None else sender_id
+        reply_context = self._reply_context(message)
+        prefix = f"{routing['speaker_tag']}{reply_context}"
+        # Respond-gate: a voice message we're staying silent on is recorded as a
+        # cheap placeholder — no point downloading/transcribing audio we won't
+        # answer (#30).
+        if not routing["respond"]:
+            await self.agent.process(
+                message=f"{prefix}(voice message)",
+                channel=self.channel_name,
+                user_id=str(convo_user),
+                chat_id=str(chat_id),
+                respond=False,
+            )
+            return
+
         if not self.voice:
             await self.send(
                 chat_id, "Voice messages are not supported (voice pipeline not configured)."
@@ -198,10 +335,9 @@ class TelegramChannel:
         voice_msg = message.voice or message.audio
         if not voice_msg:
             return
-        reply_context = self._reply_context(message)
         asyncio.create_task(
-            self._handle_voice(voice_msg.file_id, user_id, chat_id, reply_context),
-            name=f"tg-voice-{user_id}",
+            self._handle_voice(voice_msg.file_id, convo_user, str(chat_id), prefix),
+            name=f"tg-voice-{convo_user}",
         )
 
     async def _on_photo(self, update: Update, context) -> None:
@@ -211,15 +347,30 @@ class TelegramChannel:
         chat = update.effective_chat
         if not user or not message:
             return
-        user_id = user.id
+        sender_id = user.id
         folded = self._fold(chat, message)
-        if folded is not None:
-            self._last_chat_for_user[user_id] = folded
-        if not self._is_allowed(user_id):
+        routing = self._turn_routing(update, message, context)
+        convo_user = routing["user_id"]
+        self._remember_chat(convo_user, folded)
+        if not self._is_allowed(sender_id):
             return
 
-        chat_id = folded if folded is not None else user_id
+        chat_id = folded if folded is not None else sender_id
         caption = message.caption or ""
+        reply_context = self._reply_context(message)
+        prefix = f"{routing['speaker_tag']}{reply_context}"
+        # Respond-gate: record a placeholder for an image we're staying silent
+        # on instead of downloading it (#30).
+        if not routing["respond"]:
+            label = f"{caption} (image)" if caption else "(image)"
+            await self.agent.process(
+                message=f"{prefix}{label}",
+                channel=self.channel_name,
+                user_id=str(convo_user),
+                chat_id=str(chat_id),
+                respond=False,
+            )
+            return
 
         # Collect file IDs to download.
         # Photos: Telegram sends multiple sizes; pick the largest (last).
@@ -234,10 +385,9 @@ class TelegramChannel:
         if not file_ids:
             return
 
-        reply_context = self._reply_context(message)
         asyncio.create_task(
-            self._handle_photo(file_ids, caption, reply_context, user_id, chat_id),
-            name=f"tg-photo-{user_id}",
+            self._handle_photo(file_ids, caption, prefix, convo_user, str(chat_id)),
+            name=f"tg-photo-{convo_user}",
         )
 
     async def _on_jobs_command(self, update: Update, context) -> None:
@@ -325,8 +475,11 @@ class TelegramChannel:
         if user_id is None or not self._is_allowed(user_id):
             return
         chat_id = f"{chat.id}:{thread}"
+        # Bind under the same conversational id messages resolve with, so a group
+        # room's shared history finds the topic binding (#30).
+        convo_user = self._convo_user_id(chat, user_id)
         bound = await self.agent.bind_chat_persona_by_label(
-            self.channel_name, str(user_id), chat_id, name
+            self.channel_name, convo_user, chat_id, name
         )
         if bound:
             await self.send(chat_id, f"Bound this topic to {bound}.")
@@ -522,7 +675,20 @@ class TelegramChannel:
             return False
         return True
 
-    async def _handle_text(self, text: str, user_id: int, chat_id: int | str) -> None:
+    async def _handle_text(
+        self, text: str, user_id: str, chat_id: int | str, respond: bool = True
+    ) -> None:
+        # Respond-gate silent path (#30): record the turn for context, no typing
+        # indicator, no reply.
+        if not respond:
+            await self.agent.process(
+                message=text,
+                channel=self.channel_name,
+                user_id=str(user_id),
+                chat_id=str(chat_id),
+                respond=False,
+            )
+            return
         async with self._typing(chat_id), self._progress(chat_id):
             response = await self.agent.process(
                 message=text,
@@ -533,7 +699,7 @@ class TelegramChannel:
         await self._send_response(chat_id, response)
 
     async def _handle_voice(
-        self, file_id: str, user_id: int, chat_id: int | str, reply_context: str
+        self, file_id: str, user_id: str, chat_id: int | str, prefix: str
     ) -> None:
         async with self._typing(chat_id), self._progress(chat_id):
             file = await self.app.bot.get_file(file_id)
@@ -558,8 +724,8 @@ class TelegramChannel:
             log.info("Transcript: %s", transcript[:200])
 
             content = f"[voice] {transcript}"
-            if reply_context:
-                content = f"{reply_context}{content}"
+            if prefix:
+                content = f"{prefix}{content}"
             response = await self.agent.process(
                 message=content,
                 channel=self.channel_name,
@@ -572,8 +738,8 @@ class TelegramChannel:
         self,
         file_ids: list[tuple[str, str | None]],
         caption: str,
-        reply_context: str,
-        user_id: int,
+        prefix: str,
+        user_id: str,
         chat_id: int | str,
     ) -> None:
         from core.models import IMAGE_MIME_TYPES, Attachment
@@ -603,8 +769,8 @@ class TelegramChannel:
                 return
 
             content = caption.strip()
-            if reply_context:
-                content = f"{reply_context}{content}" if content else reply_context
+            if prefix:
+                content = f"{prefix}{content}" if content else prefix
             response = await self.agent.process(
                 message=content,
                 channel=self.channel_name,

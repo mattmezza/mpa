@@ -89,6 +89,36 @@ class AgentConfig(BaseModel):
     personalia: str = ""
 
 
+class GroupChatConfig(BaseModel):
+    """Multi-agent group rooms — turn-taking + loop guard + speaker tags (#30).
+
+    Lets several persona-bots share one Telegram group without the raw misbehaviour
+    (every bot answering every message; bots looping replies at each other). In a
+    group/supergroup a bot:
+
+    - replies only when **addressed** — @mentioned or replying to one of its own
+      messages (``reply_when_addressed_only``); otherwise it stays silent but still
+      records the turn for context,
+    - **ignores other bots** so two assistants never loop replying to each other
+      (``ignore_bots``); their messages are still recorded for context,
+    - records every message it sees with a ``[from <author>]`` speaker tag, so a
+      persona is never confused about who said what in the shared history.
+
+    Receiving the unaddressed messages that feed the shared context requires the
+    bot's Telegram **privacy mode to be OFF** (set via BotFather). With privacy
+    mode on (the default) a bot only receives messages addressed to it, so the
+    gate is moot and no shared context accumulates. Telegram-only: WhatsApp uses a
+    single number, so multi-bot rooms don't apply there.
+    """
+
+    enabled: bool = True
+    # Respond-gate: only reply when addressed. False = reply to every human message
+    # in the group (still ignoring bots / tagging speakers).
+    reply_when_addressed_only: bool = True
+    # Loop guard: never reply to a message authored by another bot (record only).
+    ignore_bots: bool = True
+
+
 class TelegramConfig(BaseModel):
     enabled: bool = False
     bot_token: str = ""
@@ -96,6 +126,8 @@ class TelegramConfig(BaseModel):
     # Opt-in: fold forum topics into separate contexts (one persona per topic).
     # Off by default so the plain 1:1 DM flow is unchanged.
     topics_enabled: bool = False
+    # Group multi-agent room behaviour (#30); inherited by per-persona bots.
+    group_chat: GroupChatConfig = Field(default_factory=GroupChatConfig)
 
     @field_validator("allowed_user_ids", mode="before")
     @classmethod
