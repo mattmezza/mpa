@@ -387,12 +387,25 @@ class TelegramChannel:
 
     # -- Helpers -------------------------------------------------------------
 
+    # Seconds the agent must keep working before the "Thinking…" placeholder is
+    # posted — short enough to reassure on a slow turn, long enough that quick
+    # replies (already covered by native typing dots) never flash a throwaway
+    # bubble. Overridable in tests.
+    _PLACEHOLDER_DELAY = 0.1
+
     @asynccontextmanager
     async def _typing(self, chat_id: int | str):
-        """Send 'typing' chat action continuously until the wrapped block completes.
+        """Keep a 'working' signal visible for the whole turn, on every client.
 
-        Telegram's typing indicator expires after ~5 seconds, so we resend it
-        every 4 seconds to keep it visible for the duration of agent processing.
+        Telegram Web (K) does not render the ``sendChatAction`` typing indicator
+        that mobile and desktop show (#57), but it does render normal messages.
+        So two signals run together:
+
+        * the chat action, resent every 4s (it expires after ~5s) — native typing
+          dots on clients that honour it;
+        * a real, silent placeholder message ("🤔 Thinking…"), which every client
+          renders and which doubles as a "the agent is thinking" (CoT) signal. It
+          is posted only once the turn is slow and removed before the answer.
         """
         cid, kw = self._route(chat_id)
 
@@ -404,15 +417,44 @@ class TelegramChannel:
             except asyncio.CancelledError:
                 pass
 
-        task = asyncio.create_task(_send_typing(), name=f"tg-typing-{chat_id}")
+        turn_over = asyncio.Event()
+
+        async def _placeholder():
+            # Wait out the delay; a turn that finishes first never posts (no flash).
+            try:
+                await asyncio.wait_for(turn_over.wait(), timeout=self._PLACEHOLDER_DELAY)
+                return
+            except TimeoutError:
+                pass
+            # disable_notification: deleting a message does NOT retract its push, so
+            # a notifying placeholder would ping the user every turn. Keep it silent.
+            # ponytail: static "Thinking…". Streaming the real per-step CoT would
+            # need a progress callback threaded through agent.process() — add that
+            # if the generic signal proves not enough.
+            msg = await self.app.bot.send_message(
+                cid, "🤔 Thinking…", disable_notification=True, **kw
+            )
+            await turn_over.wait()  # leave it up for the rest of the turn
+            try:
+                await self.app.bot.delete_message(cid, msg.message_id)
+            except Exception:
+                pass
+
+        typing_task = asyncio.create_task(_send_typing(), name=f"tg-typing-{chat_id}")
+        # The placeholder owns its full post→delete lifecycle and is signalled via
+        # turn_over, never cancelled mid-send, so a turn that ends during the send
+        # round-trip can't orphan the bubble (the bot would lose the id to delete).
+        placeholder_task = asyncio.ensure_future(_placeholder())
         try:
             yield
         finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            turn_over.set()
+            typing_task.cancel()
+            for t in (typing_task, placeholder_task):
+                try:
+                    await t
+                except asyncio.CancelledError, Exception:
+                    pass
 
     @asynccontextmanager
     async def _progress(self, chat_id: int | str):
