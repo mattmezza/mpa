@@ -360,6 +360,30 @@ async def test_add_and_list_secret_via_admin(admin_client) -> None:
     assert await s.get_secret("STRIPE") == "sk_live"
 
 
+async def test_delete_secret_via_admin(admin_client) -> None:
+    client, s, _cs = admin_client
+    await s.set_secret("DOOMED", "v", shared=True)
+    resp = client.post("/admin/secrets/delete", data={"name": "DOOMED"}, headers=_auth())
+    assert resp.status_code == 200 and "DOOMED" not in resp.text
+    assert await s.get_secret("DOOMED") is None
+
+
+async def test_delete_infra_secret_via_admin(tmp_path) -> None:
+    db = str(tmp_path / "config.db")
+    cs = ConfigStore(db_path=db)
+    await cs.set_setup_step("done")
+    await cs.set_admin_password("testpw")
+    s = SecretStore(db_path=db, infra_vault=InfraVault("test-machine-key"))
+    app, _ = create_admin_app(AgentState(), cs, secret_store=s)
+    client = TestClient(app)
+    await s.set_infra_secret("OPENAI_API_KEY", "sk-old")
+    resp = client.post(
+        "/admin/secrets/infra/delete", data={"name": "OPENAI_API_KEY"}, headers=_auth()
+    )
+    assert resp.status_code == 200 and "OPENAI_API_KEY" not in resp.text
+    assert await s.get_infra_secret("OPENAI_API_KEY") is None
+
+
 async def test_vault_fill_flow(admin_client) -> None:
     client, s, _cs = admin_client
     token = await s.create_request("NEWKEY", persona="", reason="need")

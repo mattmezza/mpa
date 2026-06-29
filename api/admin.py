@@ -3203,7 +3203,9 @@ def create_admin_app(
         if secret_store is None:
             return _no_vault_partial()
         form = await request.form()
-        await secret_store.delete_secret(str(form.get("name", "")).strip())
+        name = str(form.get("name", "")).strip()
+        if await secret_store.delete_secret(name):
+            log.info("Persona secret %r deleted via admin", name)
         return _render_partial("partials/secrets.html", **(await _secrets_ctx()))
 
     @app.post("/admin/secrets/grant", response_class=HTMLResponse, dependencies=[Depends(auth)])
@@ -3236,6 +3238,18 @@ def create_admin_app(
         await secret_store.set_infra_secret(
             name, str(form.get("value", "")), str(form.get("description", ""))
         )
+        return _render_partial("partials/secrets.html", **(await _secrets_ctx()))
+
+    @app.post(
+        "/admin/secrets/infra/delete", response_class=HTMLResponse, dependencies=[Depends(auth)]
+    )
+    async def delete_infra_secret(request: Request) -> HTMLResponse:
+        if secret_store is None:
+            return _no_vault_partial()
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        if await secret_store.delete_infra_secret(name):
+            log.info("Infra secret %r deleted via admin", name)
         return _render_partial("partials/secrets.html", **(await _secrets_ctx()))
 
     # -- Secure-link credential fill flow --
