@@ -241,6 +241,32 @@ class TestPartialRoutes:
         assert "ch-tg-group-addressed" in resp.text
         assert "ch-tg-group-ignorebots" in resp.text
 
+    def test_save_telegram_vaulted_token_allows_group_chat(self):
+        """A vault-managed token (empty readonly field) must not block saving the
+        group_chat / topics toggles (#30)."""
+        store = _ConfigStoreStub(setup_complete=True)
+        store._data["channels.telegram.bot_token"] = "${vault:TELEGRAM_BOT_TOKEN}"
+        agent_state = AgentState(agent=cast(Any, _AgentStub()))
+        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
+        client = TestClient(app, follow_redirects=False)
+        resp = client.post(
+            "/channels/telegram",
+            headers=AUTH,
+            json={
+                "bot_token": "",  # vaulted → field is empty
+                "user_ids": "1",
+                "enabled": True,
+                "group_chat_enabled": True,
+                "group_reply_addressed_only": False,
+                "group_ignore_bots": True,
+            },
+        )
+        assert resp.status_code == 200  # not 400, despite the empty token
+        assert store._data["channels.telegram.group_chat.enabled"] == "true"
+        assert store._data["channels.telegram.group_chat.reply_when_addressed_only"] == "false"
+        # The vault ref is left untouched (not overwritten with an empty token).
+        assert store._data["channels.telegram.bot_token"] == "${vault:TELEGRAM_BOT_TOKEN}"
+
     def test_logs_partial(self):
         client = _client(setup_complete=True)
         resp = client.get("/partials/logs", headers=AUTH)

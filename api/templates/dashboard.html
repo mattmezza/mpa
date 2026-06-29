@@ -349,7 +349,10 @@
     const groupAddressed = groupAddressedInput ? groupAddressedInput.checked : true;
     const groupIgnoreBotsInput = document.getElementById('ch-tg-group-ignorebots');
     const groupIgnoreBots = groupIgnoreBotsInput ? groupIgnoreBotsInput.checked : true;
-    if (!token) {
+    // A vault-managed token renders the field readonly+empty; the backend keeps
+    // the existing ${vault:} ref, so don't demand a typed token there (otherwise
+    // toggling topics/group rooms is impossible once the token is vaulted).
+    if (!token && !tokenInput.readOnly) {
       result.textContent = 'Bot token is required.';
       result.className = 'alert-error';
       return;
