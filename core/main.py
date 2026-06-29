@@ -124,6 +124,7 @@ async def _start_agent(config_store: ConfigStore):
                 bot_token=token,
                 allowed_user_ids=persona.allowed_user_ids or tg_global.allowed_user_ids,
                 topics_enabled=tg_global.topics_enabled,
+                group_chat=tg_global.group_chat,  # inherit group-room behaviour (#30)
             )
             await _start_tg(pconf, f"telegram:{persona.name}", f"telegram:{persona.name}")
 

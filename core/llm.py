@@ -131,6 +131,40 @@ def _openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return converted
 
 
+def _as_content_blocks(content: Any) -> list[dict[str, Any]]:
+    """Normalise a message ``content`` to a list of content-part blocks."""
+    if isinstance(content, list):
+        return content
+    return [{"type": "text", "text": content if isinstance(content, str) else str(content)}]
+
+
+def _coalesce_user_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge consecutive ``user`` messages into one, so a run of user turns is
+    sent as a single turn.
+
+    Group multi-agent rooms (#30) record every message they see — including ones
+    the bot stays silent on — so the replayed history can hold several user turns
+    in a row before the bot's reply. Anthropic requires strict user/assistant
+    alternation, so this normalises the array right before the API call instead of
+    making every caller track it. String contents join with a blank line; anything
+    multimodal falls back to concatenated content-part blocks (valid for both
+    Anthropic and the OpenAI-compatible providers). Assistant/tool messages are
+    left untouched — only plain user turns are ever produced back-to-back.
+    """
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        if out and out[-1].get("role") == "user" and msg.get("role") == "user":
+            prev, cur = out[-1].get("content"), msg.get("content")
+            if isinstance(prev, str) and isinstance(cur, str):
+                merged: Any = f"{prev}\n\n{cur}"
+            else:
+                merged = _as_content_blocks(prev) + _as_content_blocks(cur)
+            out[-1] = {**out[-1], "content": merged}
+        else:
+            out.append(dict(msg))
+    return out
+
+
 def _normalize_provider(provider: str) -> str:
     value = (provider or "").strip().lower()
     return value or "anthropic"
@@ -229,6 +263,9 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> LLMResponse:
         resolved_model = _normalize_model(self.provider, model)
+        # Collapse any run of consecutive user turns (group rooms record silent
+        # turns between replies, #30) so the array honours strict alternation.
+        messages = _coalesce_user_messages(messages)
         if self.provider == "anthropic":
             client_any = cast(Any, self._client)
             messages_client = cast(Any, getattr(client_any, "messages"))  # type: ignore[attr-defined]

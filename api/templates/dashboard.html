@@ -343,7 +343,16 @@
     const users = usersInput.value.trim();
     const topicsInput = document.getElementById('ch-tg-topics');
     const topics = topicsInput ? topicsInput.checked : false;
-    if (!token) {
+    const groupInput = document.getElementById('ch-tg-group');
+    const group = groupInput ? groupInput.checked : false;
+    const groupAddressedInput = document.getElementById('ch-tg-group-addressed');
+    const groupAddressed = groupAddressedInput ? groupAddressedInput.checked : true;
+    const groupIgnoreBotsInput = document.getElementById('ch-tg-group-ignorebots');
+    const groupIgnoreBots = groupIgnoreBotsInput ? groupIgnoreBotsInput.checked : true;
+    // A vault-managed token renders the field readonly+empty; the backend keeps
+    // the existing ${vault:} ref, so don't demand a typed token there (otherwise
+    // toggling topics/group rooms is impossible once the token is vaulted).
+    if (!token && !tokenInput.readOnly) {
       result.textContent = 'Bot token is required.';
       result.className = 'alert-error';
       return;
@@ -354,7 +363,11 @@
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
       },
-      body: JSON.stringify({bot_token: token, user_ids: users, enabled: true, topics_enabled: topics})
+      body: JSON.stringify({
+        bot_token: token, user_ids: users, enabled: true, topics_enabled: topics,
+        group_chat_enabled: group, group_reply_addressed_only: groupAddressed,
+        group_ignore_bots: groupIgnoreBots
+      })
     })
       .then(r => r.text())
       .then(html => {

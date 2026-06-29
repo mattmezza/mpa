@@ -31,6 +31,28 @@
     topic after a persona to auto-bind it; rebind any chat on the Chats tab.
   </div>
 
+  <label class="flex items-center gap-2 mt-3 text-sm">
+    <input type="checkbox" id="ch-tg-group" {% if group_chat_enabled %}checked{% endif %}>
+    Group multi-agent rooms
+  </label>
+  <div class="hint">
+    Let several persona-bots share one group: each replies only when addressed,
+    ignores other bots, and tags who said what. Requires each bot's Telegram
+    privacy mode to be <strong>off</strong> (@BotFather → /setprivacy) to see the
+    wider conversation. Inherited by per-persona bots.
+  </div>
+  <div class="ml-5 mt-1 space-y-1">
+    <label class="flex items-center gap-2 text-sm">
+      <input type="checkbox" id="ch-tg-group-addressed" {% if group_reply_addressed_only %}checked{% endif %}>
+      Reply only when addressed (@mention or reply-to)
+    </label>
+    <label class="flex items-center gap-2 text-sm">
+      <input type="checkbox" id="ch-tg-group-ignorebots" {% if group_ignore_bots %}checked{% endif %}>
+      Never reply to other bots (loop guard)
+    </label>
+    <div class="hint">These two apply only when group rooms are on.</div>
+  </div>
+
   {% include "partials/restart_note.html" %}
 
   <div class="flex items-center gap-2 mt-3">

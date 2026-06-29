@@ -320,6 +320,18 @@ async def _channel_wizard_context(
         ctx["topics_enabled"] = (
             str(await config_store.get("channels.telegram.topics_enabled")).lower() == "true"
         )
+        # Group multi-agent rooms (#30). Absent keys fall back to the model
+        # defaults: enabled off, the two sub-options on.
+        g_enabled = await config_store.get("channels.telegram.group_chat.enabled")
+        g_addressed = await config_store.get(
+            "channels.telegram.group_chat.reply_when_addressed_only"
+        )
+        g_ignore = await config_store.get("channels.telegram.group_chat.ignore_bots")
+        ctx["group_chat_enabled"] = str(g_enabled).lower() == "true"  # default off
+        ctx["group_reply_addressed_only"] = (
+            g_addressed is None or str(g_addressed).lower() == "true"
+        )
+        ctx["group_ignore_bots"] = g_ignore is None or str(g_ignore).lower() == "true"
     if channel == "whatsapp":
         enabled_raw = await config_store.get("channels.whatsapp.enabled")
         enabled = str(enabled_raw).lower() != "false"
@@ -2316,6 +2328,10 @@ def create_admin_app(
         user_ids = str(body.get("user_ids", "")).strip()
         enabled = str(body.get("enabled", "true")).lower() == "true"
         topics_enabled = bool(body.get("topics_enabled", False))
+        # Group multi-agent rooms (#30). Sub-options default on; whole feature off.
+        group_enabled = bool(body.get("group_chat_enabled", False))
+        group_addressed = bool(body.get("group_reply_addressed_only", True))
+        group_ignore_bots = bool(body.get("group_ignore_bots", True))
         # When the token lives in the vault the editor submits an empty field —
         # treat the existing ${vault:} ref as "present" and leave it untouched.
         token_is_vaulted = _is_vault_ref(await config_store.get("channels.telegram.bot_token"))
@@ -2325,6 +2341,9 @@ def create_admin_app(
             "channels.telegram.enabled": str(enabled).lower(),
             "channels.telegram.allowed_user_ids": user_ids,
             "channels.telegram.topics_enabled": str(topics_enabled).lower(),
+            "channels.telegram.group_chat.enabled": str(group_enabled).lower(),
+            "channels.telegram.group_chat.reply_when_addressed_only": str(group_addressed).lower(),
+            "channels.telegram.group_chat.ignore_bots": str(group_ignore_bots).lower(),
         }
         if bot_token:  # only overwrite when a real new token was typed
             values["channels.telegram.bot_token"] = bot_token
