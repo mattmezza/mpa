@@ -712,6 +712,7 @@ class AgentCore:
         chat_id: str = "",
         persona_name: str | None = None,
         respond: bool = True,
+        addressed: bool = True,
     ) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop.
 
@@ -730,6 +731,13 @@ class AgentCore:
         silent for messages not addressed to it (and for other bots' messages),
         yet still sees them as inbound turns when it is later addressed. No
         persona, preamble, or LLM call runs on this path.
+
+        ``addressed`` is whether the message was explicitly directed at THIS bot
+        (@mention / reply / ``/cmd@bot``). It usually tracks ``respond``, but
+        diverges when ``reply_when_addressed_only=False`` makes a bot reply to
+        everything — there ``respond`` is True for unaddressed messages too. The
+        YOLO toggle keys off ``addressed`` (not ``respond``) so a bare ``/yolo-on``
+        never flips every bot in a room. Defaults True for non-group channels.
         """
 
         # Respond-gate (#30): record the turn for context, but do not reply. Runs
@@ -738,10 +746,47 @@ class AgentCore:
             await self._record_inbound(channel, user_id, chat_id, message, attachments)
             return AgentResponse(text="")
 
+        command = _strip_command_suffix(message)
+
+        # YOLO toggle — /yolo-on grants this agent a free pass (ASK actions run
+        # without a prompt); /yolo-off restores prompting. Require explicit
+        # addressing, not just respond=True: with reply_when_addressed_only=False
+        # every bot in a group responds to a bare "/yolo-on", and we must not flip
+        # them all — `addressed` is the same "directed at THIS bot" signal that
+        # routes a reply, so "/yolo-on@thatbot" targets exactly one agent. Scoped
+        # per (channel, chat_id): a bot's free pass is confined to the chat it was
+        # granted in, never silently extended to its other chats.
+        if command in ("/yolo-on", "/yolo-off"):
+            # Ignore unless explicitly addressed, and never on the system/scheduler
+            # path (channel='system' is exempt from prompts anyway, so a YOLO scope
+            # there would be a dead, unread row).
+            if not addressed or channel == "system":
+                return AgentResponse(text="")
+            on = command == "/yolo-on"
+            self.permissions.set_yolo(self._yolo_scope(channel, chat_id), on)
+            log.warning(
+                "YOLO %s by user=%s channel=%s chat=%s",
+                "ON" if on else "OFF",
+                user_id,
+                channel,
+                chat_id,
+            )
+            if on:
+                return AgentResponse(
+                    text=(
+                        "🔓 YOLO mode ON for this chat — I'll run actions without "
+                        "asking. Only a short hard-blocked list is still refused "
+                        "(e.g. direct DB drops/alters); everything else, including "
+                        "file and network commands, runs unprompted. Send /yolo-off "
+                        "to restore approvals."
+                    )
+                )
+            return AgentResponse(text="🔒 YOLO mode OFF — I'll ask before risky actions again.")
+
         # Handle /new (alias /clear) command — clear conversational context. In a
         # group the command arrives as "/new@botname"; strip the @-suffix so the
         # addressed bot still honours it.
-        if _strip_command_suffix(message) in ("/new", "/clear"):
+        if command in ("/new", "/clear"):
             if self.history_mode == "session":
                 await self.history.clear_session(channel, user_id, chat_id)
             else:
@@ -1334,6 +1379,9 @@ class AgentCore:
         request_state = self._new_request_state(
             persona, origin={"channel": channel, "user_id": user_id, "chat_id": chat_id}
         )
+        # Resolve the YOLO grant once per turn (channel+chat_id are in scope here
+        # but not in _execute_tool); every tool call this turn reads the cached flag.
+        request_state["yolo"] = self.permissions.is_yolo(self._yolo_scope(channel, chat_id))
         tool_log: list[dict] = []
         while response.tool_calls:
             await self._batch_approve_writes(response.tool_calls, channel, user_id, request_state)
@@ -1444,6 +1492,9 @@ class AgentCore:
         request_state = self._new_request_state(
             persona, origin={"channel": channel, "user_id": user_id, "chat_id": chat_id}
         )
+        # Resolve the YOLO grant once per turn (channel+chat_id are in scope here
+        # but not in _execute_tool); every tool call this turn reads the cached flag.
+        request_state["yolo"] = self.permissions.is_yolo(self._yolo_scope(channel, chat_id))
         tool_log: list[dict] = []
         while response.tool_calls:
             await self._batch_approve_writes(response.tool_calls, channel, user_id, request_state)
@@ -1596,6 +1647,15 @@ class AgentCore:
         if level == PermissionLevel.NEVER:
             log.warning("Permission DENIED (NEVER): %s — %s", name, params)
             return {"error": "This action is not allowed."}
+
+        # YOLO bypass: when the owner put this agent+chat in YOLO, skip the approval
+        # prompt for ASK actions — auto-approved without persisting a rule. The
+        # decision is computed once per turn (request_state["yolo"], keyed by
+        # channel+chat_id where chat_id is in scope) so it can't leak across chats.
+        # Runs after the NEVER check so hard rails still hold even in YOLO.
+        if level == PermissionLevel.ASK and channel != "system" and request_state.get("yolo"):
+            log.warning("YOLO auto-approve: %s on channel=%s", name, channel)
+            level = PermissionLevel.ALWAYS
 
         if level == PermissionLevel.ASK and channel != "system":
             match_key = self.permissions.match_key(name, params)
@@ -1753,6 +1813,13 @@ class AgentCore:
             return result
 
         return {"error": f"Unknown tool: {name}"}
+
+    @staticmethod
+    def _yolo_scope(channel: str, chat_id: str) -> str:
+        """Key for a YOLO grant: the agent (channel) within one chat (chat_id), so
+        a free pass is confined to where it was granted. ``\\x1f`` can't appear in a
+        channel name or chat id, so it's an unambiguous separator."""
+        return f"{channel}\x1f{chat_id}"
 
     @staticmethod
     def _new_request_state(
@@ -2717,8 +2784,8 @@ class AgentCore:
         A lone write is left to the per-call path — batching only helps when
         there are two or more. The decision is all-or-nothing across the batch.
         """
-        if channel == "system":
-            return
+        if channel == "system" or request_state.get("yolo"):
+            return  # YOLO: writes fall through to _execute_tool's auto-approve
         write_decisions = request_state.setdefault("write_decisions", {})
         pending: list[tuple[str, str]] = []  # (signature, description)
         seen: set[str] = set()

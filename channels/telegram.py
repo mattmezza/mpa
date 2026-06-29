@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Plain-text commands the agent handles in process() (not Telegram CommandHandlers).
+# _on_text sends these bare (no speaker tag / reply-quote) and honours an explicit
+# "@bot" target so a command never acts on the wrong bot in a multi-agent room.
+_AGENT_COMMANDS = frozenset({"/new", "/clear", "/yolo-on", "/yolo-off"})
+
 # Callback data prefix for approval buttons
 _APPROVE_PREFIX = "perm_approve:"
 _DENY_PREFIX = "perm_deny:"
@@ -287,28 +292,40 @@ class TelegramChannel:
 
         Returns ``user_id`` (the shared conversation key — the group, or the
         sender for a DM), the ``speaker_tag`` to prepend so the persona knows who
-        spoke, and ``respond`` (reply now, or just record for context). Outside a
-        group room every message gets ``respond=True`` and no tag, so 1:1 DMs are
-        untouched.
+        spoke, ``respond`` (reply now, or just record for context), and
+        ``addressed`` (was the message explicitly directed at THIS bot). Outside a
+        group room every message gets ``respond=True``/``addressed=True`` and no
+        tag, so 1:1 DMs are untouched.
         """
         user = update.effective_user
         chat = update.effective_chat
         sender_id = user.id if user else 0
         if not self._is_group(chat, message):
-            return {"user_id": str(sender_id), "speaker_tag": "", "respond": True}
+            return {
+                "user_id": str(sender_id),
+                "speaker_tag": "",
+                "respond": True,
+                "addressed": True,
+            }
 
         self._ensure_bot_identity(context)
         gc = self.config.group_chat
         is_bot = bool(getattr(user, "is_bot", False))
         marker = " (bot)" if is_bot else ""
         speaker_tag = f"[from {self._speaker_name(user)}{marker}]\n"
+        addressed = self._addressed_to_me(message)
         if is_bot and gc.ignore_bots:
             respond = False  # loop guard — record only, never reply to another bot
-        elif gc.reply_when_addressed_only and not self._addressed_to_me(message):
+        elif gc.reply_when_addressed_only and not addressed:
             respond = False  # respond-gate — not addressed, stay silent but record
         else:
             respond = True
-        return {"user_id": str(chat.id), "speaker_tag": speaker_tag, "respond": respond}
+        return {
+            "user_id": str(chat.id),
+            "speaker_tag": speaker_tag,
+            "respond": respond,
+            "addressed": addressed,
+        }
 
     def _remember_chat(self, convo_user: str, folded) -> None:
         """Note the chat to route an approval prompt back to (keyed by the
@@ -339,14 +356,23 @@ class TelegramChannel:
             return
 
         chat_id = folded if folded is not None else sender_id
-        reply_context = self._reply_context(message)
         text = (message.text or "").strip()
-        # Don't tag slash-commands — they're explicit and the tag would break the
-        # bare "/new" / "/clear" match (which already strips the @bot suffix).
-        tag = "" if text.startswith("/") else routing["speaker_tag"]
-        payload = f"{tag}{reply_context}{text}"
+        respond = routing["respond"]
+        first = text.split(maxsplit=1)[0] if text else ""
+        base, _, target = first.partition("@") if first.startswith("/") else ("", "", "")
+        if base.lower() in _AGENT_COMMANDS:
+            # A recognised command is explicit and self-contained: send it bare, with
+            # no speaker tag or reply-quote (either would stop the agent-side match).
+            # But "/cmd@otherbot" is aimed at a DIFFERENT bot — even when this message
+            # is a reply to us — so this bot must not act on it (which would toggle or
+            # clear the wrong agent); record it for context instead.
+            payload = text
+            if target and self._bot_username and target.lower() != self._bot_username:
+                respond = False
+        else:
+            payload = f"{routing['speaker_tag']}{self._reply_context(message)}{text}"
         asyncio.create_task(
-            self._handle_text(payload, convo_user, str(chat_id), routing["respond"]),
+            self._handle_text(payload, convo_user, str(chat_id), respond, routing["addressed"]),
             name=f"tg-text-{convo_user}",
         )
 
@@ -742,7 +768,12 @@ class TelegramChannel:
         return True
 
     async def _handle_text(
-        self, text: str, user_id: str, chat_id: int | str, respond: bool = True
+        self,
+        text: str,
+        user_id: str,
+        chat_id: int | str,
+        respond: bool = True,
+        addressed: bool = True,
     ) -> None:
         # Respond-gate silent path (#30): record the turn for context, no typing
         # indicator, no reply.
@@ -761,6 +792,7 @@ class TelegramChannel:
                 channel=self.channel_name,
                 user_id=str(user_id),
                 chat_id=str(chat_id),
+                addressed=addressed,
             )
         await self._send_response(chat_id, response)
 
@@ -885,4 +917,3 @@ class TelegramChannel:
             await query.message.delete()
         except Exception:
             pass
-
