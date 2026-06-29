@@ -498,17 +498,17 @@ class TelegramChannel:
         if data.startswith(_APPROVE_PREFIX):
             request_id = data[len(_APPROVE_PREFIX) :]
             resolved = self.agent.permissions.resolve_approval(request_id, True)
-            await self._finalize_approval_response(query, resolved, "Approved")
+            await self._finalize_approval_response(query, resolved, "✅ Approved")
 
         elif data.startswith(_DENY_PREFIX):
             request_id = data[len(_DENY_PREFIX) :]
             resolved = self.agent.permissions.resolve_approval(request_id, False)
-            await self._finalize_approval_response(query, resolved, "Denied")
+            await self._finalize_approval_response(query, resolved, "❌ Denied")
 
         elif data.startswith(_ALWAYS_PREFIX):
             request_id = data[len(_ALWAYS_PREFIX) :]
             resolved = self.agent.permissions.resolve_approval(request_id, True, always_allow=True)
-            await self._finalize_approval_response(query, resolved, "Always allowed")
+            await self._finalize_approval_response(query, resolved, "♾️ Always allowed")
 
         elif data.startswith(_SUB_CANCEL_PREFIX):
             run_id = data[len(_SUB_CANCEL_PREFIX) :]
@@ -872,12 +872,17 @@ class TelegramChannel:
         if not resolved:
             await query.edit_message_text("(approval request expired or already handled)")
             return
-        message = query.message
         try:
-            text = getattr(message, "text", None) if message else None
-            if text:
-                await query.edit_message_text(text + f"\n\n--- {label}")
-            else:
-                await self.app.bot.send_message(query.from_user.id, f"{label}.")
+            await query.edit_message_text(f"{label}.")
+            asyncio.create_task(self._delete_after_delay(query))
         except Exception:
             log.exception("Failed to update approval message")
+
+    async def _delete_after_delay(self, query: CallbackQuery, delay: int = 30) -> None:
+        """Delete message after a delay to keep chat clean (issue #62)."""
+        await asyncio.sleep(delay)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+
