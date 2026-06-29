@@ -83,57 +83,106 @@ def test_is_group_chat_heuristic(agent) -> None:
     assert agent._is_group_chat("111", "") is False  # no chat id → not a group
 
 
-def test_rate_limiter_backstop(agent) -> None:
+def test_reserve_reply_caps_window(agent) -> None:
     cfg = agent.config.reply_decision
     cfg.max_replies_per_window = 3
     cfg.window_seconds = 120
     for _ in range(3):
-        assert agent._reply_rate_exceeded("telegram", "-999", cfg) is False
-        agent._record_reply("telegram", "-999")
-    # Fourth reply within the window is blocked.
-    assert agent._reply_rate_exceeded("telegram", "-999", cfg) is True
-    # A different chat has its own budget.
-    assert agent._reply_rate_exceeded("telegram", "-888", cfg) is False
+        assert agent._reserve_reply("telegram", "-999", cfg) is not None
+    # Fourth reservation within the window is refused.
+    assert agent._reserve_reply("telegram", "-999", cfg) is None
+    # A different chat keeps its own budget.
+    assert agent._reserve_reply("telegram", "-888", cfg) is not None
 
 
-def test_rate_limiter_window_expiry(agent) -> None:
+def test_release_frees_a_slot(agent) -> None:
+    cfg = agent.config.reply_decision
+    cfg.max_replies_per_window = 1
+    ts = agent._reserve_reply("telegram", "-999", cfg)
+    assert ts is not None
+    assert agent._reserve_reply("telegram", "-999", cfg) is None  # full
+    agent._release_reply("telegram", "-999", ts)  # SKIP gives the slot back
+    assert agent._reserve_reply("telegram", "-999", cfg) is not None  # room again
+
+
+def test_reserve_prunes_expired_window(agent) -> None:
     cfg = agent.config.reply_decision
     cfg.max_replies_per_window = 1
     cfg.window_seconds = 120
-    # Seed a timestamp older than the window — it must be pruned, not counted.
+    # A timestamp older than the window must be pruned, not counted.
     agent._reply_times[("telegram", "-999")] = [1.0]
-    assert agent._reply_rate_exceeded("telegram", "-999", cfg) is False
+    assert agent._reserve_reply("telegram", "-999", cfg) is not None
+
+
+# Stub the heavy dispatch so process() exercises the gate without real inference.
+def _stub_dispatch(agent, monkeypatch, text="ok"):
+    from core.models import AgentResponse
+
+    async def _fake(*a, **k):
+        return AgentResponse(text=text)
+
+    monkeypatch.setattr(agent, "_process_injection", _fake)
+    monkeypatch.setattr(agent, "_process_session", _fake)
 
 
 @pytest.mark.asyncio
 async def test_process_suppresses_on_skip(agent, monkeypatch) -> None:
     monkeypatch.setattr(agent, "_background_llm", lambda *a, **k: _LLMStub("SKIP"))
-    boom = _BoomLLM()  # main inference must never run on a suppressed message
-    monkeypatch.setattr(agent.llm, "generate", boom.generate_text)
+    _stub_dispatch(agent, monkeypatch)
 
     resp = await agent.process(
         message="lol same", channel="telegram", user_id="111", chat_id="-999"
     )
     assert resp.text == ""
+    # The reserved slot is released on SKIP, so a quiet chat keeps its budget.
+    assert agent._reply_times.get(("telegram", "-999"), []) == []
 
 
 @pytest.mark.asyncio
-async def test_process_replies_in_dm_without_gating(agent, monkeypatch) -> None:
-    # In a DM (chat_id == user_id) the gate is skipped entirely, so the
-    # background classifier is never consulted.
-    sentinel = _BoomLLM()
-    monkeypatch.setattr(agent, "_background_llm", lambda *a, **k: sentinel)
-    # Short-circuit the heavy inference path: prove the gate let it through.
-    assert agent._is_group_chat("111", "111") is False
+async def test_process_replies_in_group_and_records_slot(agent, monkeypatch) -> None:
+    monkeypatch.setattr(agent, "_background_llm", lambda *a, **k: _LLMStub("REPLY"))
+    _stub_dispatch(agent, monkeypatch, text="here you go")
+
+    resp = await agent.process(
+        message="can you help me?", channel="telegram", user_id="111", chat_id="-999"
+    )
+    assert resp.text == "here you go"
+    # A real reply keeps its reserved slot — the backstop counts it.
+    assert len(agent._reply_times[("telegram", "-999")]) == 1
+
+
+@pytest.mark.asyncio
+async def test_process_skips_gate_in_dm(agent, monkeypatch) -> None:
+    # In a DM (chat_id == user_id) the gate must be bypassed entirely, so
+    # should_reply is never consulted.
+    import core.agent as agent_mod
+
+    calls: list[int] = []
+
+    async def _spy(*a, **k):
+        calls.append(1)
+        return True
+
+    monkeypatch.setattr(agent_mod, "should_reply", _spy)
+    _stub_dispatch(agent, monkeypatch, text="hi")
+
+    resp = await agent.process(
+        message="hey there friend", channel="telegram", user_id="111", chat_id="111"
+    )
+    assert resp.text == "hi"
+    assert calls == []  # gate skipped in a 1:1 chat
 
 
 @pytest.mark.asyncio
 async def test_process_suppresses_when_rate_capped(agent, monkeypatch) -> None:
+    import time
+
     cfg = agent.config.reply_decision
     cfg.max_replies_per_window = 2
-    agent._reply_times[("telegram", "-999")] = [__import__("time").time()] * 2
+    agent._reply_times[("telegram", "-999")] = [time.time()] * 2
     # Rate cap is checked before the classifier — it must not even be called.
     monkeypatch.setattr(agent, "_background_llm", lambda *a, **k: _BoomLLM())
+    _stub_dispatch(agent, monkeypatch)
     resp = await agent.process(
         message="still going", channel="telegram", user_id="111", chat_id="-999"
     )

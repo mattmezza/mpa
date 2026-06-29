@@ -78,15 +78,26 @@ async def should_reply(
     return True
 
 
-if __name__ == "__main__":  # ponytail: parse self-check, no network
-    # Only an explicit SKIP suppresses; everything else (incl. junk) replies.
-    def _parse(raw: str) -> bool:
-        return not raw.strip().upper().startswith("SKIP")
+if __name__ == "__main__":  # ponytail: drives the real should_reply, no network
+    import asyncio
 
-    assert _parse("REPLY") is True
-    assert _parse("  reply  ") is True
-    assert _parse("SKIP") is False
-    assert _parse("skip — addressed to another bot") is False
-    assert _parse("") is True  # fail-open on empty
-    assert _parse("maybe?") is True  # unknown → reply
-    print("reply_decision parse self-check passed")
+    class _Stub:
+        def __init__(self, reply: str, *, boom: bool = False):
+            self.reply, self.boom = reply, boom
+
+        async def generate_text(self, *, model: str, prompt: str, max_tokens: int = 1024) -> str:
+            if self.boom:
+                raise RuntimeError("classifier down")
+            return self.reply
+
+    async def _check() -> None:
+        # Only an explicit SKIP suppresses; everything else replies (fail-open).
+        assert await should_reply(_Stub("REPLY"), "m", "help me?") is True
+        assert await should_reply(_Stub("SKIP - for another bot"), "m", "@bot hi") is False
+        assert await should_reply(_Stub("maybe?"), "m", "hi") is True  # unparseable → reply
+        assert await should_reply(_Stub(""), "m", "hi") is True  # empty model output → reply
+        assert await should_reply(_Stub("SKIP", boom=True), "m", "hi") is True  # error → reply
+        assert await should_reply(_Stub("SKIP"), "m", "   ") is True  # blank msg, no call
+
+    asyncio.run(_check())
+    print("reply_decision self-check passed")

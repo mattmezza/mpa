@@ -674,13 +674,6 @@ class AgentCore:
             )
             return AgentResponse(text="Conversation cleared.")
 
-        # Goal decomposition — classify and (if complex) decompose the request.
-        # The resulting plan is request-specific, so it is injected per turn
-        # (in the user-message preamble), not baked into the static prompt.
-        decomposed_goal: DecomposedGoal | None = None
-        if self.config.goal_decomposition.enabled and channel != "system":
-            decomposed_goal = await self._maybe_decompose(message)
-
         # Resolve the active persona (its identity, skills + tool scope) — a
         # per-chat binding wins over the globally selected persona (#14). An
         # explicit override (scheduler) skips the ladder (#29).
@@ -693,15 +686,21 @@ class AgentCore:
         # aimed at someone else or caught in a bot-to-bot reaction loop. Off by
         # default; never gates 1:1 chats (group_only) or scheduler/system turns.
         # A hard per-chat rate cap backstops the LLM gate so a runaway loop
-        # always terminates even if the gate keeps voting "reply". Returns an
-        # empty response so the channel sends nothing.
+        # always terminates even if the gate keeps voting "reply". Runs before
+        # goal decomposition so a suppressed message costs only this one cheap
+        # call, never a decompose pass. Returns an empty response → no send.
         rd_cfg = self.config.reply_decision
         if (
             rd_cfg.enabled
             and channel != "system"
             and (not rd_cfg.group_only or self._is_group_chat(user_id, chat_id))
         ):
-            if self._reply_rate_exceeded(channel, chat_id, rd_cfg):
+            # Reserve a slot BEFORE the awaited LLM call so concurrent messages
+            # in the same chat (each its own task) see the reservation and trip
+            # the cap — closing the check-then-act race that would otherwise let
+            # a burst sail past the cap. A SKIP releases its slot below.
+            reserved = self._reserve_reply(channel, chat_id, rd_cfg)
+            if reserved is None:
                 log.warning(
                     "Reply suppressed: rate cap %d/%ds hit for chat=%s channel=%s",
                     rd_cfg.max_replies_per_window,
@@ -713,8 +712,15 @@ class AgentCore:
             identity = persona.name if persona else "the assistant"
             llm = self._background_llm(rd_cfg.provider, rd_cfg.thinking_level)
             if not await should_reply(llm, rd_cfg.model, message, identity):
+                self._release_reply(channel, chat_id, reserved)
                 return AgentResponse(text="")
-            self._record_reply(channel, chat_id)
+
+        # Goal decomposition — classify and (if complex) decompose the request.
+        # The resulting plan is request-specific, so it is injected per turn
+        # (in the user-message preamble), not baked into the static prompt.
+        decomposed_goal: DecomposedGoal | None = None
+        if self.config.goal_decomposition.enabled and channel != "system":
+            decomposed_goal = await self._maybe_decompose(message)
 
         # Per-turn preamble: live date/time + fresh memory/reflections + skills
         # index + plan. Memory is scoped to the active persona (#42): shared +
@@ -2702,17 +2708,35 @@ class AgentCore:
         """
         return bool(chat_id) and chat_id != user_id
 
-    def _reply_rate_exceeded(self, channel: str, chat_id: str, cfg) -> bool:
-        """True if this chat already hit its auto-reply cap in the rolling window."""
+    def _reserve_reply(self, channel: str, chat_id: str, cfg) -> float | None:
+        """Reserve an auto-reply slot if under the per-chat cap (#36 backstop).
+
+        Returns the reservation timestamp, or None if the rolling window is
+        already full. Read-modify-write with no ``await`` in between, so it is
+        atomic under the single-threaded event loop — concurrent messages in
+        the same chat see each other's reservations and the cap holds even
+        under a bursty bot-to-bot loop. Caller must ``_release_reply`` the slot
+        if it ends up not replying (a SKIP), so quiet decisions don't burn the
+        budget of a busy human group.
+        """
         now = time.time()
         key = (channel, chat_id)
         recent = [t for t in self._reply_times.get(key, []) if now - t < cfg.window_seconds]
-        self._reply_times[key] = recent  # also prunes expired timestamps
-        return len(recent) >= cfg.max_replies_per_window
+        if len(recent) >= cfg.max_replies_per_window:
+            self._reply_times[key] = recent  # prune expired even when refusing
+            return None
+        recent.append(now)
+        self._reply_times[key] = recent
+        return now
 
-    def _record_reply(self, channel: str, chat_id: str) -> None:
-        """Record that an auto-reply went out, for the rate-limit backstop (#36)."""
-        self._reply_times.setdefault((channel, chat_id), []).append(time.time())
+    def _release_reply(self, channel: str, chat_id: str, reserved: float) -> None:
+        """Give back a reserved slot when the gate decided not to reply (#36)."""
+        slots = self._reply_times.get((channel, chat_id))
+        if slots:
+            try:
+                slots.remove(reserved)
+            except ValueError:
+                pass  # already pruned by the window — nothing to release
 
     async def _maybe_decompose(self, message: str) -> DecomposedGoal | None:
         """Classify and optionally decompose a user message into sub-goals.
