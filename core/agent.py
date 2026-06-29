@@ -71,6 +71,17 @@ def _shell_quote(s: str) -> str:
     return shlex.quote(s)
 
 
+# Control marker the LLM appends to request a spoken reply (see the <voice> prompt
+# block). It is internal signalling and must never reach the user, whether or not
+# synthesis ran.
+VOICE_MARKER = "[respond_with_voice]"
+
+
+def strip_voice_marker(text: str) -> str:
+    """Remove the voice control marker so it never leaks into a user-visible reply."""
+    return text.replace(VOICE_MARKER, "").strip()
+
+
 def _strip_command_suffix(message: str) -> str:
     """Normalise a slash command for matching: lower-cased and with any
     ``@botname`` suffix removed (Telegram appends it to group commands, e.g.
@@ -1355,8 +1366,9 @@ class AgentCore:
         voice_bytes = await self._maybe_synthesize_voice(
             final_text, voice=persona.voice if persona else None
         )
-        if voice_bytes:
-            final_text = final_text.replace("[respond_with_voice]", "").strip()
+        # Strip the control marker unconditionally — it must never reach the user,
+        # even when synthesis was skipped or failed (voice_bytes is None).
+        final_text = strip_voice_marker(final_text)
 
         # Persist the turn (user message + final assistant text only)
         history_message = self._history_message_text(message, attachments)
@@ -1484,8 +1496,9 @@ class AgentCore:
         voice_bytes = await self._maybe_synthesize_voice(
             final_text, voice=persona.voice if persona else None
         )
-        if voice_bytes:
-            final_text = final_text.replace("[respond_with_voice]", "").strip()
+        # Strip the control marker unconditionally — it must never reach the user,
+        # even when synthesis was skipped or failed (voice_bytes is None).
+        final_text = strip_voice_marker(final_text)
 
         # Automatic memory extraction
         if channel != "system":
@@ -1522,8 +1535,8 @@ class AgentCore:
     async def _maybe_synthesize_voice(self, text: str, voice: str | None = None) -> bytes | None:
         """Synthesize voice if requested by the LLM, using the persona's voice
         when one is set (else the configured default)."""
-        if "[respond_with_voice]" in text and self.voice:
-            clean_text = text.replace("[respond_with_voice]", "").strip()
+        if VOICE_MARKER in text and self.voice:
+            clean_text = strip_voice_marker(text)
             try:
                 return await self.voice.synthesize(clean_text, voice=voice)
             except Exception:
