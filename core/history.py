@@ -534,18 +534,21 @@ class ConversationHistory:
         # in-memory _session_system cache (keyed by the old channel) is moot here.
 
     async def list_chats(self) -> list[dict[str, str]]:
-        """List every known (channel, user_id, chat_id) with its bound persona.
+        """List every known (channel, user_id, chat_id), most-recently-active first.
 
-        Drives the admin Chats page. Unions the turn/session/binding tables so a
+        Drives the admin Inspect tab. Unions the turn/session/binding tables so a
         chat appears whichever history mode produced it (and even when it is only
-        bound, e.g. a topic auto-bound before its first message). LEFT JOIN
-        surfaces the binding; ``persona`` is "" when unbound.
+        bound, e.g. a topic auto-bound before its first message). ``last_active``
+        is the most recent turn/message timestamp (UTC ``datetime('now')`` text,
+        so lexically sortable), or "" for a chat that is only bound. ``persona``
+        is the bound persona ("" when unbound). Ordered newest-active first so the
+        chat you just messaged floats to the top.
         """
         await self._ensure_schema()
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 """
-                SELECT c.channel, c.user_id, c.chat_id, p.persona
+                SELECT c.channel, c.user_id, c.chat_id, p.persona, a.last_active
                 FROM (
                     SELECT DISTINCT channel, user_id, chat_id FROM conversation_turns
                     UNION
@@ -556,11 +559,29 @@ class ConversationHistory:
                 LEFT JOIN chat_persona AS p
                   ON p.channel = c.channel AND p.user_id = c.user_id
                   AND p.chat_id = c.chat_id
-                ORDER BY c.channel, c.user_id, c.chat_id
+                LEFT JOIN (
+                    SELECT channel, user_id, chat_id, MAX(created_at) AS last_active
+                    FROM (
+                        SELECT channel, user_id, chat_id, created_at FROM conversation_turns
+                        UNION ALL
+                        SELECT channel, user_id, chat_id, created_at FROM session_messages
+                    )
+                    GROUP BY channel, user_id, chat_id
+                ) AS a
+                  ON a.channel = c.channel AND a.user_id = c.user_id
+                  AND a.chat_id = c.chat_id
+                ORDER BY a.last_active IS NULL, a.last_active DESC,
+                         c.channel, c.user_id, c.chat_id
                 """
             )
             rows = await cursor.fetchall()
         return [
-            {"channel": ch, "user_id": uid, "chat_id": cid, "persona": persona or ""}
-            for ch, uid, cid, persona in rows
+            {
+                "channel": ch,
+                "user_id": uid,
+                "chat_id": cid,
+                "persona": persona or "",
+                "last_active": last_active or "",
+            }
+            for ch, uid, cid, persona, last_active in rows
         ]

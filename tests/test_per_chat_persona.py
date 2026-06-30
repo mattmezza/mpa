@@ -45,6 +45,27 @@ async def test_list_chats_unions_history_and_bindings(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_chats_orders_most_recent_first(tmp_path) -> None:
+    import aiosqlite
+
+    h = ConversationHistory(db_path=str(tmp_path / "h.db"))
+    await h.add_turn("telegram", "u1", "user", "old", "old_chat")
+    await h.add_turn("telegram", "u1", "user", "new", "new_chat")
+    # Force distinct timestamps (datetime('now') is whole-second, so same-second
+    # inserts would tie) — make new_chat unambiguously the most recent.
+    sql = "UPDATE conversation_turns SET created_at=? WHERE chat_id=?"
+    async with aiosqlite.connect(h.db_path) as db:
+        await db.execute(sql, ("2020-01-01 00:00:00", "old_chat"))
+        await db.execute(sql, ("2026-01-01 00:00:00", "new_chat"))
+        await db.commit()
+    chats = await h.list_chats()
+    order = [c["chat_id"] for c in chats]
+    assert order.index("new_chat") < order.index("old_chat")  # newest first
+    by_chat = {c["chat_id"]: c for c in chats}
+    assert by_chat["new_chat"]["last_active"] == "2026-01-01 00:00:00"
+
+
+@pytest.mark.asyncio
 async def test_clear_session_system_keeps_messages(tmp_path) -> None:
     h = ConversationHistory(db_path=str(tmp_path / "h.db"))
     await h.append_session_message("telegram", "u1", {"role": "user", "content": "hi"}, "c1")

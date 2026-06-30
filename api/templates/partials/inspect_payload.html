@@ -1,22 +1,108 @@
-{# Last-sent LLM payload for one context (#99). Loaded into the Inspect card on
-   demand. `pretty` is the serialized request; `meta` summarises it. #}
-{%- if not payload %}
-<div class="text-muted text-xs border border-border rounded-md p-2">
+{# Last-sent LLM payload for one context (#99), rendered as a readable transcript:
+   system prompt, tool defs, and the message window, plus a raw-JSON fallback.
+   `meta` summarises; `system`/`messages`/`tools` are the (image-elided) request. #}
+
+{%- macro render_block(b) -%}
+  {%- if b is string -%}
+    <div class="whitespace-pre-wrap break-words">{{ b }}</div>
+  {%- elif b is mapping -%}
+    {%- set t = b.get('type') -%}
+    {%- if t == 'text' -%}
+      <div class="whitespace-pre-wrap break-words">{{ b.get('text', '') }}</div>
+    {%- elif t == 'image' -%}
+      <div class="text-muted italic">[image{% if b.get('source') and b['source'].get('media_type') %}: {{ b['source']['media_type'] }}{% endif %}]</div>
+    {%- elif t == 'tool_use' -%}
+      <div><span class="badge-warn">tool_use</span> <code>{{ b.get('name', '') }}</code>
+        <pre class="log-viewer mt-1" style="max-height:14rem">{{ b.get('input') | tojson(indent=2) }}</pre></div>
+    {%- elif t == 'tool_result' -%}
+      <div><span class="badge-warn">tool_result</span>
+        <div class="mt-1">{{ render_content(b.get('content')) }}</div></div>
+    {%- elif t in ('thinking', 'redacted_thinking') -%}
+      <div class="text-muted italic">[thinking]</div>
+    {%- else -%}
+      <pre class="log-viewer" style="max-height:14rem">{{ b | tojson(indent=2) }}</pre>
+    {%- endif -%}
+  {%- else -%}
+    <div class="whitespace-pre-wrap break-words">{{ b }}</div>
+  {%- endif -%}
+{%- endmacro -%}
+
+{%- macro render_content(c) -%}
+  {%- if c is string -%}
+    <div class="whitespace-pre-wrap break-words">{{ c }}</div>
+  {%- elif c is iterable and c is not mapping -%}
+    {%- for b in c %}{{ render_block(b) }}{% endfor -%}
+  {%- else -%}
+    {{ render_block(c) }}
+  {%- endif -%}
+{%- endmacro -%}
+
+{%- if not meta -%}
+<div class="text-muted text-xs border border-border rounded-md p-3">
   No payload captured yet for this context. Send it a message while the agent is
-  running, then reopen this.
+  running, then reselect it here.
 </div>
-{%- else %}
-<div class="text-xs text-muted mb-1 break-all">
+{%- else -%}
+<div class="text-xs text-muted mb-2 break-all">
   <span class="badge-ok">{{ meta.provider }}</span>
   <code>{{ meta.model }}</code> ·
   max_tokens {{ meta.max_tokens }} ·
   {{ meta.n_messages }} message{{ '' if meta.n_messages == 1 else 's' }} ·
   {{ meta.n_tools }} tool{{ '' if meta.n_tools == 1 else 's' }}
   {%- if meta.captured_at %} · captured {{ meta.captured_at }}{% endif %}
+  <div class="mt-0.5" style="font-size:0.65rem">
+    The exact request the model last received. Admin-only; the prompt references
+    secrets by name, not value.
+  </div>
 </div>
-<div class="text-muted mb-1" style="font-size:0.65rem">
-  Shown verbatim (admin-only). The assembled prompt references secrets by name,
-  not value.
+
+{# System prompt / identity #}
+<details class="card mb-2" open>
+  <summary class="cursor-pointer text-sm font-semibold">System prompt
+    <span class="text-muted text-xs">({{ system|length }} chars)</span></summary>
+  <pre class="log-viewer mt-2">{{ system }}</pre>
+</details>
+
+{# Tool definitions offered this turn #}
+<details class="card mb-2">
+  <summary class="cursor-pointer text-sm font-semibold">Tool definitions
+    <span class="text-muted text-xs">({{ tools|length }})</span></summary>
+  <div class="mt-2 flex flex-col gap-1">
+    {% for t in tools %}
+    <details>
+      <summary class="cursor-pointer text-xs"><code>{{ t.get('name', '?') }}</code>
+        <span class="text-muted">— {{ (t.get('description') or '') | truncate(90) }}</span></summary>
+      <pre class="log-viewer mt-1" style="max-height:16rem">{{ t | tojson(indent=2) }}</pre>
+    </details>
+    {% endfor %}
+    {% if not tools %}<div class="text-muted text-xs">No tools offered.</div>{% endif %}
+  </div>
+</details>
+
+{# The history window, as a transcript #}
+<div class="card mb-2">
+  <div class="text-sm font-semibold mb-2">Context window
+    <span class="text-muted text-xs">({{ messages|length }} message{{ '' if messages|length == 1 else 's' }})</span></div>
+  <div class="flex flex-col gap-2">
+    {% for m in messages %}
+    {% set role = m.get('role', '?') %}
+    <div class="border-l-2 pl-2 {% if role == 'assistant' %}border-accent{% else %}border-border{% endif %}">
+      <div class="mb-1">
+        {% if role == 'assistant' %}<span class="badge-ok">{{ role }}</span>
+        {% elif role == 'user' %}<span class="badge-off">{{ role }}</span>
+        {% else %}<span class="badge-warn">{{ role }}</span>{% endif %}
+      </div>
+      <div class="text-xs">{{ render_content(m.get('content')) }}</div>
+    </div>
+    {% endfor %}
+    {% if not messages %}<div class="text-muted text-xs">Empty window.</div>{% endif %}
+  </div>
 </div>
-<pre class="log-viewer">{{ pretty }}</pre>
-{%- endif %}
+
+{# Exact serialized request, for power users #}
+<details class="card">
+  <summary class="cursor-pointer text-sm font-semibold">Raw JSON
+    <span class="text-muted text-xs">(image bytes elided)</span></summary>
+  <pre class="log-viewer mt-2">{{ pretty }}</pre>
+</details>
+{%- endif -%}

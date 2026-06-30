@@ -106,6 +106,51 @@ def _render_partial(template_name: str, **ctx: object) -> HTMLResponse:
     return HTMLResponse(tmpl.render(**ctx))
 
 
+def _humanize_ts(ts_utc: str, now: datetime, tz: str = "UTC") -> str:
+    """Relative "last active" label from a SQLite ``datetime('now')`` UTC string.
+
+    Recent times read as just now / Nm / Nh / Nd ago; older than a week falls
+    back to a date in the agent's timezone. "" in, "" out (a never-messaged chat).
+    """
+    if not ts_utc:
+        return ""
+    try:
+        dt = datetime.strptime(ts_utc, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+    except ValueError:
+        return ts_utc
+    delta = max(0.0, (now - dt).total_seconds())
+    if delta < 60:
+        return "just now"
+    if delta < 3600:
+        return f"{int(delta // 60)}m ago"
+    if delta < 86400:
+        return f"{int(delta // 3600)}h ago"
+    if delta < 7 * 86400:
+        return f"{int(delta // 86400)}d ago"
+    try:
+        return dt.astimezone(ZoneInfo(tz)).strftime("%Y-%m-%d")
+    except ZoneInfoNotFoundError:
+        return dt.strftime("%Y-%m-%d")
+
+
+def _elide_image_data(value: object) -> object:
+    """Return a copy of ``value`` with long base64 ``data`` fields replaced by a
+    short placeholder, so a captured image payload doesn't bloat the Inspect view.
+    Recurses through the message/block dict+list structure; leaves all else as-is.
+    """
+    if isinstance(value, dict):
+        out: dict = {}
+        for k, v in value.items():
+            if k == "data" and isinstance(v, str) and len(v) > 256:
+                out[k] = f"<{len(v)} base64 chars elided>"
+            else:
+                out[k] = _elide_image_data(v)
+        return out
+    if isinstance(value, list):
+        return [_elide_image_data(v) for v in value]
+    return value
+
+
 def _is_vault_ref(value: str | None) -> bool:
     """True if a stored config value points at the infra vault (issue #35).
 
@@ -2857,19 +2902,21 @@ def create_admin_app(
         await _set_active_persona(name)
         return await _personae_partial()
 
-    # ── Inspect API (active contexts, per-chat bindings, last-sent payload) ──
+    # ── Inspect API (active contexts + last-sent LLM payload) ──────────────
 
     async def _inspect_partial() -> HTMLResponse:
         history = await _history_from_config(config_store)
         chats = await history.list_chats()
-        store = await _persona_store_from_config(config_store)
-        personae = await store.list_personae()
-        return _render_partial("partials/inspect.html", chats=chats, personae=personae)
+        tz = await config_store.get("agent.timezone") or "UTC"
+        now = datetime.now(UTC)
+        for c in chats:
+            c["last_active_h"] = _humanize_ts(c.get("last_active", ""), now, tz)
+        return _render_partial("partials/inspect.html", chats=chats)
 
     @app.get("/partials/inspect", dependencies=[Depends(auth)])
     async def partial_inspect() -> HTMLResponse:
-        """Inspect tab partial — active contexts, their bound persona, and a
-        per-context view of the exact payload last sent to the LLM (#99)."""
+        """Inspect tab partial — active contexts (most-recently-active first) and
+        a master/detail view of the exact payload last sent to the LLM (#99)."""
         return await _inspect_partial()
 
     @app.get("/inspect/payload", dependencies=[Depends(auth)])
@@ -2883,6 +2930,9 @@ def create_admin_app(
         the context has had a turn since the agent started."""
         payload = get_sent_payload((channel, user_id, chat_id))
         meta: dict[str, object] | None = None
+        system = ""
+        messages: list = []
+        tools: list = []
         pretty: str | None = None
         if payload:
             ts = payload.get("captured_at")
@@ -2893,9 +2943,13 @@ def create_admin_app(
                     captured = datetime.fromtimestamp(float(ts), ZoneInfo(tz)).strftime(
                         "%Y-%m-%d %H:%M:%S %Z"
                     )
-                except ValueError, ZoneInfoNotFoundError:
+                except ZoneInfoNotFoundError:
                     captured = datetime.fromtimestamp(float(ts), UTC).isoformat()
-            messages = payload.get("messages") or []
+            system = payload.get("system") or ""
+            # Elide base64 image data so the detail pane never ships megabytes of
+            # base64 (a sent photo) — the transcript shows "[image]" and the raw
+            # view shows a placeholder, while every other field stays verbatim.
+            messages = _elide_image_data(payload.get("messages") or [])
             tools = payload.get("tools") or []
             meta = {
                 "provider": payload.get("provider", ""),
@@ -2909,7 +2963,7 @@ def create_admin_app(
                 {
                     "model": payload.get("model"),
                     "max_tokens": payload.get("max_tokens"),
-                    "system": payload.get("system"),
+                    "system": system,
                     "tools": tools,
                     "messages": messages,
                 },
@@ -2918,32 +2972,13 @@ def create_admin_app(
                 default=str,
             )
         return _render_partial(
-            "partials/inspect_payload.html", payload=payload, meta=meta, pretty=pretty
+            "partials/inspect_payload.html",
+            meta=meta,
+            system=system,
+            messages=messages,
+            tools=tools,
+            pretty=pretty,
         )
-
-    @app.post("/chats/bind", dependencies=[Depends(auth)])
-    async def bind_chat(request: Request) -> HTMLResponse:
-        content_type = request.headers.get("content-type", "")
-        if "application/x-www-form-urlencoded" in content_type:
-            body = await request.form()
-        else:
-            body = await request.json()
-        channel = str(body.get("channel", "")).strip()
-        user_id = str(body.get("user_id", "")).strip()
-        chat_id = str(body.get("chat_id", "")).strip()
-        persona = str(body.get("persona", "")).strip()  # "" = unbind (default identity)
-        if not channel or not user_id:
-            raise HTTPException(400, "Missing 'channel' or 'user_id' in request body")
-        if persona:
-            store = await _persona_store_from_config(config_store)
-            if not await store.get(persona):
-                raise HTTPException(404, f"Persona not found: {persona}")
-        # Use the running agent's history instance so its in-memory session cache
-        # is the one cleared; fall back to a config-built store when not running.
-        agent = agent_state.agent
-        history = agent.history if agent else await _history_from_config(config_store)
-        await history.bind_chat_persona(channel, user_id, chat_id, persona)
-        return await _inspect_partial()
 
     # ── Memory API ─────────────────────────────────────────────────────
 

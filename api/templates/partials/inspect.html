@@ -1,79 +1,58 @@
-{# Inspect tab partial — every active context + the exact payload last sent to
-   the LLM for it (#99). Keeps the per-chat persona binding from the old Chats
-   tab; adds a developer payload inspector. #}
-<div x-data="{ filter: '' }">
-  {# Intro #}
+{# Inspect tab — master/detail view of active contexts and the exact payload
+   last sent to the LLM for each (#99). Master lists contexts newest-active
+   first; selecting one loads its last-sent context into the detail pane. #}
+<div x-data="{ filter: '', selected: 0 }">
   <div class="card mb-4">
     <h2 class="text-base mb-0.5">Inspect</h2>
     <p class="text-muted text-xs">
-      Every active context, by <code>channel · user · chat</code>. For developers:
-      open <strong>Last-sent payload</strong> to see exactly what was assembled and
-      sent to the model — system prompt/identity, history window, and tool
-      definitions — the last time this context ran.
-    </p>
-    <p class="text-muted text-xs mt-2">
-      Bind a persona to a chat to override the global active persona there; the
-      change applies on the next turn. Payloads are captured in memory while the
-      agent runs, so a context shows nothing until it has had a turn since startup.
+      Every active context, most recently used first. Select one to see the exact
+      payload last sent to the model — system prompt/identity, history window, and
+      tool definitions — the last time it ran. Admin-only; captured in memory while
+      the agent runs, so a context is blank until it has had a turn since startup.
     </p>
   </div>
 
-  {# Toolbar #}
-  <div class="flex items-center gap-2 mb-4 flex-wrap">
-    <input type="text" class="input-sm flex-1" style="max-width:280px"
-           placeholder="Filter contexts..." x-model="filter">
-    <span class="text-muted text-xs">{{ chats|length }} total</span>
-  </div>
-
-  {# Card grid — 1 col on phone, 2 on large #}
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-    {% for c in chats %}
-    <div class="card flex flex-col gap-2 {% if c.persona %}border-accent{% endif %}"
-         x-show="!filter
-                 || {{ c.channel|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
-                 || {{ c.user_id|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
-                 || {{ c.chat_id|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())">
-      <div class="flex items-start gap-2 min-w-0">
-        <span class="badge-ok whitespace-nowrap">{{ c.channel }}</span>
-        <div class="min-w-0 flex-1">
-          <div class="text-sm font-semibold break-all">{{ c.chat_id or '(default)' }}</div>
-          <div class="text-muted text-xs break-all">user {{ c.user_id }}</div>
-        </div>
-      </div>
-
-      <form class="flex items-center gap-1.5">
-        <input type="hidden" name="channel" value="{{ c.channel }}">
-        <input type="hidden" name="user_id" value="{{ c.user_id }}">
-        <input type="hidden" name="chat_id" value="{{ c.chat_id }}">
-        <label class="text-muted text-xs whitespace-nowrap">Persona</label>
-        <select name="persona" class="input-sm flex-1"
-                hx-post="/chats/bind" hx-trigger="change"
-                hx-include="closest form"
-                hx-target="#tab-content" hx-swap="innerHTML">
-          <option value="" {% if not c.persona %}selected{% endif %}>Default</option>
-          {% for p in personae %}
-          <option value="{{ p.name }}" {% if p.name == c.persona %}selected{% endif %}>
-            {{ p.emoji or '🧩' }} {{ p.role or p.name }}
-          </option>
-          {% endfor %}
-        </select>
-      </form>
-
-      {# Payload inspector — clicking (re)loads the latest captured request. #}
-      <div class="mt-auto pt-1">
-        <button type="button" class="btn-sm"
+  <div class="flex flex-col lg:flex-row gap-3">
+    {# Master — context list, newest-active first #}
+    <div class="lg:w-80 lg:shrink-0 flex flex-col gap-2">
+      <input type="text" class="input-sm" placeholder="Filter contexts..." x-model="filter">
+      <span class="text-muted text-xs">{{ chats|length }} context{{ '' if chats|length == 1 else 's' }}</span>
+      <div class="flex flex-col gap-1 overflow-y-auto" style="max-height: 32rem">
+        {% for c in chats %}
+        <button type="button"
+                class="card text-left flex flex-col gap-0.5 py-2"
+                :class="selected === {{ loop.index0 }} ? 'border-accent' : ''"
+                @click="selected = {{ loop.index0 }}"
+                x-show="!filter
+                        || {{ c.channel|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
+                        || {{ c.user_id|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
+                        || {{ c.chat_id|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())"
                 hx-get="/inspect/payload?channel={{ c.channel|urlencode }}&user_id={{ c.user_id|urlencode }}&chat_id={{ c.chat_id|urlencode }}"
-                hx-target="#payload-{{ loop.index0 }}" hx-swap="innerHTML">
-          Last-sent payload
+                hx-target="#inspect-detail" hx-swap="innerHTML"
+                hx-trigger="click{% if loop.first %}, load{% endif %}">
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="badge-ok whitespace-nowrap">{{ c.channel }}</span>
+            <span class="text-sm font-semibold break-all flex-1 min-w-0">{{ c.chat_id or '(default)' }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-muted text-xs break-all">user {{ c.user_id }}</span>
+            {% if c.last_active_h %}
+            <span class="text-muted text-xs whitespace-nowrap">{{ c.last_active_h }}</span>
+            {% endif %}
+          </div>
         </button>
-        <div id="payload-{{ loop.index0 }}" class="mt-2"></div>
+        {% endfor %}
+        {% if not chats %}
+        <div class="text-muted text-xs text-center py-6">
+          No contexts yet. They appear here once a conversation has started.
+        </div>
+        {% endif %}
       </div>
     </div>
-    {% endfor %}
-    {% if not chats %}
-    <div class="text-muted text-xs text-center py-6 col-span-full">
-      No contexts yet. They appear here once a conversation has started.
+
+    {# Detail — last-sent payload for the selected context #}
+    <div id="inspect-detail" class="flex-1 min-w-0">
+      <div class="text-muted text-xs">Select a context to inspect its last-sent payload.</div>
     </div>
-    {% endif %}
   </div>
 </div>

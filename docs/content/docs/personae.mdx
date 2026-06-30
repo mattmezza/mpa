@@ -126,9 +126,11 @@ conversation — it overrides the global one **only there**. Resolution runs a l
 3. the default identity.
 
 Bindings live in the `chat_persona` table and work on **any** channel (Telegram, WhatsApp,
-REPL). Manage them on the **Inspect** tab of the admin UI: it lists every active context and
-lets you pick a persona per chat. A change applies on the next turn; the open chat keeps its
-current identity until then (its messages are preserved).
+REPL). They are set programmatically — by **bot-per-persona** routing and by Telegram
+**topic auto-bind** (below) — rather than hand-picked per chat; the project is moving toward
+**one persona = one agent** (a dedicated `telegram:<persona>` bot per identity), so the admin
+UI no longer offers a per-chat persona dropdown. A binding applies on the next turn; the open
+chat keeps its current identity until then (its messages are preserved).
 
 ### Telegram forum topics (optional)
 
@@ -137,7 +139,7 @@ the Telegram channel setup) to treat each forum topic in a group as its own cont
 topic's `message_thread_id` is folded into the `chat_id`, so every topic gets isolated
 history and its own persona binding; the group's General topic maps to the default context.
 Name a topic after a persona (its name, agent name, or role) and it auto-binds when the topic
-is created or renamed; rebind any topic from the Inspect tab.
+is created or renamed.
 
 ## Bot-per-persona
 
