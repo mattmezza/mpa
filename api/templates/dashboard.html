@@ -386,35 +386,6 @@
       });
   }
 
-  function saveWhatsApp() {
-    const result = document.getElementById('channel-wizard-result');
-    const numbersInput = document.getElementById('ch-wa-numbers');
-    const enabledInput = document.getElementById('ch-wa-enabled');
-    if (!result || !numbersInput || !enabledInput) return;
-    const bridgeUrl = 'local-wacli';
-    const numbers = numbersInput.value.trim();
-    const enabled = enabledInput.checked;
-    fetch('/channels/whatsapp', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
-      },
-      body: JSON.stringify({bridge_url: bridgeUrl, allowed_numbers: numbers, enabled: enabled})
-    })
-      .then(r => r.text())
-      .then(html => {
-        document.getElementById('tab-content').innerHTML = html;
-        closeChannelWizard();
-        if (window.showToast) { window.showToast('WhatsApp channel saved'); }
-        if (window.notifyRestartRequired) { notifyRestartRequired(); }
-      })
-      .catch(e => {
-        result.textContent = e.message;
-        result.className = 'alert-error';
-      });
-  }
-
   function testWhatsApp() {
     const result = document.getElementById('channel-wizard-result');
     if (!result) return;
@@ -437,39 +408,6 @@
       })
       .catch(e => {
         result.textContent = e.message || 'wacli not available.';
-        result.className = 'alert-error';
-      });
-  }
-
-  function sendWhatsAppTestMessage() {
-    const result = document.getElementById('channel-wizard-result');
-    const numbersInput = document.getElementById('ch-wa-numbers');
-    if (!result || !numbersInput) return;
-    const numbersRaw = numbersInput.value.trim();
-    const firstNumber = numbersRaw.split(',').map((n) => n.trim()).filter(Boolean)[0];
-    if (!firstNumber) {
-      result.textContent = 'Add at least one allowed number to send a test message.';
-      result.className = 'alert-error';
-      return;
-    }
-    result.textContent = 'Sending test message...';
-    result.className = 'alert-info';
-    fetch('/channels/whatsapp/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
-      },
-      body: JSON.stringify({ to: firstNumber, text: 'Test message from MPA' })
-    })
-      .then(r => r.json())
-      .then(d => {
-        const ok = d && d.ok === true;
-        result.textContent = ok ? 'Test message sent.' : (d.error || 'Failed to send test message.');
-        result.className = ok ? 'alert-success' : 'alert-error';
-      })
-      .catch(e => {
-        result.textContent = e.message || 'Failed to send test message.';
         result.className = 'alert-error';
       });
   }
