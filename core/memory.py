@@ -1079,6 +1079,18 @@ class MemoryStore:
         vec = await self._safe_embed(text)
         return pack_vector(vec) if vec else None
 
+    async def remember(
+        self, content: str, *, subject: str = "", category: str = "fact", scope: str = ""
+    ) -> None:
+        """Public entry point for the ``remember`` tool (#13): store a durable fact.
+
+        Thin wrapper over ``_insert_long_term`` so memory writes go through a
+        parameterised INSERT instead of the model hand-building sqlite3 SQL (which
+        broke on quoting and was injectable). ponytail: dedup is left to the
+        consolidation job; add a similarity pre-check here if repeats pile up.
+        """
+        await self._insert_long_term(category or "fact", subject, content, scope=scope)
+
     async def _insert_long_term(
         self,
         category: str,

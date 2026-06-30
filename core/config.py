@@ -80,6 +80,10 @@ class AgentConfig(BaseModel):
     # raise it on the LLM admin tab for capable models (Claude allows up to
     # 128000 — note large non-streaming outputs can approach provider timeouts).
     max_tokens: int = 8192
+    # Sampling temperature for the main agent loop. Lower = steadier tool calls;
+    # higher = more varied prose. Skipped automatically for reasoning calls. Tune
+    # on the LLM admin tab. (#12)
+    temperature: float = 0.5
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
     skills_db_path: str = "data/skills.db"
@@ -260,7 +264,7 @@ class TaskReflectionConfig(BaseModel):
     model: str = "deepseek-v4-flash"
     thinking_level: str = ""  # "" (off) | "low" | "medium" | "high"
     db_path: str = "data/reflections.db"
-    max_reflections: int = 50  # max reflections to keep for prompt injection
+    max_reflections: int = 12  # injected per turn; kept small to cut prompt bloat (#5, was 50)
 
 
 class ReplyDecisionConfig(BaseModel):

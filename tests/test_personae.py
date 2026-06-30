@@ -80,7 +80,7 @@ def test_gateable_tools_in_sync_with_tools() -> None:
     # The admin UI lists GATEABLE_TOOLS for the scope checkboxes; it must stay
     # in sync with the real tool set (every tool except the always-on ones:
     # load_skill, the vault discovery/request tools — issue #19 — and
-    # recall_memory, which mirrors always-on scoped memory injection — #47).
+    # recall_memory / remember, which mirror always-on scoped memory access — #47/#13).
     from api.admin import GATEABLE_TOOLS
     from core.agent import TOOLS
 
@@ -89,6 +89,7 @@ def test_gateable_tools_in_sync_with_tools() -> None:
         "search_skills",
         "list_skills",
         "recall_memory",
+        "remember",
         "list_secrets",
         "request_secret",
     }

@@ -2040,6 +2040,7 @@ def create_admin_app(
                 new_config = await _resolved_config()
                 agent.config = new_config
                 agent.llm = LLMClient.from_agent_config(new_config.agent)
+                agent.llm.temperature = new_config.agent.temperature  # #12: live temp update
                 agent.executor.tool_env = tool_env(new_config)
                 agent.history_mode = new_config.history.mode
                 mem_cfg = new_config.memory
