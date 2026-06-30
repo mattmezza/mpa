@@ -12,7 +12,7 @@ MPA includes a voice pipeline for receiving and sending voice messages through m
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
 | **Speech-to-Text** | [faster-whisper](https://github.com/guillaumekln/faster-whisper) | Transcribe incoming voice messages |
-| **Text-to-Speech** | [edge-tts](https://github.com/rany2/edge-tts) | Synthesize voice responses |
+| **Text-to-Speech** | [edge-tts](https://github.com/rany2/edge-tts) (default) or [Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M) | Synthesize voice responses |
 
 ## How it works
 
@@ -54,6 +54,11 @@ voice:
   stt_model: "base"           # Whisper model size
   tts_voice: "en-US-GuyNeural"  # edge-tts voice name
   tts_enabled: true
+  backend: "edge-tts"         # "edge-tts" (cloud) | "kokoro" (offline)
+  kokoro:                     # only used when backend: kokoro
+    model_path: "models/kokoro/kokoro-v1.0.onnx"
+    voices_path: "models/kokoro/voices-v1.0.bin"
+    default_voice: "af_bella"
 ```
 
 ### Whisper model sizes
@@ -80,9 +85,63 @@ edge-tts provides a wide selection of voices. Some popular options:
 | `it-IT-DiegoNeural` | Italian | Male |
 | `de-DE-ConradNeural` | German | Male |
 
+## Kokoro (offline TTS)
+
+[Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M) is an open-weight TTS
+model that runs on CPU in real time — **fully offline**, no cloud calls, and
+**multilingual** so the agent can answer in the language it's conversing in.
+Set `backend: "kokoro"` to use it.
+
+### Enabling it
+
+Kokoro and its model are **not bundled by default** (edge-tts is the default
+backend and the model adds ~325 MB). Build the image with the model and the
+Python extra:
+
+```bash
+docker build --build-arg INSTALL_KOKORO=true -t mpa .
+```
+
+For a local (non-Docker) run, install the extra and download the model files to
+the configured `kokoro.model_path` / `kokoro.voices_path`:
+
+```bash
+uv sync --extra kokoro
+```
+
+If the model can't be loaded (missing file, OOM), MPA logs a warning and **falls
+back to edge-tts** — both at startup and per-reply — so voice replies are never
+lost.
+
+### Voices
+
+The voice name's first letter selects the language (used for phonemization):
+
+| Prefix | Language | Example voices |
+|--------|----------|----------------|
+| `af_`, `am_` | English (US) F/M | `af_bella`, `af_nicole`, `am_adam` |
+| `bf_`, `bm_` | English (UK) F/M | `bf_emma`, `bm_george` |
+| `ff_` | French | `ff_siwis` |
+| `jf_`, `jm_` | Japanese F/M | `jf_alpha`, `jm_kuma` |
+| `zf_`, `zm_` | Mandarin F/M | `zf_xiaobei` |
+| `ef_`, `em_` | Spanish F/M | `ef_dora`, `em_alex` |
+| `pf_`, `pm_` | Portuguese F/M | `pf_dora`, `pm_alex` |
+| `hf_`, `hm_` | Hindi F/M | `hm_omega` |
+
+### Per-persona voice
+
+A persona can speak in its own voice — set `voice:` in the persona's frontmatter
+to a Kokoro voice name (e.g. a French tutor using `ff_siwis`). The same field
+also works for edge-tts voice names; pick one that matches the active backend.
+
+```yaml
+voice: "ff_siwis"   # this persona speaks French
+```
+
 ## Resource requirements
 
 | Component | RAM | CPU |
 |-----------|-----|-----|
 | faster-whisper (`base`) | ~300 MB | 1 core during transcription |
 | edge-tts | Minimal | Minimal (streams from Microsoft) |
+| Kokoro 82M | ~400 MB | 1 core during synthesis (real-time on CPU) |
