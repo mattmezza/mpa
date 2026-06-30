@@ -112,7 +112,7 @@
     }
     window.previewVoice = previewVoice;
 
-    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel, rdEnabled, rdProvider, rdModel, rdThinkingLevel, rdGroupOnly, rdMaxReplies, rdWindowSeconds, maxTokens) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel, rdEnabled, rdProvider, rdModel, rdThinkingLevel, rdGroupOnly, rdMaxReplies, rdWindowSeconds, maxTokens, temperature, trMaxReflections) {
       const currentProvider = provider || 'anthropic';
       return {
         providerOptions: [
@@ -126,6 +126,7 @@
         apiKey: apiKey || '',
         model: model || '',
         maxTokens: maxTokens || '8192',
+        temperature: temperature || '0.5',
         thinkingLevel: thinkingLevel || '',
         extractionThinkingLevel: extractionThinkingLevel || '',
         consolidationThinkingLevel: consolidationThinkingLevel || '',
@@ -153,6 +154,7 @@
         trEnabled: trEnabled === 'true' || trEnabled === true,
         trProvider: trProvider || 'anthropic',
         trModel: trModel || 'claude-haiku-4-5',
+        trMaxReflections: trMaxReflections || '12',
         promptToolUsageOverride: promptToolUsageOverride || '',
         promptHistoryOverride: promptHistoryOverride || '',
         defaultToolUsage: defaultToolUsage || '',

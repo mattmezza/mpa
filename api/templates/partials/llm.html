@@ -71,7 +71,9 @@
   {{ rd_group_only|default('true', true)|tojson|forceescape }},
   {{ rd_max_replies|default('6', true)|tojson|forceescape }},
   {{ rd_window_seconds|default('120', true)|tojson|forceescape }},
-  {{ max_tokens|default('8192', true)|tojson|forceescape }}
+  {{ max_tokens|default('8192', true)|tojson|forceescape }},
+  {{ temperature|default('0.5', true)|tojson|forceescape }},
+  {{ tr_max_reflections|default('12', true)|tojson|forceescape }}
 )">
   <div class="card">
     <h2 class="text-base mb-1">System Prompt Controls</h2>
@@ -242,6 +244,12 @@
         <p class="text-muted text-xs mt-1">Hard ceiling on tokens the model may emit per response. Too low truncates large outputs (e.g. web artifacts) mid-generation. Default 8192; raise for capable models (Claude allows up to 128000).</p>
       </div>
 
+      <div>
+        <label class="label">Temperature</label>
+        <input type="number" min="0" max="2" step="0.05" class="input-sm" style="max-width:200px" x-model="temperature">
+        <p class="text-muted text-xs mt-1">Sampling randomness for the main agent loop. Lower = steadier tool calls; higher = more varied prose. Skipped automatically when a thinking level is set. Default 0.5.</p>
+      </div>
+
 {{ think('thinkingLevel', 'provider', 'model', 'dl-think-main') }}
     </form>
 
@@ -267,7 +275,8 @@
                     'agent.deepseek_base_url': deepseekBaseUrl,
                     'agent.model': model,
                     'agent.thinking_level': thinkingLevel,
-                    'agent.max_tokens': String(maxTokens)
+                    'agent.max_tokens': String(maxTokens),
+                    'agent.temperature': String(temperature)
                   }})
                 })
                 .then(r => { resultOk = r.ok; return r.json(); })
@@ -461,6 +470,11 @@
         </datalist>
         <p class="text-muted text-xs mt-1">Model used to reflect on completed tasks and extract lessons.</p>
       </div>
+      <div>
+        <label class="label">Max reflections per turn</label>
+        <input type="number" min="1" class="input-sm" style="max-width:160px" x-model="trMaxReflections" :disabled="!trEnabled">
+        <p class="text-muted text-xs mt-1">How many past lessons are injected each turn. Keep small to limit prompt bloat. Default 12.</p>
+      </div>
 {{ think('trThinkingLevel', 'trProvider', 'trModel', 'dl-think-tr', true) }}
     </form>
 
@@ -477,7 +491,8 @@
                     'task_reflection.enabled': trEnabled ? 'true' : 'false',
                     'task_reflection.provider': trProvider,
                     'task_reflection.model': trModel,
-                    'task_reflection.thinking_level': trThinkingLevel
+                    'task_reflection.thinking_level': trThinkingLevel,
+                    'task_reflection.max_reflections': String(trMaxReflections)
                   }})
                 })
                 .then(r => { trResultOk = r.ok; return r.json(); })
