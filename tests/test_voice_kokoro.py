@@ -143,3 +143,33 @@ def test_wav_to_ogg_real_ffmpeg():
         pytest.skip("ffmpeg not installed")
     ogg = _wav_to_ogg(_pcm_to_wav(np.zeros(2400, dtype=np.float32), 24000))
     assert ogg[:4] == b"OggS"  # valid Ogg stream
+
+
+def test_preview_lang_override(monkeypatch):
+    """Explicit lang reaches Kokoro.create instead of the voice-derived one (#84):
+    an Italian voice can read English."""
+    monkeypatch.setattr("voice.pipeline._wav_to_ogg", lambda wav: b"OGG")
+    p = _bare_pipeline()
+    p._kokoro = _FakeKokoro()
+    audio, mime = asyncio.run(p.preview("Hello world", "if_sara", "en-us"))
+    assert mime == "audio/ogg"
+    assert p._kokoro.calls == [("Hello world", "if_sara", "en-us")]  # not derived "it"
+
+
+def test_preview_lang_blank_derives_from_voice(monkeypatch):
+    monkeypatch.setattr("voice.pipeline._wav_to_ogg", lambda wav: b"OGG")
+    p = _bare_pipeline()
+    p._kokoro = _FakeKokoro()
+    asyncio.run(p.preview("Ciao", "if_sara", ""))
+    assert p._kokoro.calls[0][2] == "it"  # blank lang → derived from voice prefix
+
+
+def test_preview_edge_voice_ignores_lang(monkeypatch):
+    p = _bare_pipeline()  # edge voice → no Kokoro needed
+
+    async def fake_edge(text, voice):
+        return b"MP3"
+
+    monkeypatch.setattr(p, "_synthesize_edge", fake_edge)
+    audio, mime = asyncio.run(p.preview("Hi", "en-US-AvaNeural", "it"))
+    assert (audio, mime) == (b"MP3", "audio/mpeg")  # edge path, lang irrelevant

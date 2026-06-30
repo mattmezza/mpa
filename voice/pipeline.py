@@ -100,6 +100,20 @@ KOKORO_VOICES: tuple[str, ...] = (
     "pm_alex",
 )
 
+# Kokoro phonemization languages (code, label) for the admin preview dropdown.
+# The language is independent of the voice, so any voice can read any language.
+KOKORO_LANGUAGES: tuple[tuple[str, str], ...] = (
+    ("en-us", "English (US)"),
+    ("en-gb", "English (UK)"),
+    ("it", "Italian"),
+    ("fr-fr", "French"),
+    ("es", "Spanish"),
+    ("pt-br", "Portuguese (BR)"),
+    ("hi", "Hindi"),
+    ("ja", "Japanese"),
+    ("cmn", "Mandarin"),
+)
+
 
 def _pcm_to_wav(samples, sample_rate: int) -> bytes:
     """Encode float32 PCM samples (-1..1) from Kokoro into 16-bit mono WAV bytes."""
@@ -271,26 +285,38 @@ class VoicePipeline:
         log.info("Synthesized %d chars → %d bytes audio (edge-tts)", len(text), len(audio))
         return audio
 
-    async def _synthesize_kokoro(self, text: str, voice: str | None) -> bytes:
-        """Kokoro is synchronous and CPU-bound — run it off the event loop."""
+    async def _synthesize_kokoro(
+        self, text: str, voice: str | None, lang: str | None = None
+    ) -> bytes:
+        """Kokoro is synchronous and CPU-bound — run it off the event loop.
+
+        ``lang`` overrides the phonemization language (independent of the voice,
+        so an Italian voice can read English); ``None`` derives it from the voice.
+        """
         import asyncio as _asyncio
 
         name = voice or self.kokoro_default_voice
         loop = _asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(self._kokoro_sync, text, name))
+        return await loop.run_in_executor(None, partial(self._kokoro_sync, text, name, lang))
 
-    def _kokoro_sync(self, text: str, voice: str) -> bytes:
-        samples, sample_rate = self._kokoro.create(
-            text, voice=voice, speed=1.0, lang=_lang_for_voice(voice)
-        )
+    def _kokoro_sync(self, text: str, voice: str, lang: str | None = None) -> bytes:
+        lang = lang or _lang_for_voice(voice)
+        samples, sample_rate = self._kokoro.create(text, voice=voice, speed=1.0, lang=lang)
         audio = _wav_to_ogg(_pcm_to_wav(samples, sample_rate))
-        log.info("Synthesized %d chars → %d bytes audio (kokoro/%s)", len(text), len(audio), voice)
+        log.info(
+            "Synthesized %d chars → %d bytes audio (kokoro/%s/%s)",
+            len(text),
+            len(audio),
+            voice,
+            lang,
+        )
         return audio
 
-    async def preview(self, text: str, voice: str) -> tuple[bytes, str]:
+    async def preview(self, text: str, voice: str, lang: str = "") -> tuple[bytes, str]:
         """Synthesize a short sample with a SPECIFIC voice for the admin voice
         picker.  The engine is chosen from the voice name (Kokoro-style →
-        Kokoro, else edge-tts), independent of the configured backend.  Returns
+        Kokoro, else edge-tts), independent of the configured backend.  ``lang``
+        (Kokoro only) overrides the pronunciation language.  Returns
         ``(audio_bytes, mime_type)``.
         """
         text = clean_for_speech(text) or text
@@ -300,5 +326,5 @@ class VoicePipeline:
                     "Kokoro model isn't loaded — switch the TTS backend to "
                     "'kokoro' and restart to preview Kokoro voices."
                 )
-            return await self._synthesize_kokoro(text, voice), "audio/ogg"
+            return await self._synthesize_kokoro(text, voice, lang or None), "audio/ogg"
         return await self._synthesize_edge(text, voice), "audio/mpeg"

@@ -82,16 +82,18 @@
     }
     window.restartAgentNow = restartAgentNow;
 
-    // Voice preview (#84): synthesize a sample of `voice` and play it. The engine
-    // is chosen server-side from the voice name. `btn` (optional) shows progress.
-    function previewVoice(voice, btn) {
+    // Voice preview (#84): synthesize `text` in `voice` and play it. The engine
+    // is chosen server-side from the voice name; `lang` (Kokoro only) overrides
+    // the pronunciation language. `text`/`lang` blank → server defaults. `btn`
+    // (optional) shows progress.
+    function previewVoice(voice, text, lang, btn) {
       const key = localStorage.getItem('admin_api_key') || '';
       const original = btn ? btn.textContent : '';
       if (btn) { btn.disabled = true; btn.textContent = '…'; }
       fetch('/voice/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
-        body: JSON.stringify({ voice: voice || '' })
+        body: JSON.stringify({ voice: voice || '', text: text || '', lang: lang || '' })
       })
         .then(async r => {
           if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'Preview failed'); }

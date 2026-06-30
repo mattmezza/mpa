@@ -234,7 +234,7 @@ class TestVoicePreview:
 
     def test_preview_returns_audio(self):
         class _VoiceStub:
-            async def preview(self, text: str, voice: str):
+            async def preview(self, text: str, voice: str, lang: str = ""):
                 assert voice == "en-US-AvaNeural"
                 return b"AUDIO-BYTES", "audio/mpeg"
 
@@ -243,6 +243,24 @@ class TestVoicePreview:
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "audio/mpeg"
         assert resp.content == b"AUDIO-BYTES"
+
+    def test_preview_passes_text_and_lang(self):
+        # #84: custom preview text + Kokoro language override reach the pipeline.
+        seen = {}
+
+        class _VoiceStub:
+            async def preview(self, text: str, voice: str, lang: str = ""):
+                seen.update(text=text, voice=voice, lang=lang)
+                return b"OGG", "audio/ogg"
+
+        client = _client(agent=cast(Any, SimpleNamespace(voice=_VoiceStub())))
+        resp = client.post(
+            "/voice/preview",
+            json={"voice": "if_sara", "text": "Hello world", "lang": "en-us"},
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        assert seen == {"text": "Hello world", "voice": "if_sara", "lang": "en-us"}
 
     def test_permissions_partial(self):
         client = _client(setup_complete=True)

@@ -121,6 +121,8 @@
     ttsVoice: {{ tts_voice|default('en-US-AvaNeural', true)|tojson|forceescape }},
     backend: {{ backend|default('edge-tts', true)|tojson|forceescape }},
     kokoroVoice: {{ kokoro_voice|default('af_bella', true)|tojson|forceescape }},
+    previewText: '',
+    previewLang: '',
     voiceResult: '',
     voiceOk: false
   }">
@@ -157,25 +159,42 @@
       {# Edge voice #}
       <div x-show="backend === 'edge-tts'">
         <label class="label">TTS voice</label>
-        <div class="flex items-center gap-2">
-          <input type="text" class="input-sm" style="max-width:260px" x-model="ttsVoice" placeholder="en-US-AvaNeural">
-          <button type="button" class="btn btn-sm" @click="previewVoice(ttsVoice, $event.currentTarget)">▶ Preview</button>
-        </div>
+        <input type="text" class="input-sm" style="max-width:260px" x-model="ttsVoice" placeholder="en-US-AvaNeural">
         <p class="text-muted text-xs mt-1">Use Edge TTS voice names. Example: en-US-AvaNeural.</p>
       </div>
 
       {# Kokoro default voice #}
       <div x-show="backend === 'kokoro'">
         <label class="label">Default Kokoro voice</label>
-        <div class="flex items-center gap-2">
-          <select class="input-sm" style="max-width:260px" x-model="kokoroVoice">
-            {% for v in kokoro_voices %}
-            <option value="{{ v }}">{{ v }}</option>
+        <select class="input-sm" style="max-width:260px" x-model="kokoroVoice">
+          {% for v in kokoro_voices %}
+          <option value="{{ v }}">{{ v }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-muted text-xs mt-1">Voice prefix sets the default language (af/am = English, ff = French, jf/jm = Japanese, …). Preview needs the Kokoro backend running.</p>
+      </div>
+
+      {# Preview — type text, pick a language (Kokoro), hear the selected voice #}
+      <div>
+        <label class="label">Preview</label>
+        <div class="flex items-center gap-2 flex-wrap">
+          <input type="text" class="input-sm" style="max-width:300px" x-model="previewText"
+                 placeholder="Type a few words to hear… (blank = sample)">
+          <select x-show="backend === 'kokoro'" class="input-sm" style="max-width:180px"
+                  x-model="previewLang" title="Pronunciation language">
+            <option value="">Auto (match voice)</option>
+            {% for code, label in kokoro_languages %}
+            <option value="{{ code }}">{{ label }}</option>
             {% endfor %}
           </select>
-          <button type="button" class="btn btn-sm" @click="previewVoice(kokoroVoice, $event.currentTarget)">▶ Preview</button>
+          <button type="button" class="btn btn-sm"
+                  @click="previewVoice(
+                    backend === 'kokoro' ? kokoroVoice : ttsVoice,
+                    previewText,
+                    backend === 'kokoro' ? previewLang : '',
+                    $event.currentTarget)">▶ Preview</button>
         </div>
-        <p class="text-muted text-xs mt-1">Voice prefix sets the language (af/am = English, ff = French, jf/jm = Japanese, …). Preview needs the Kokoro backend running.</p>
+        <p class="text-muted text-xs mt-1" x-show="backend === 'kokoro'">Language sets pronunciation independently of the voice — e.g. an Italian voice can read English text.</p>
       </div>
       {% include "partials/restart_note.html" %}
     </div>

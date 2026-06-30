@@ -658,6 +658,7 @@ class VoicePreviewIn(BaseModel):
     # text (RAM / worker-thread exhaustion). A preview is a short sample.
     voice: str = Field("", max_length=64)
     text: str = Field("Hi! This is a quick preview of this voice.", max_length=600)
+    lang: str = Field("", max_length=16)  # Kokoro pronunciation override; "" = derive from voice
 
 
 # ---------------------------------------------------------------------------
@@ -951,7 +952,7 @@ def create_admin_app(
         A globally-disabled feature (e.g. artifacts) is dropped so its tool is
         hidden from the persona scope UI.
         """
-        from voice.pipeline import KOKORO_VOICES
+        from voice.pipeline import KOKORO_LANGUAGES, KOKORO_VOICES
 
         store = await _skills_store_from_config(config_store)
         all_skills = [s["name"] for s in await store.list_skills()]
@@ -969,6 +970,7 @@ def create_admin_app(
                 workspace_enabled=ws_on,
             ),
             "kokoro_voices": KOKORO_VOICES,
+            "kokoro_languages": KOKORO_LANGUAGES,
         }
 
     @app.get("/admin/personae/new", response_model=None)
@@ -1043,7 +1045,7 @@ def create_admin_app(
     @app.get("/partials/identity", dependencies=[Depends(auth)])
     async def partial_identity() -> HTMLResponse:
         """Agent identity tab partial."""
-        from voice.pipeline import KOKORO_VOICES
+        from voice.pipeline import KOKORO_LANGUAGES, KOKORO_VOICES
 
         character = await config_store.get("agent.character") or ""
         personalia = await config_store.get("agent.personalia") or ""
@@ -1064,6 +1066,7 @@ def create_admin_app(
             backend=backend,
             kokoro_voice=kokoro_voice,
             kokoro_voices=KOKORO_VOICES,
+            kokoro_languages=KOKORO_LANGUAGES,
         )
 
     @app.get("/partials/you", dependencies=[Depends(auth)])
@@ -2042,7 +2045,7 @@ def create_admin_app(
             )
         text = (body.text or "").strip() or "Hi! This is a quick preview of this voice."
         try:
-            audio, mime = await pipeline.preview(text, body.voice.strip())
+            audio, mime = await pipeline.preview(text, body.voice.strip(), body.lang.strip())
         except Exception as exc:
             raise HTTPException(503, f"Preview failed: {exc}") from exc
         return Response(content=audio, media_type=mime)

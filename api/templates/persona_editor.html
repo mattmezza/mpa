@@ -46,10 +46,7 @@
         </div>
         <div>
           <label class="label">Voice <span class="text-muted">(TTS — blank = default)</span></label>
-          <div class="flex items-center gap-2">
-            <input class="input-sm" x-model="voice" list="voice-options" placeholder="en-US-AvaNeural">
-            <button type="button" class="btn btn-sm" @click="previewVoice(voice, $event.currentTarget)">▶ Preview</button>
-          </div>
+          <input class="input-sm" x-model="voice" list="voice-options" placeholder="en-US-AvaNeural">
           <datalist id="voice-options">
             <option value="en-US-AvaNeural"></option>
             <option value="en-US-AndrewNeural"></option>
@@ -61,7 +58,20 @@
             <option value="{{ v }}"></option>
             {% endfor %}
           </datalist>
-          <p class="text-muted text-xs mt-1">Edge TTS names (<code>en-US-AvaNeural</code>) or Kokoro names (<code>af_bella</code>) — match the active backend. Preview plays the selected voice.</p>
+          <div class="flex items-center gap-2 mt-2 flex-wrap">
+            <input type="text" class="input-sm" style="max-width:240px" x-model="previewText"
+                   placeholder="Preview text… (blank = sample)">
+            <select x-show="/^[a-z][fm]_/.test(voice)" class="input-sm" style="max-width:170px"
+                    x-model="previewLang" title="Pronunciation language">
+              <option value="">Auto (match voice)</option>
+              {% for code, label in kokoro_languages %}
+              <option value="{{ code }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="btn btn-sm"
+                    @click="previewVoice(voice, previewText, /^[a-z][fm]_/.test(voice) ? previewLang : '', $event.currentTarget)">▶ Preview</button>
+          </div>
+          <p class="text-muted text-xs mt-1">Edge TTS names (<code>en-US-AvaNeural</code>) or Kokoro names (<code>af_bella</code>) — match the active backend. Preview plays the selected voice; for Kokoro you can override the language.</p>
         </div>
       </div>
 
@@ -152,6 +162,8 @@
       role: {{ persona.role|tojson }},
       emoji: {{ persona.emoji|tojson }},
       voice: {{ persona.voice|tojson }},
+      previewText: '',
+      previewLang: '',
       bot_token: {{ persona.bot_token|tojson }},
       allowedUserIds: {{ (persona.allowed_user_ids|join(', '))|tojson }},
       personalia: {{ persona.personalia|tojson }},
