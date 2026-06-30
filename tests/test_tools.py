@@ -132,9 +132,13 @@ def test_strip_voice_marker_removes_marker_unconditionally() -> None:
     assert strip_voice_marker("Hi there [respond_with_voice]") == "Hi there"
     assert strip_voice_marker("[respond_with_voice]") == ""
     assert strip_voice_marker("plain reply") == "plain reply"
-    # The :lang variant (issue #95) is stripped just as unconditionally.
+    # The :lang variant (issue #95) is stripped just as unconditionally,
+    # including malformed codes — the marker must never leak to the user.
     assert strip_voice_marker("Ciao [respond_with_voice:it]") == "Ciao"
     assert strip_voice_marker("[respond_with_voice:en-US]") == ""
+    assert strip_voice_marker("Ciao [respond_with_voice:english]") == "Ciao"
+    assert strip_voice_marker("Hi [respond_with_voice:it-IT]") == "Hi"
+    assert strip_voice_marker("Hi [respond_with_voice:]") == "Hi"
 
 
 def test_voice_request_lang_parses_marker() -> None:
@@ -143,7 +147,14 @@ def test_voice_request_lang_parses_marker() -> None:
 
     assert voice_request_lang("Ciao [respond_with_voice:it]") == "it"
     assert voice_request_lang("Hi [respond_with_voice:EN-us]") == "en"  # normalized
+    assert voice_request_lang("Ciao [respond_with_voice:english]") == "en"  # name → prefix
+    assert voice_request_lang("Hi [respond_with_voice:it-IT]") == "it"  # region dropped
     assert voice_request_lang("Hi [respond_with_voice]") is None  # bare marker
+    # Junk codes degrade to None (→ default voice), never crash or leak.
+    assert voice_request_lang("Hi [respond_with_voice:]") is None
+    assert voice_request_lang("Hi [respond_with_voice:1]") is None
+    assert voice_request_lang("Hi [respond_with_voice:123]") is None
+    assert voice_request_lang("Hi [respond_with_voice:-]") is None
     assert voice_request_lang("no marker here") is None
 
 

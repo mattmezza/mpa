@@ -155,7 +155,11 @@ def _as_int(value: object, default: int) -> int:
 # TTS the language the reply is written in so it isn't spoken with the wrong
 # phonemes (issue #95). VOICE_MARKER stays the canonical bare form for prompts.
 VOICE_MARKER = "[respond_with_voice]"
-_VOICE_MARKER_RE = re.compile(r"\[respond_with_voice(?::([a-zA-Z-]{2,5}))?\]")
+# Match the marker with ANY ":suffix" (or none) so it is always stripped — even
+# when the model writes a malformed code like ":english" or ":it-IT". A strict
+# suffix pattern would fail to match those and leak the raw marker to the user;
+# voice_request_lang validates the code separately.
+_VOICE_MARKER_RE = re.compile(r"\[respond_with_voice(?::([^\]]*))?\]")
 
 # Cap an approval prompt's text on the fail-closed retry so an over-long
 # description (e.g. a huge run_command) fits a channel's message limit. Well
@@ -177,10 +181,15 @@ def strip_voice_marker(text: str) -> str:
 
 def voice_request_lang(text: str) -> str | None:
     """ISO-639-1 language tagged on the voice marker (``[respond_with_voice:it]``
-    → ``"it"``), or ``None`` when the marker is bare or absent (issue #95)."""
+    → ``"it"``), or ``None`` when the marker is bare, absent, or carries a code
+    we can't read as a 2-letter language (issue #95). Tolerates a region suffix
+    (``it-IT`` → ``it``) and a full name's first two letters (``english`` → ``en``)
+    while rejecting junk (``123``, ``-``) so a bad tag degrades to default voice."""
     m = _VOICE_MARKER_RE.search(text)
-    code = (m.group(1) or "") if m else ""
-    return code.lower()[:2] or None
+    if not m:
+        return None
+    code = (m.group(1) or "").strip().lower()[:2]
+    return code if re.fullmatch(r"[a-z]{2}", code) else None
 
 
 def _strip_command_suffix(message: str) -> str:
