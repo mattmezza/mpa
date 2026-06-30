@@ -79,6 +79,12 @@ _TRUNCATION_NOTICE = (
     "than passing it all in one tool argument."
 )
 _MAX_TRUNCATION_RETRIES = 3
+# Shown to the user when the truncation cap trips and the model produced no
+# usable text (only a cut-off tool call) — better than a blank reply.
+_TRUNCATION_GIVEUP_MESSAGE = (
+    "I couldn't fit my response within the output limit. Try narrowing the "
+    "request, or ask me to produce the result in smaller parts."
+)
 
 
 def _truncation_tool_results(response) -> list[dict]:
@@ -1450,6 +1456,8 @@ class AgentCore:
                 tools=cast(Any, tools),
             )
         final_text = response.text
+        if response.truncated and not final_text:
+            final_text = _TRUNCATION_GIVEUP_MESSAGE
         log.info("Response: %s", final_text[:200])
 
         # Check if the LLM wants to respond with voice
@@ -1584,11 +1592,14 @@ class AgentCore:
                 tools=cast(Any, tools),
             )
 
+        final_text = response.text
+        if response.truncated and not final_text:
+            final_text = _TRUNCATION_GIVEUP_MESSAGE
+
         # Append the final assistant response to the session
-        final_assistant_msg = {"role": "assistant", "content": response.text}
+        final_assistant_msg = {"role": "assistant", "content": final_text}
         await self.history.append_session_message(channel, user_id, final_assistant_msg, chat_id)
 
-        final_text = response.text
         log.info("Response: %s", final_text[:200])
 
         # Compaction — if the context has grown past the configured threshold,
