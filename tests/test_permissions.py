@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 
 import pytest
 
@@ -222,6 +223,113 @@ async def test_always_allow_button_never_creates_bare_rule(tmp_path) -> None:
     engine.resolve_approval(request_id, True, always_allow=True)
     assert await future == "approved"
     assert "run_command" not in engine.rules
+
+
+# ── Per-persona scoping (#100) ──────────────────────────────────────────────
+
+
+def test_scoped_rule_overrides_default() -> None:
+    # A persona rule wins over a default rule for the same action; other personae
+    # and the default scope are unaffected.
+    engine = PermissionEngine()
+    assert engine.check("send_message", {}) == PermissionLevel.ASK  # default
+    engine.add_rule("send_message", PermissionLevel.ALWAYS, scope="coach")
+    assert engine.check("send_message", {}, scope="coach") == PermissionLevel.ALWAYS
+    assert engine.check("send_message", {}, scope="finance") == PermissionLevel.ASK
+    assert engine.check("send_message", {}) == PermissionLevel.ASK
+
+
+def test_scoped_scope_falls_back_to_default() -> None:
+    # An action with no persona-specific rule resolves through the default set.
+    engine = PermissionEngine()
+    engine.add_rule("send_message", PermissionLevel.ALWAYS, scope="coach")
+    # web_search has no coach rule → default ALWAYS still applies in the scope.
+    assert engine.check("web_search", {}, scope="coach") == PermissionLevel.ALWAYS
+    # Unknown action still defaults to ASK within a scope.
+    assert engine.check("send_fax", {}, scope="coach") == PermissionLevel.ASK
+
+
+def test_scoped_rule_persists_and_isolates(tmp_path) -> None:
+    db = str(tmp_path / "config.db")
+    engine = PermissionEngine(db_path=db)
+    engine.add_rule("run_command:deploy*", PermissionLevel.ALWAYS, scope="coach")
+    engine.add_rule("run_command:deploy*", PermissionLevel.NEVER, scope="finance")
+
+    reloaded = PermissionEngine(db_path=db)
+    assert reloaded.check("run_command", {"command": "deploy now"}, scope="coach") == (
+        PermissionLevel.ALWAYS
+    )
+    assert reloaded.check("run_command", {"command": "deploy now"}, scope="finance") == (
+        PermissionLevel.NEVER
+    )
+    # Same pattern under different scopes coexists (composite key), and the default
+    # scope is untouched by either.
+    assert reloaded.rules_for_scope("coach") == {"run_command:deploy*": "ALWAYS"}
+    assert "run_command:deploy*" not in reloaded.rules
+
+
+def test_remove_scoped_rule_leaves_other_scopes(tmp_path) -> None:
+    db = str(tmp_path / "config.db")
+    engine = PermissionEngine(db_path=db)
+    engine.add_rule("send_message", PermissionLevel.ALWAYS, scope="coach")
+    engine.add_rule("send_message", PermissionLevel.ALWAYS, scope="finance")
+
+    assert engine.remove_rule("send_message", scope="coach") is True
+    assert engine.check("send_message", {}, scope="coach") == PermissionLevel.ASK
+    assert engine.check("send_message", {}, scope="finance") == PermissionLevel.ALWAYS
+    # Gone after a restart too.
+    assert PermissionEngine(db_path=db).check("send_message", {}, scope="finance") == (
+        PermissionLevel.ALWAYS
+    )
+    assert PermissionEngine(db_path=db).rules_for_scope("coach") == {}
+
+
+def test_learn_always_rule_scoped_does_not_widen_default(tmp_path) -> None:
+    db = str(tmp_path / "config.db")
+    engine = PermissionEngine(db_path=db)
+    engine.learn_always_rule("run_command:customtool foo", generalize=False, scope="coach")
+    assert engine.check("run_command", {"command": "customtool foo"}, scope="coach") == (
+        PermissionLevel.ALWAYS
+    )
+    # The default scope (and other personae) keep asking — the approval was scoped.
+    assert "run_command:customtool foo" not in engine.rules
+    assert (
+        engine.check("run_command", {"command": "customtool foo"}, scope="other")
+        == PermissionLevel.ASK
+    )
+
+
+def test_legacy_table_migrates_to_default_scope(tmp_path) -> None:
+    # Pre-#100 DBs key permissions by pattern only. The engine must rebuild that
+    # into the composite-key table with existing rules as the default scope.
+    db = str(tmp_path / "config.db")
+    with sqlite3.connect(db) as raw:
+        raw.execute(
+            "CREATE TABLE permissions ("
+            "pattern TEXT PRIMARY KEY, level TEXT NOT NULL, "
+            "created_at DATETIME DEFAULT (datetime('now')))"
+        )
+        raw.execute(
+            "INSERT INTO permissions (pattern, level) VALUES (?, ?)",
+            ("run_command:legacytool*", "ALWAYS"),
+        )
+        raw.commit()
+
+    engine = PermissionEngine(db_path=db)
+    assert engine.rules.get("run_command:legacytool*") == "ALWAYS"
+    assert engine.check("run_command", {"command": "legacytool go"}) == PermissionLevel.ALWAYS
+    # The composite schema is now in place — a scoped rule reusing the pattern coexists.
+    engine.add_rule("run_command:legacytool*", PermissionLevel.NEVER, scope="coach")
+    assert (
+        PermissionEngine(db_path=db).check(
+            "run_command", {"command": "legacytool go"}, scope="coach"
+        )
+        == PermissionLevel.NEVER
+    )
+    # Migration is one-shot and idempotent: a second open doesn't choke or duplicate.
+    with sqlite3.connect(db) as raw:
+        cols = {row[1] for row in raw.execute("PRAGMA table_info(permissions)").fetchall()}
+    assert "scope" in cols
 
 
 def test_format_approval_message_run_command_includes_purpose() -> None:
