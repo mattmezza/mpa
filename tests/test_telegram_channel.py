@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from channels.telegram import TelegramChannel
+from channels.telegram import TELEGRAM_LIMIT, TelegramChannel, _chunk
 
 
 def _channel_with_mock_bot(delay: float = 0.0) -> TelegramChannel:
@@ -105,3 +105,50 @@ async def test_placeholder_send_failure_is_non_fatal() -> None:
         await _wait_for(lambda: ch.app.bot.send_message.call_count > 0)
 
     ch.app.bot.delete_message.assert_not_awaited()
+
+
+def test_chunk_keeps_pieces_under_limit_and_loses_nothing() -> None:
+    # 50 lines of 200 chars = 10000 chars, well over the 4096 limit (#80).
+    text = "\n".join(f"line{i} " + "x" * 200 for i in range(50))
+    chunks = _chunk(text)
+    assert len(chunks) > 1
+    assert all(len(c) <= TELEGRAM_LIMIT for c in chunks)
+    # Newline-joined chunks reconstruct the original — no data dropped, no dupes.
+    assert "\n".join(chunks) == text
+
+
+def test_chunk_hard_splits_a_single_oversized_line() -> None:
+    # A heredoc with no newlines (the #80 incident) must still be split.
+    text = "y" * (TELEGRAM_LIMIT * 2 + 17)
+    chunks = _chunk(text)
+    assert all(len(c) <= TELEGRAM_LIMIT for c in chunks)
+    assert "".join(chunks) == text
+
+
+def test_chunk_short_text_is_single_piece() -> None:
+    assert _chunk("hello") == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_send_splits_long_reply_into_multiple_messages() -> None:
+    # A >4096-char reply must be split, not crash the turn (#80).
+    ch = _channel_with_mock_bot()
+    await ch.send(123, "z" * (TELEGRAM_LIMIT + 500))
+    assert ch.app.bot.send_message.await_count == 2
+    for call in ch.app.bot.send_message.await_args_list:
+        # call.args[1] is the rendered payload sent to Telegram.
+        assert len(call.args[1]) <= TELEGRAM_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_approval_request_chunks_and_keyboard_rides_last() -> None:
+    # A long approval prompt must send across messages with the buttons only on
+    # the final one, so the keyboard isn't lost (#80).
+    ch = _channel_with_mock_bot()
+    ch._last_chat_for_user = {}
+    await ch.send_approval_request("123", "req1", "D" * (TELEGRAM_LIMIT + 500))
+    calls = ch.app.bot.send_message.await_args_list
+    assert len(calls) >= 2
+    assert all(len(c.args[1]) <= TELEGRAM_LIMIT for c in calls)
+    assert all(c.kwargs.get("reply_markup") is None for c in calls[:-1])
+    assert calls[-1].kwargs.get("reply_markup") is not None
