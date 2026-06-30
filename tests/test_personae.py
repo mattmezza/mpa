@@ -30,7 +30,9 @@ character: |
     assert p.skills == ["scheduling", "memory"]
     assert p.tools == ["run_command"]
     assert p.secrets == ["persona:fitness:key"]
-    assert "Forge" in p.personalia and "Direct" in p.character
+    # #98: legacy personalia folds into character (prepended), so both land there.
+    assert "Forge" in p.character and "Direct" in p.character
+    assert p.character.index("Forge") < p.character.index("Direct")
 
 
 def test_parse_body_appended_to_character() -> None:
@@ -45,7 +47,6 @@ def test_markdown_roundtrip() -> None:
         role="R",
         emoji="🤖",
         voice="en-GB-SoniaNeural",
-        personalia="Who.",
         character="How.",
         skills=["memory"],
         tools=["send_message"],
@@ -53,7 +54,7 @@ def test_markdown_roundtrip() -> None:
     )
     p2 = parse_markdown(to_markdown(p), name="t")
     assert (p2.role, p2.voice, p2.skills, p2.tools) == (p.role, p.voice, p.skills, p.tools)
-    assert p2.personalia.strip() == "Who." and p2.character.strip() == "How."
+    assert p2.character.strip() == "How."
 
 
 def test_allow_semantics() -> None:
@@ -97,13 +98,11 @@ def test_gateable_tools_in_sync_with_tools() -> None:
 def test_prompt_uses_persona_identity() -> None:
     cfg = Config()
     cfg.agent.name = "Clio"
-    cfg.agent.personalia = "DEFAULT-PERSONALIA"
     cfg.agent.character = "DEFAULT-CHARACTER"
     persona = Persona(
         name="coach",
         agent_name="Forge",
         role="Fitness coach",
-        personalia="PERSONA-ID",
         character="PERSONA-CH",
     )
     sections = build_prompt_sections(
@@ -116,8 +115,8 @@ def test_prompt_uses_persona_identity() -> None:
         persona=persona,
     )
     full = sections.full_prompt
-    assert "PERSONA-ID" in full and "PERSONA-CH" in full
-    assert "DEFAULT-PERSONALIA" not in full and "DEFAULT-CHARACTER" not in full
+    assert "PERSONA-CH" in full
+    assert "DEFAULT-CHARACTER" not in full
     assert "Fitness coach" in full  # active-role line
     assert "You are Forge" in full  # persona agent_name overrides global name
     assert "You are Clio" not in full
@@ -131,7 +130,7 @@ def test_prompt_uses_persona_identity() -> None:
         reflections="",
         decomposed_goal=None,
     )
-    assert "DEFAULT-PERSONALIA" in default.full_prompt
+    assert "DEFAULT-CHARACTER" in default.full_prompt
 
 
 @pytest.mark.asyncio
