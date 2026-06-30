@@ -54,19 +54,14 @@ def test_disabled_by_default():
 def test_feature_gate_hides_tool_when_disabled():
     names = {
         t["name"]
-        for t in apply_feature_gates(
-            TOOLS, secrets_available=True, artifacts_enabled=True, imagegen_enabled=False
-        )
+        for t in apply_feature_gates(TOOLS, secrets_available=True, imagegen_enabled=False)
     }
     assert "generate_image" not in names
 
 
 def test_feature_gate_shows_tool_when_enabled():
     names = {
-        t["name"]
-        for t in apply_feature_gates(
-            TOOLS, secrets_available=True, artifacts_enabled=True, imagegen_enabled=True
-        )
+        t["name"] for t in apply_feature_gates(TOOLS, secrets_available=True, imagegen_enabled=True)
     }
     assert "generate_image" in names
 

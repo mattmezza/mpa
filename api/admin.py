@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
-from core.artifacts import ARTIFACT_CSP, NOT_FOUND_HTML, store_from_config, valid_id
+from core.artifacts import ARTIFACT_CSP, NOT_FOUND_HTML, resolve, serving_base, valid_id
 from core.config_store import ConfigStore
 from core.goal_decomposition import classify_complexity, decompose_goal
 from core.llm import LLMClient
@@ -733,26 +733,28 @@ def create_admin_app(
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    # ── Agent web artifacts (public; the random id is the only secret) ──
+    # ── Agent web artifacts (public files under {workspace}/artifacts/, issue #82) ──
     @app.get("/artifacts/{artifact_id}", response_model=None)
     async def artifact_root(artifact_id: str) -> Response:
         # Redirect to the trailing-slash form so relative links inside the
-        # artifact (href="style.css", "img/logo.png") resolve under /artifacts/<id>/.
-        # Validate first so a malformed id never reaches the Location header.
+        # artifact (href="style.css", "img/logo.png") resolve under /artifacts/<slug>/.
+        # Validate first so a malformed slug never reaches the Location header.
         if not valid_id(artifact_id):
             return HTMLResponse(NOT_FOUND_HTML, status_code=404)
         return RedirectResponse(f"/artifacts/{artifact_id}/", status_code=307)
 
     @app.get("/artifacts/{artifact_id}/{file_path:path}", response_model=None)
     async def serve_artifact(artifact_id: str, file_path: str = "") -> Response:
-        """Serve a file from an artifact dir. No auth — the unguessable id gates it.
+        """Serve a file from ``{workspace}/artifacts/<slug>/``. No auth — the slug
+        is the only handle (artifacts are public shareables, issue #82).
 
-        ``resolve`` validates the id, blocks traversal/dotfiles/symlinks/hardlinks
-        and anything outside the artifact dir. The CSP sandbox keeps artifact JS
-        off the admin origin's localStorage; nosniff stops MIME-sniffing.
+        ``resolve`` blocks traversal/dotfiles/symlinks/hardlinks and anything
+        outside the artifacts dir, so a sibling source file or a planted link to
+        ``../.env`` can't leak. The CSP sandbox keeps artifact JS off the admin
+        origin's localStorage; nosniff stops MIME-sniffing.
         """
-        store = await store_from_config(config_store)
-        target = store.resolve(artifact_id, file_path) if store.enabled else None
+        base = await serving_base(config_store)
+        target = resolve(base, artifact_id, file_path) if base else None
         if target is None:
             return HTMLResponse(NOT_FOUND_HTML, status_code=404)
         return FileResponse(
@@ -944,7 +946,6 @@ def create_admin_app(
         """
         store = await _skills_store_from_config(config_store)
         all_skills = [s["name"] for s in await store.list_skills()]
-        artifacts = await store_from_config(config_store)
         sub_enabled = await config_store.get("subagents.enabled")
         sub_on = sub_enabled is None or sub_enabled == "true"
         ig_on = (await config_store.get("tools.imagegen.enabled")) == "true"
@@ -954,7 +955,6 @@ def create_admin_app(
         return {
             "all_skills": all_skills,
             "all_tools": gateable_tools_for(
-                artifacts.enabled,
                 subagents_enabled=sub_on,
                 imagegen_enabled=ig_on,
                 workspace_enabled=ws_on,
@@ -1291,7 +1291,10 @@ def create_admin_app(
         except Exception:
             browser_profiles = []
 
-        artifacts = await store_from_config(config_store)
+        # Web artifacts (issue #82) — only the public-serving toggle remains; the
+        # files live under the workspace. Key may be absent on an old store.
+        artifacts_enabled = await config_store.get("artifacts.enabled")
+        artifacts_enabled = "false" if artifacts_enabled == "false" else "true"
 
         # Subagents (issue #15) — keys may be absent on a store seeded before the
         # feature existed, so fall back to the SubagentsConfig defaults.
@@ -1331,9 +1334,7 @@ def create_admin_app(
             browser_ua=browser_ua,
             browser_profiles=browser_profiles,
             browser_rules=_browser_rules(),
-            artifacts_enabled="true" if artifacts.enabled else "false",
-            artifacts_directory=str(artifacts.dir),
-            artifacts_ttl_hours=str(artifacts.ttl_hours),
+            artifacts_enabled=artifacts_enabled,
             subagents_enabled=sub_enabled,
             subagents_recursion_depth=sub_recursion,
             subagents_max_steps=sub_steps,
@@ -3746,7 +3747,6 @@ GATEABLE_TOOLS = [
     "create_calendar_event",
     "web_search",
     "manage_jobs",
-    "write_artifact",
     "spawn_subagent",
     "generate_image",
     "read_file",
@@ -3768,15 +3768,12 @@ _WORKSPACE_TOOLS = (
 
 
 def gateable_tools_for(
-    artifacts_enabled: bool,
     subagents_enabled: bool = True,
     imagegen_enabled: bool = True,
     workspace_enabled: bool = True,
 ) -> list[str]:
     """GATEABLE_TOOLS minus tools whose feature is globally disabled."""
     out = list(GATEABLE_TOOLS)
-    if not artifacts_enabled:
-        out = [t for t in out if t != "write_artifact"]
     if not subagents_enabled:
         out = [t for t in out if t != "spawn_subagent"]
     if not imagegen_enabled:

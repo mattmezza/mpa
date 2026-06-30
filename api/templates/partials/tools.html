@@ -13,17 +13,13 @@
     </p>
   </div>
 
-  {# Web artifacts (built-in tool) #}
+  {# Web artifacts (served from the workspace, issue #82) #}
   <div class="card" x-data="{
     enabled: {{ artifacts_enabled|default('true', true)|tojson|forceescape }},
-    directory: {{ artifacts_directory|default('data/artifacts', true)|tojson|forceescape }},
-    ttl: {{ artifacts_ttl_hours|default('168', true)|tojson|forceescape }},
     result: '', resultOk: false,
     save() {
       const vals = {
-        'artifacts.enabled': String(this.enabled === true || this.enabled === 'true'),
-        'artifacts.directory': this.directory,
-        'artifacts.ttl_hours': String(parseInt(this.ttl) || 0)
+        'artifacts.enabled': String(this.enabled === true || this.enabled === 'true')
       };
       fetch('/config', {
         method: 'PATCH',
@@ -46,28 +42,13 @@
       </div>
     </div>
     <p class="text-muted text-xs mb-4">
-      Let the assistant publish pages, multi-file sites, or documents (PDF, image,
-      slides) as shareable links at <code>/artifacts/&lt;id&gt;/</code>. When disabled,
-      the tool is hidden from the assistant (and from the Personae tool scope) and
-      every artifact link returns 404. Assign it per persona in the
-      <strong>Personae</strong> editor.
+      Serve files the assistant writes under <code>&lt;workspace&gt;/artifacts/&lt;slug&gt;/</code>
+      (with the <strong>workspace</strong> file tools) as shareable links at
+      <code>/artifacts/&lt;slug&gt;/</code>. Requires the workspace harness to be enabled
+      below — that's what gives the assistant a place to write them. When disabled,
+      every <code>/artifacts/</code> link returns 404. The slug is public and guessable,
+      so don't publish secrets.
     </p>
-    <div class="space-y-3" x-show="enabled === 'true' || enabled === true">
-      <div>
-        <label class="label">Directory</label>
-        <input type="text" class="input-sm" style="max-width:500px" x-model="directory"
-               placeholder="data/artifacts">
-        <p class="text-muted text-xs mt-1">Where artifacts are stored on disk.</p>
-      </div>
-      <div>
-        <label class="label">Default TTL (hours)</label>
-        <input type="number" min="0" class="input-sm" style="max-width:200px" x-model="ttl">
-        <p class="text-muted text-xs mt-1">
-          Default lifetime before cleanup; the assistant may set its own per artifact.
-          <code>0</code> = keep forever.
-        </p>
-      </div>
-    </div>
     <div class="flex items-center gap-2 mt-4">
       <button class="btn-primary btn-sm" @click="save()">Save</button>
     </div>

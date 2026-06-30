@@ -184,7 +184,7 @@ Memory system settings. `extraction_model` is the cheap/fast model used for post
 
 #### `artifacts`
 
-Agent-crafted [web artifacts](/docs/artifacts) — pages, multi-file sites, or documents served at `/artifacts/<id>/`. `directory` is where they live; `ttl_hours` is the **default** lifetime before the background sweep deletes them (`0` = keep forever), which the agent may override per artifact. Set `MPA_BASE_URL` so the shared links are reachable from your devices. Enabled by default, and managed from the admin **Tools** tab; `enabled: false` hides the tool everywhere and 404s all links.
+[Web artifacts](/docs/artifacts) — pages, multi-file sites, or documents the agent publishes by writing files under `{workspace}/artifacts/<slug>/` with the `workspace` file tools, served at `/artifacts/<slug>/`. The only key is `enabled`, which toggles that public, no-auth route; the files live in the `workspace` (below), so serving also requires the workspace harness to be on. The slug is public and guessable — don't publish secrets. Set `MPA_BASE_URL` so the shared links are reachable from your devices. Managed from the admin **Tools** tab; `enabled: false` 404s all links.
 
 #### `workspace`
 

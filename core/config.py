@@ -76,7 +76,7 @@ class AgentConfig(BaseModel):
     thinking_level: str = ""  # "" (off) | "low" | "medium" | "high" — only for reasoning models
     # Hard ceiling on tokens the model may emit per response. The agentic loop
     # truncates mid-tool-call when this is too small for the output (e.g. a large
-    # write_artifact payload), so keep it generous. 8192 is safe across providers;
+    # file written via write_file), so keep it generous. 8192 is safe across providers;
     # raise it on the LLM admin tab for capable models (Claude allows up to
     # 128000 — note large non-streaming outputs can approach provider timeouts).
     max_tokens: int = 8192
@@ -394,11 +394,16 @@ class WorkspaceConfig(BaseModel):
 
 
 class ArtifactsConfig(BaseModel):
-    """Agent-crafted web artifacts served at /artifacts/<id> (see core/artifacts.py)."""
+    """Public serving toggle for agent-published web artifacts (issue #82).
+
+    Artifacts are files the agent writes under ``{workspace}/artifacts/{slug}/``
+    with the coding-harness ``write_file`` tool — there is no separate storage,
+    TTL or directory here. This flag only gates the public, no-auth
+    ``/artifacts/`` route; serving also requires the workspace harness to be on
+    (it provides the write path). See core/artifacts.py.
+    """
 
     enabled: bool = True
-    directory: str = "data/artifacts"
-    ttl_hours: int = 168  # 7 days; 0 = keep forever (no auto-cleanup)
 
 
 class SubagentsConfig(BaseModel):

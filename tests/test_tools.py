@@ -379,7 +379,6 @@ def test_feature_gate_offers_discovery_tools_only_on_demand() -> None:
             for t in apply_feature_gates(
                 TOOLS,
                 secrets_available=True,
-                artifacts_enabled=True,
                 skills_on_demand=on_demand,
             )
         }

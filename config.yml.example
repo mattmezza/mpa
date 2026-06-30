@@ -139,13 +139,14 @@ memory:
   hygiene_enabled: true
   hygiene_similarity_threshold: 0.45 # min similarity to cluster two memories
 
-# Agent-crafted web artifacts — the agent publishes pages, multi-file sites, or
-# documents (PDF, image, slides) served at /artifacts/<random-id>/. Set the
-# MPA_BASE_URL env var so the shared links are reachable from your devices.
+# Web artifacts (issue #82) — the agent publishes pages/sites/documents by
+# writing files under {workspace}/artifacts/<slug>/ with the workspace file
+# tools; they're served at /artifacts/<slug>/. This only toggles that public,
+# no-auth route — the files live in the workspace below, so serving needs the
+# workspace harness enabled too. The slug is public/guessable: no secrets in an
+# artifact. Set MPA_BASE_URL so the shared links are reachable from your devices.
 artifacts:
   enabled: true
-  directory: "data/artifacts"  # where artifacts live
-  ttl_hours: 168               # default lifetime; agent may pick its own (0 = forever)
 
 # Optional tools the agent can use. Configure via the admin UI (Settings → Tools)
 # or here. Image generation (generate_image) sends results as native photos:
