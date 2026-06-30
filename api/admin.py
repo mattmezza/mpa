@@ -3744,6 +3744,7 @@ GATEABLE_TOOLS = [
     "send_email",
     "reply_email",
     "send_message",
+    "set_reaction",
     "create_calendar_event",
     "web_search",
     "manage_jobs",

@@ -275,6 +275,61 @@ TOOLS = [
         },
     },
     {
+        "name": "set_reaction",
+        "description": (
+            "React to the user's message with an emoji instead of sending a text "
+            "reply — a fast, non-verbal acknowledgement (Telegram only). Defaults to "
+            "the message that triggered this turn, so usually you pass only `emoji`. "
+            "Use it for lightweight acks where a sentence would just be clutter: "
+            "thumbsup for 'got it'/done, heart for thanks, eyes for 'I see your "
+            "photo/file', party for good news, cry or pray for bad news, laugh for "
+            "something funny, check/cross for approving/denying. To acknowledge with "
+            "ONLY a reaction, call this tool and then end your turn with no text at all "
+            "— an empty reply sends nothing, so the reaction stands on its own. When you "
+            "actually have information to convey, reply with text (you may still react in "
+            "addition). Reactions on messages older than 24h silently no-op."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "emoji": {
+                    "type": "string",
+                    "enum": [
+                        "thumbsup",
+                        "thumbsdown",
+                        "heart",
+                        "fire",
+                        "party",
+                        "laugh",
+                        "cry",
+                        "surprise",
+                        "pray",
+                        "100",
+                        "thinking",
+                        "eyes",
+                        "check",
+                        "cross",
+                        "star",
+                        "rocket",
+                        "clap",
+                        "muscle",
+                        "handshake",
+                        "target",
+                    ],
+                },
+                "chat_id": {
+                    "type": "string",
+                    "description": "Override target chat (defaults to the current chat).",
+                },
+                "message_id": {
+                    "type": "integer",
+                    "description": "Override target message (defaults to the triggering message).",
+                },
+            },
+            "required": ["emoji"],
+        },
+    },
+    {
         "name": "create_calendar_event",
         "description": "Create a calendar event or send an invite.",
         "input_schema": {
@@ -869,6 +924,7 @@ class AgentCore:
         persona_name: str | None = None,
         respond: bool = True,
         addressed: bool = True,
+        message_id: int | None = None,
     ) -> AgentResponse:
         """Process an incoming message through the LLM with tool-use loop.
 
@@ -894,6 +950,10 @@ class AgentCore:
         everything — there ``respond`` is True for unaddressed messages too. The
         YOLO toggle keys off ``addressed`` (not ``respond``) so a bare ``/yolo-on``
         never flips every bot in a room. Defaults True for non-group channels.
+
+        ``message_id`` is the inbound message's id, carried into request_state so
+        the ``set_reaction`` tool can react to the triggering message without the
+        model having to know its id (#70). Channel-specific; None off Telegram.
         """
 
         # Respond-gate (#30): record the turn for context, but do not reply. Runs
@@ -1049,10 +1109,28 @@ class AgentCore:
 
         if self.history_mode == "session":
             return await self._process_session(
-                system, preamble, message, channel, user_id, attachments, chat_id, tools, persona
+                system,
+                preamble,
+                message,
+                channel,
+                user_id,
+                attachments,
+                chat_id,
+                tools,
+                persona,
+                message_id,
             )
         return await self._process_injection(
-            system, preamble, message, channel, user_id, attachments, chat_id, tools, persona
+            system,
+            preamble,
+            message,
+            channel,
+            user_id,
+            attachments,
+            chat_id,
+            tools,
+            persona,
+            message_id,
         )
 
     async def _resolve_persona(self, channel: str, user_id: str, chat_id: str) -> Persona | None:
@@ -1520,6 +1598,7 @@ class AgentCore:
         chat_id: str = "",
         tools: list[dict] | None = None,
         persona: Persona | None = None,
+        message_id: int | None = None,
     ) -> AgentResponse:
         """Injection mode: replay windowed history as native alternating messages."""
         tools = tools if tools is not None else TOOLS
@@ -1553,7 +1632,13 @@ class AgentCore:
 
         # Agentic loop — keep going while the LLM wants to call tools
         request_state = self._new_request_state(
-            persona, origin={"channel": channel, "user_id": user_id, "chat_id": chat_id}
+            persona,
+            origin={
+                "channel": channel,
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "message_id": message_id,
+            },
         )
         # Resolve the YOLO grant once per turn (channel+chat_id are in scope here
         # but not in _execute_tool); every tool call this turn reads the cached flag.
@@ -1611,10 +1696,14 @@ class AgentCore:
         # even when synthesis was skipped or failed (voice_bytes is None).
         final_text = strip_voice_marker(final_text)
 
-        # Persist the turn (user message + final assistant text only)
+        # Persist the turn (user message + final assistant text only). A react-only
+        # turn (or any reply that sends nothing) leaves final_text empty — don't
+        # store an empty assistant turn: some providers reject empty content on the
+        # next replay, and the coalescer folds the resulting adjacent user turns (#70).
         history_message = self._history_message_text(message, attachments)
         await self.history.add_turn(channel, user_id, "user", history_message, chat_id)
-        await self.history.add_turn(channel, user_id, "assistant", final_text, chat_id)
+        if final_text:
+            await self.history.add_turn(channel, user_id, "assistant", final_text, chat_id)
 
         # Automatic memory extraction
         if channel != "system":
@@ -1647,6 +1736,7 @@ class AgentCore:
         chat_id: str = "",
         tools: list[dict] | None = None,
         persona: Persona | None = None,
+        message_id: int | None = None,
     ) -> AgentResponse:
         """Session mode: sticky session per (channel, user_id, chat_id).
 
@@ -1683,7 +1773,13 @@ class AgentCore:
         # Agentic loop — keep going while the LLM wants to call tools
         new_messages: list[dict] = []
         request_state = self._new_request_state(
-            persona, origin={"channel": channel, "user_id": user_id, "chat_id": chat_id}
+            persona,
+            origin={
+                "channel": channel,
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "message_id": message_id,
+            },
         )
         # Resolve the YOLO grant once per turn (channel+chat_id are in scope here
         # but not in _execute_tool); every tool call this turn reads the cached flag.
@@ -1743,9 +1839,15 @@ class AgentCore:
         elif response.tool_calls and not final_text:
             final_text = _LOOP_ABORT_MESSAGE
 
-        # Append the final assistant response to the session
-        final_assistant_msg = {"role": "assistant", "content": final_text}
-        await self.history.append_session_message(channel, user_id, final_assistant_msg, chat_id)
+        # Append the final assistant response to the session. Skip an empty final
+        # (a react-only turn sends nothing): the reaction is already recorded as the
+        # assistant tool_use turn above, and an empty assistant message is dead weight
+        # that some providers reject on the next call (#70).
+        if final_text:
+            final_assistant_msg = {"role": "assistant", "content": final_text}
+            await self.history.append_session_message(
+                channel, user_id, final_assistant_msg, chat_id
+            )
 
         log.info("Response: %s", final_text[:200])
 
@@ -1981,6 +2083,9 @@ class AgentCore:
                 executed_writes.add(write_sig)
             return result
 
+        if name == "set_reaction":
+            return await self._tool_set_reaction(params, request_state)
+
         if name == "create_calendar_event":
             result = await self._tool_create_calendar_event(params)
             if is_write_action and self._is_tool_success(result):
@@ -2214,6 +2319,34 @@ class AgentCore:
         try:
             await channel.send(to, text)
             return {"ok": True, "channel": channel_name, "to": to}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    async def _tool_set_reaction(self, params: dict, request_state: dict) -> dict:
+        """React to a message with an emoji (#70).
+
+        The channel/chat/message default to the turn's origin (the message that
+        triggered this turn), so the model normally supplies only ``emoji`` — it
+        has no way to know a message id otherwise. Reactions are cosmetic and
+        pre-approved (ALWAYS), so this never prompts.
+        """
+        origin = (request_state or {}).get("origin") or {}
+        channel_name = origin.get("channel") or ""
+        chat_id = params.get("chat_id") or origin.get("chat_id")
+        message_id = params.get("message_id") or origin.get("message_id")
+        emoji = str(params.get("emoji", "")).strip()
+        log.info("Tool call: set_reaction — %s on %s/%s", emoji, channel_name, message_id)
+        if not emoji:
+            return {"error": "Missing 'emoji'."}
+        if not (chat_id and message_id):
+            return {"error": "No message to react to in this context."}
+        channel = self.channels.get(channel_name)
+        react = getattr(channel, "react", None) if channel else None
+        if not callable(react):
+            return {"error": f"Channel '{channel_name}' does not support reactions."}
+        try:
+            await react(chat_id, int(message_id), emoji)
+            return {"ok": True, "emoji": emoji}
         except Exception as exc:
             return {"error": str(exc)}
 

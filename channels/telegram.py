@@ -10,7 +10,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReactionTypeEmoji,
+    Update,
+)
 from telegram.constants import ChatAction
 from telegram.error import BadRequest
 from telegram.ext import (
@@ -49,6 +55,34 @@ _HTML_TAG_RE = re.compile(
 
 # Telegram rejects messages over 4096 chars with "Message is too long" (#80).
 TELEGRAM_LIMIT = 4096
+
+# Descriptive reaction name → Telegram emoji (#70). The model picks a name from
+# the set_reaction tool's enum; only the emojis in Telegram's *default* reaction
+# set are accepted by setMessageReaction, so the proposed check/cross/star/rocket/
+# muscle/target (which have no native reaction) map to the closest valid emoji
+# rather than silently failing.
+REACTION_EMOJI: dict[str, str] = {
+    "thumbsup": "👍",
+    "thumbsdown": "👎",
+    "heart": "❤",
+    "fire": "🔥",
+    "party": "🎉",
+    "laugh": "😁",
+    "cry": "😢",
+    "surprise": "😱",
+    "pray": "🙏",
+    "100": "💯",
+    "thinking": "🤔",
+    "eyes": "👀",
+    "check": "👌",  # no native ✅ reaction — 👌 reads as "acknowledged/approved"
+    "cross": "👎",  # no native ❌ reaction — 👎 reads as "denied"
+    "star": "🤩",  # no native ⭐ reaction — 🤩 "star-struck"
+    "rocket": "⚡",  # no native 🚀 reaction — ⚡ "fast/launch"
+    "clap": "👏",
+    "muscle": "🆒",  # no native 💪 reaction
+    "handshake": "🤝",
+    "target": "🏆",  # no native 🎯 reaction — 🏆 "on target / achieved"
+}
 
 
 def _chunk(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
@@ -406,7 +440,14 @@ class TelegramChannel:
         else:
             payload = f"{routing['speaker_tag']}{self._reply_context(message)}{text}"
         asyncio.create_task(
-            self._handle_text(payload, convo_user, str(chat_id), respond, routing["addressed"]),
+            self._handle_text(
+                payload,
+                convo_user,
+                str(chat_id),
+                respond,
+                routing["addressed"],
+                getattr(message, "message_id", None),
+            ),
             name=f"tg-text-{convo_user}",
         )
 
@@ -456,7 +497,13 @@ class TelegramChannel:
         if not voice_msg:
             return
         asyncio.create_task(
-            self._handle_voice(voice_msg.file_id, convo_user, str(chat_id), prefix),
+            self._handle_voice(
+                voice_msg.file_id,
+                convo_user,
+                str(chat_id),
+                prefix,
+                getattr(message, "message_id", None),
+            ),
             name=f"tg-voice-{convo_user}",
         )
 
@@ -510,7 +557,14 @@ class TelegramChannel:
             return
 
         asyncio.create_task(
-            self._handle_photo(file_ids, caption, prefix, convo_user, str(chat_id)),
+            self._handle_photo(
+                file_ids,
+                caption,
+                prefix,
+                convo_user,
+                str(chat_id),
+                getattr(message, "message_id", None),
+            ),
             name=f"tg-photo-{convo_user}",
         )
 
@@ -631,6 +685,29 @@ class TelegramChannel:
                     await self.app.bot.send_message(cid, chunk, **kw)
                     continue
                 raise
+
+    async def react(self, chat_id: int | str, message_id: int, emoji: str) -> None:
+        """Set an emoji reaction on a message (#70).
+
+        ``emoji`` is a descriptive name from REACTION_EMOJI (validated by the
+        caller). A folded "<chat>:<thread>" id is split to its base chat — a
+        reaction targets a message, not a thread, so message_thread_id is dropped.
+        Telegram only allows reactions on recent messages and rejects an unknown
+        emoji; both surface as BadRequest, which is swallowed (a cosmetic ack must
+        never fail a turn — issue #70 edge cases).
+        """
+        char = REACTION_EMOJI.get(emoji)
+        if char is None:
+            raise ValueError(f"Unsupported reaction: {emoji!r}")
+        cid, _ = self._route(chat_id)
+        try:
+            await self.app.bot.set_message_reaction(
+                chat_id=cid, message_id=int(message_id), reaction=[ReactionTypeEmoji(emoji=char)]
+            )
+        except BadRequest as exc:
+            # Expired (>24h), deleted, or an emoji this chat disallows — nothing to
+            # recover, and a failed reaction must not break the reply.
+            log.info("Reaction skipped on %s/%s: %s", cid, message_id, exc)
 
     async def send_approval_request(
         self, user_id: str, request_id: str, description: str, image_path: str | None = None
@@ -815,6 +892,7 @@ class TelegramChannel:
         chat_id: int | str,
         respond: bool = True,
         addressed: bool = True,
+        message_id: int | None = None,
     ) -> None:
         # Respond-gate silent path (#30): record the turn for context, no typing
         # indicator, no reply.
@@ -834,11 +912,17 @@ class TelegramChannel:
                 user_id=str(user_id),
                 chat_id=str(chat_id),
                 addressed=addressed,
+                message_id=message_id,
             )
         await self._send_response(chat_id, response)
 
     async def _handle_voice(
-        self, file_id: str, user_id: str, chat_id: int | str, prefix: str
+        self,
+        file_id: str,
+        user_id: str,
+        chat_id: int | str,
+        prefix: str,
+        message_id: int | None = None,
     ) -> None:
         async with self._typing(chat_id), self._progress(chat_id):
             file = await self.app.bot.get_file(file_id)
@@ -870,6 +954,7 @@ class TelegramChannel:
                 channel=self.channel_name,
                 user_id=str(user_id),
                 chat_id=str(chat_id),
+                message_id=message_id,
             )
         await self._send_response(chat_id, response)
 
@@ -880,6 +965,7 @@ class TelegramChannel:
         prefix: str,
         user_id: str,
         chat_id: int | str,
+        message_id: int | None = None,
     ) -> None:
         from core.models import IMAGE_MIME_TYPES, Attachment
 
@@ -916,6 +1002,7 @@ class TelegramChannel:
                 user_id=str(user_id),
                 attachments=attachments,
                 chat_id=str(chat_id),
+                message_id=message_id,
             )
         await self._send_response(chat_id, response)
 
