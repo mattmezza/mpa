@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import urllib.parse
@@ -50,6 +51,10 @@ if TYPE_CHECKING:
     from core.skills import SkillsStore
 
 log = logging.getLogger(__name__)
+
+# A persona slug becomes part of a channel name (``telegram:<slug>``) and a URL
+# path (``/admin/personae/<slug>``), so it must avoid ':' , '/' and whitespace.
+_VALID_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 # ---------------------------------------------------------------------------
 # Google OAuth 2.0 constants (for CalDAV calendar access)
@@ -2592,6 +2597,52 @@ def create_admin_app(
         agent = agent_state.agent
         if agent:
             agent.config.agent.active_persona = name
+
+    @app.post("/personae/rename", dependencies=[Depends(auth)])
+    async def rename_persona(request: Request) -> HTMLResponse:
+        """Change a persona's slug, cascading it to every store that keys off it.
+
+        The slug is a foreign key without a DB constraint: per-chat bindings,
+        private memory scope, scheduled jobs, the active-persona selection and the
+        ``telegram:<slug>`` bot channel all reference it by value, so each is
+        repointed here (#69). A persona with its own bot needs an agent restart for
+        the bot to re-register under the new slug.
+        """
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        old = str(body.get("old", "")).strip()
+        new = str(body.get("new", "")).strip()
+        if not old or not new:
+            raise HTTPException(400, "Missing 'old' or 'new' in request body")
+        if old == new:
+            return await _personae_partial()  # no-op
+        if not _VALID_SLUG.match(new):
+            raise HTTPException(
+                400, "Slug may contain only letters, digits, '-' and '_' (no spaces or ':')."
+            )
+        store = await _persona_store_from_config(config_store)
+        try:
+            renamed = await store.rename(old, new)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        if not renamed:
+            raise HTTPException(404, f"Persona not found: {old}")
+        # ponytail: best-effort cascade across the separate SQLite DBs — there is
+        # no cross-DB transaction; a missed ref just falls back to the default
+        # identity at runtime, never corrupts data.
+        history = await _history_from_config(config_store)
+        await history.rename_persona(old, new)
+        from core.memory import MemoryStore
+
+        memory_db = await config_store.get("memory.db_path") or "data/memory.db"
+        await MemoryStore(db_path=memory_db).rename_scope(old, new)
+        await _get_job_store().rename_persona(old, new)
+        if (await config_store.get("agent.active_persona") or "").strip() == old:
+            await _set_active_persona(new)
+        return await _personae_partial()
 
     @app.post("/personae/activate", dependencies=[Depends(auth)])
     async def activate_persona(request: Request) -> HTMLResponse:

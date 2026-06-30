@@ -281,6 +281,18 @@ class JobStore:
             await db.commit()
             return cursor.rowcount > 0
 
+    async def rename_persona(self, old: str, new: str) -> None:
+        """Repoint jobs from a renamed persona slug (#69): the ``persona`` column
+        and the ``telegram:<slug>`` channel a per-persona-bot job delivers to."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE jobs SET persona = ? WHERE persona = ?", (new, old))
+            await db.execute(
+                "UPDATE jobs SET channel = ? WHERE channel = ?",
+                (f"telegram:{new}", f"telegram:{old}"),
+            )
+            await db.commit()
+
     async def seed_from_config(self, jobs: list[dict]) -> int:
         """Seed jobs from config (on first boot). Only inserts, never overwrites.
 

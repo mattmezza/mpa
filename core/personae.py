@@ -278,6 +278,27 @@ class PersonaStore:
             await db.commit()
             return cursor.rowcount > 0
 
+    async def rename(self, old: str, new: str) -> bool:
+        """Change a persona's slug (its PRIMARY KEY). Returns False if ``old`` is
+        missing; raises ``ValueError`` if ``new`` already names another persona.
+
+        This only moves the personae row. The slug is referenced from other
+        stores (per-chat bindings, memory scope, jobs, the active-persona config,
+        and the ``telegram:<slug>`` bot channel) — the admin rename route cascades
+        the new slug to those so nothing is orphaned.
+        """
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT 1 FROM personae WHERE name = ?", (new,))
+            if await cursor.fetchone():
+                raise ValueError(f"A persona named '{new}' already exists")
+            cursor = await db.execute(
+                "UPDATE personae SET name = ?, updated_at = datetime('now') WHERE name = ?",
+                (new, old),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
 
 if __name__ == "__main__":
     # ponytail: one runnable check covering the parse/serialise round-trip + scopes.

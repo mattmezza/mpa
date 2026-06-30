@@ -156,3 +156,26 @@ async def test_store_crud(tmp_path) -> None:
 
     assert await store.delete("coach") is True
     assert await store.get("coach") is None
+
+
+@pytest.mark.asyncio
+async def test_store_rename(tmp_path) -> None:
+    store = PersonaStore(db_path=str(tmp_path / "p.db"), seed_dir=tmp_path / "missing")
+    await store.upsert(Persona(name="coach", role="Coach", skills=["memory"]))
+
+    # Happy path: the row moves to the new slug, fields intact.
+    assert await store.rename("coach", "trainer") is True
+    assert await store.get("coach") is None
+    moved = await store.get("trainer")
+    assert moved is not None and moved.role == "Coach" and moved.skills == ["memory"]
+
+    # Renaming a missing slug is a no-op (False), not an error.
+    assert await store.rename("ghost", "whoever") is False
+
+    # Collision with an existing slug is rejected.
+    await store.upsert(Persona(name="writer", role="Writer"))
+    with pytest.raises(ValueError):
+        await store.rename("trainer", "writer")
+    # Both survive the rejected rename.
+    assert (await store.get("trainer")).role == "Coach"
+    assert (await store.get("writer")).role == "Writer"

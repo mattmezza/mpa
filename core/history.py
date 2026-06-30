@@ -513,6 +513,26 @@ class ConversationHistory:
             await self.clear_chat_persona(channel, user_id, chat_id)
         await self.clear_session_system(channel, user_id, chat_id)
 
+    async def rename_persona(self, old: str, new: str) -> None:
+        """Repoint everything keyed by a persona slug after it is renamed (#69).
+
+        Two kinds of reference move: the ``chat_persona.persona`` binding value,
+        and the ``telegram:<slug>`` channel that a per-persona bot's turns,
+        session, and binding rows are stored under (#29).
+        """
+        old_ch, new_ch = f"telegram:{old}", f"telegram:{new}"
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE chat_persona SET persona = ? WHERE persona = ?", (new, old))
+            tables = ("conversation_turns", "session_messages", "session_system", "chat_persona")
+            for table in tables:
+                await db.execute(
+                    f"UPDATE {table} SET channel = ? WHERE channel = ?",  # noqa: S608
+                    (new_ch, old_ch),
+                )
+            await db.commit()
+        # The per-persona bot channel only carries traffic after a restart, so the
+        # in-memory _session_system cache (keyed by the old channel) is moot here.
+
     async def list_chats(self) -> list[dict[str, str]]:
         """List every known (channel, user_id, chat_id) with its bound persona.
 
