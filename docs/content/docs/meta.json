@@ -17,6 +17,7 @@
     "subagents",
     "voice",
     "artifacts",
+    "workspace",
     "admin-ui",
     "---",
     "development",

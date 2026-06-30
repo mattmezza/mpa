@@ -833,6 +833,7 @@ def create_admin_app(
     _EMAIL_PREFIX = "email."
     _PROMPT_PREFIX = "prompt."
     _TOOLS_PREFIX = "tools."
+    _WORKSPACE_PREFIX = "workspace."
     _COMPACTION_PREFIX = "compaction."
 
     def _is_managed_key(key: str) -> bool:
@@ -852,6 +853,7 @@ def create_admin_app(
             _EMAIL_PREFIX,
             _PROMPT_PREFIX,
             _TOOLS_PREFIX,
+            _WORKSPACE_PREFIX,
             _COMPACTION_PREFIX,
         ):
             if key.startswith(prefix):
@@ -1342,6 +1344,18 @@ def create_admin_app(
             imagegen_key_vaulted=ig_key_vaulted,
             imagegen_daily_budget=ig_daily,
             imagegen_monthly_budget=ig_monthly,
+        )
+
+    @app.get("/partials/workspace", dependencies=[Depends(auth)])
+    async def partial_workspace() -> HTMLResponse:
+        """Workspace tab partial — coding harness file tools (issue #76)."""
+        ws_enabled = await config_store.get("workspace.enabled")
+        ws_enabled = ws_enabled if ws_enabled is not None else "false"
+        ws_directory = await config_store.get("workspace.directory") or ""
+        return _render_partial(
+            "partials/workspace.html",
+            workspace_enabled=ws_enabled,
+            workspace_directory=ws_directory,
         )
 
     @app.post("/tools/gh/test", dependencies=[Depends(auth)])

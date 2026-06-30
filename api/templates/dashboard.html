@@ -104,6 +104,10 @@
             @click="select('tools')">
       Tools
     </button>
+    <button class="tab-link" :class="tab === 'workspace' && 'tab-link-active'"
+            @click="select('workspace')">
+      Workspace
+    </button>
     <button class="tab-link" :class="tab === 'permissions' && 'tab-link-active'"
             @click="select('permissions')">
       Permissions
@@ -727,6 +731,7 @@
       channels: '/partials/channels',
       search: '/partials/search',
       tools: '/partials/tools',
+      workspace: '/partials/workspace',
       permissions: '/partials/permissions',
       skills: '/partials/skills',
       jobs: '/partials/jobs',

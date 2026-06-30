@@ -1,0 +1,59 @@
+---
+title: Coding harness
+description: File read/write/edit/list/grep/run tools that let the agent work on a real codebase, confined to one workspace directory.
+---
+
+# Coding harness
+
+By default the agent can *talk* about code but can't touch it — every change has to
+be described in chat and applied by hand. The **coding harness** gives it a small set
+of file tools so it can read, edit, search, and run commands on a real codebase
+directly, like a built-in coding assistant.
+
+It is deliberately minimal. Out of scope for this first iteration: AST/structural
+editing, language-server integration, a plugin system, and a terminal/REPL.
+
+## Tools
+
+All paths are relative to the configured workspace root (or absolute *inside* it).
+
+| Tool | Approval | What it does |
+| --- | --- | --- |
+| `read_file(path, offset=0, limit=100)` | pre-approved | Read a file (or a line range), returned with line numbers. Large files paginate via `offset`/`limit`. |
+| `list_dir(path=".")` | pre-approved | List one level: `[{name, type, size}]`. |
+| `grep(pattern, path=".", include="")` | pre-approved | Recursive regex search; `include` is a filename glob (e.g. `*.py`). Returns `[{file, line, content}]`. |
+| `write_file(path, content)` | **asks first** | Write a file, creating parent directories. Overwrites. |
+| `edit_file(path, old_string, new_string, multiple=false)` | **asks first** | Find-and-replace. `old_string` must match exactly and, unless `multiple` is true, be unique. |
+| `run_command_in_dir(command, workdir=".")` | **asks first** | Run a shell command (linter, tests, build) in a workspace directory. Returns `stdout`, `stderr`, `exit_code`. |
+
+Reads are pre-approved (`ALWAYS`); writes and commands are write-actions that ask for
+your approval on every call, surfaced through the same [permission](/docs/permissions)
+flow as email/calendar/message sends.
+
+## Confinement
+
+Everything is confined to the single **workspace directory** you configure. The check
+is `realpath`-based: a path is resolved (following symlinks and collapsing `..`) and
+must land on the workspace root or a descendant of it. So neither `../../etc/passwd`
+nor a symlink pointing outside the workspace can escape — both are blocked (`NEVER`).
+
+There is **no default workspace**. With the harness disabled, or with a blank
+directory, the tools are hidden from the agent entirely and the handlers refuse — the
+agent cannot reach the filesystem until you point it at a directory.
+
+## Configuration
+
+Enable it under **Settings → Workspace** in the admin UI, or in `config.yml`:
+
+```yaml
+workspace:
+  enabled: true
+  directory: "~/projects/my-repo"   # the only directory the agent may touch
+```
+
+When enabled, the file tools appear in the agent's tool set from the next `/new`
+conversation (in session history mode). Each call is written to the agent tool log on
+the **Logs** tab.
+
+Like every tool, the harness can be scoped per [persona](/docs/personae) — grant it to
+a "developer" persona and leave it off everywhere else.
