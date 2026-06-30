@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests as http_requests
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -35,7 +36,7 @@ from pydantic import BaseModel, Field
 from core.artifacts import ARTIFACT_CSP, NOT_FOUND_HTML, resolve, serving_base, valid_id
 from core.config_store import ConfigStore
 from core.goal_decomposition import classify_complexity, decompose_goal
-from core.llm import LLMClient
+from core.llm import LLMClient, get_sent_payload
 from core.log_streams import current_stream, current_subagent
 from core.prompt_builder import (
     DEFAULT_HISTORY_HANDLING_BLOCK,
@@ -2856,19 +2857,69 @@ def create_admin_app(
         await _set_active_persona(name)
         return await _personae_partial()
 
-    # ── Chats API (per-chat persona bindings) ──────────────────────────
+    # ── Inspect API (active contexts, per-chat bindings, last-sent payload) ──
 
-    async def _chats_partial() -> HTMLResponse:
+    async def _inspect_partial() -> HTMLResponse:
         history = await _history_from_config(config_store)
         chats = await history.list_chats()
         store = await _persona_store_from_config(config_store)
         personae = await store.list_personae()
-        return _render_partial("partials/chats.html", chats=chats, personae=personae)
+        return _render_partial("partials/inspect.html", chats=chats, personae=personae)
 
-    @app.get("/partials/chats", dependencies=[Depends(auth)])
-    async def partial_chats() -> HTMLResponse:
-        """Chats tab partial — active contexts and their bound persona."""
-        return await _chats_partial()
+    @app.get("/partials/inspect", dependencies=[Depends(auth)])
+    async def partial_inspect() -> HTMLResponse:
+        """Inspect tab partial — active contexts, their bound persona, and a
+        per-context view of the exact payload last sent to the LLM (#99)."""
+        return await _inspect_partial()
+
+    @app.get("/inspect/payload", dependencies=[Depends(auth)])
+    async def inspect_payload(
+        channel: str = "", user_id: str = "", chat_id: str = ""
+    ) -> HTMLResponse:
+        """Render the last-sent inference payload for one context (#99).
+
+        Reads the in-memory capture keyed by (channel, user_id, chat_id) — the
+        exact system/messages/tools/model that generate() last sent. Empty until
+        the context has had a turn since the agent started."""
+        payload = get_sent_payload((channel, user_id, chat_id))
+        meta: dict[str, object] | None = None
+        pretty: str | None = None
+        if payload:
+            ts = payload.get("captured_at")
+            captured = ""
+            if ts:
+                tz = await config_store.get("agent.timezone") or "UTC"
+                try:
+                    captured = datetime.fromtimestamp(float(ts), ZoneInfo(tz)).strftime(
+                        "%Y-%m-%d %H:%M:%S %Z"
+                    )
+                except ValueError, ZoneInfoNotFoundError:
+                    captured = datetime.fromtimestamp(float(ts), UTC).isoformat()
+            messages = payload.get("messages") or []
+            tools = payload.get("tools") or []
+            meta = {
+                "provider": payload.get("provider", ""),
+                "model": payload.get("model", ""),
+                "max_tokens": payload.get("max_tokens", ""),
+                "n_messages": len(messages),
+                "n_tools": len(tools),
+                "captured_at": captured,
+            }
+            pretty = json.dumps(
+                {
+                    "model": payload.get("model"),
+                    "max_tokens": payload.get("max_tokens"),
+                    "system": payload.get("system"),
+                    "tools": tools,
+                    "messages": messages,
+                },
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+        return _render_partial(
+            "partials/inspect_payload.html", payload=payload, meta=meta, pretty=pretty
+        )
 
     @app.post("/chats/bind", dependencies=[Depends(auth)])
     async def bind_chat(request: Request) -> HTMLResponse:
@@ -2892,7 +2943,7 @@ def create_admin_app(
         agent = agent_state.agent
         history = agent.history if agent else await _history_from_config(config_store)
         await history.bind_chat_persona(channel, user_id, chat_id, persona)
-        return await _chats_partial()
+        return await _inspect_partial()
 
     # ── Memory API ─────────────────────────────────────────────────────
 

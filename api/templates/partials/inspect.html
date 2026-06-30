@@ -1,23 +1,27 @@
-{# Chats tab partial — active contexts and the persona bound to each #}
+{# Inspect tab partial — every active context + the exact payload last sent to
+   the LLM for it (#99). Keeps the per-chat persona binding from the old Chats
+   tab; adds a developer payload inspector. #}
 <div x-data="{ filter: '' }">
   {# Intro #}
   <div class="card mb-4">
-    <h2 class="text-base mb-0.5">Chats</h2>
+    <h2 class="text-base mb-0.5">Inspect</h2>
     <p class="text-muted text-xs">
-      Every active conversation, by <code>channel · user · chat</code>. Bind a
-      persona to a single chat — it overrides the global active persona there.
-      Telegram topics show as <code>chat:topic</code> when topic mode is on.
+      Every active context, by <code>channel · user · chat</code>. For developers:
+      open <strong>Last-sent payload</strong> to see exactly what was assembled and
+      sent to the model — system prompt/identity, history window, and tool
+      definitions — the last time this context ran.
     </p>
     <p class="text-muted text-xs mt-2">
-      A change applies on the next turn; the open chat keeps its current identity
-      until then (its messages are preserved).
+      Bind a persona to a chat to override the global active persona there; the
+      change applies on the next turn. Payloads are captured in memory while the
+      agent runs, so a context shows nothing until it has had a turn since startup.
     </p>
   </div>
 
   {# Toolbar #}
   <div class="flex items-center gap-2 mb-4 flex-wrap">
     <input type="text" class="input-sm flex-1" style="max-width:280px"
-           placeholder="Filter chats..." x-model="filter">
+           placeholder="Filter contexts..." x-model="filter">
     <span class="text-muted text-xs">{{ chats|length }} total</span>
   </div>
 
@@ -37,7 +41,7 @@
         </div>
       </div>
 
-      <form class="flex items-center gap-1.5 mt-auto pt-1">
+      <form class="flex items-center gap-1.5">
         <input type="hidden" name="channel" value="{{ c.channel }}">
         <input type="hidden" name="user_id" value="{{ c.user_id }}">
         <input type="hidden" name="chat_id" value="{{ c.chat_id }}">
@@ -54,11 +58,21 @@
           {% endfor %}
         </select>
       </form>
+
+      {# Payload inspector — clicking (re)loads the latest captured request. #}
+      <div class="mt-auto pt-1">
+        <button type="button" class="btn-sm"
+                hx-get="/inspect/payload?channel={{ c.channel|urlencode }}&user_id={{ c.user_id|urlencode }}&chat_id={{ c.chat_id|urlencode }}"
+                hx-target="#payload-{{ loop.index0 }}" hx-swap="innerHTML">
+          Last-sent payload
+        </button>
+        <div id="payload-{{ loop.index0 }}" class="mt-2"></div>
+      </div>
     </div>
     {% endfor %}
     {% if not chats %}
     <div class="text-muted text-xs text-center py-6 col-span-full">
-      No chats yet. They appear here once a conversation has started.
+      No contexts yet. They appear here once a conversation has started.
     </div>
     {% endif %}
   </div>

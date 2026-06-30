@@ -24,7 +24,7 @@ reasoning_log.setLevel(logging.WARNING)
 # the agent sets the context for a turn, generate() records the payload, the
 # admin Inspect tab reads it back. ponytail: process-global dict, fine for one
 # agent process; move onto the agent instance if multi-tenant ever lands.
-_CtxKey = "tuple[str, str, str]"  # (channel, user_id, chat_id)
+# Context key = (channel, user_id, chat_id) — same triple as ConversationHistory.
 _capture_ctx: contextvars.ContextVar = contextvars.ContextVar("mpa_llm_capture_ctx", default=None)
 _LAST_SENT: OrderedDict[tuple[str, str, str], dict[str, Any]] = OrderedDict()
 _CAPTURE_CAP = 100  # ponytail: LRU cap; bump if you watch >100 live chats

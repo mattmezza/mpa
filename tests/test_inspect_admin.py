@@ -1,4 +1,5 @@
-"""Admin route tests for the Chats tab: list active contexts + per-chat bind."""
+"""Admin route tests for the Inspect tab: list active contexts, per-chat bind,
+and the last-sent LLM payload view (#99)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ from typing import cast
 from fastapi.testclient import TestClient
 
 from api.admin import AgentState, create_admin_app
+from core import llm
 from core.config_store import ConfigStore
 from core.history import ConversationHistory
 from core.personae import PersonaStore
@@ -69,14 +71,15 @@ def _binding(tmp_path) -> str | None:
     return asyncio.run(h.get_chat_persona("telegram", "u1", "c1"))
 
 
-def test_chats_partial_lists_active_contexts(tmp_path) -> None:
+def test_inspect_partial_lists_active_contexts(tmp_path) -> None:
     asyncio.run(_seed(tmp_path))
     client = _client(tmp_path)
-    r = client.get("/partials/chats", headers=AUTH)
+    r = client.get("/partials/inspect", headers=AUTH)
     assert r.status_code == 200
-    assert "Chats" in r.text
+    assert "Inspect" in r.text
     assert "c1" in r.text  # the active chat shows up
     assert "Fitness coach" in r.text  # persona option available
+    assert "Last-sent payload" in r.text  # payload inspector wired per context
 
 
 def test_bind_and_unbind_persona(tmp_path) -> None:
@@ -110,6 +113,76 @@ def test_bind_unknown_persona_404(tmp_path) -> None:
     )
     assert r.status_code == 404
     assert _binding(tmp_path) is None
+
+
+# ── Last-sent payload capture (#99) ─────────────────────────────────────────
+
+
+def test_capture_records_per_context_and_suppresses_when_unset() -> None:
+    llm.clear_captured()
+    ctx = ("telegram", "u1", "c1")
+    tok = llm.set_capture_context(ctx)
+    try:
+        llm.record_sent_payload(llm._capture_ctx.get(), {"model": "m", "messages": [], "tools": []})
+    finally:
+        llm.set_capture_context(None)  # mimic a subagent nulling the context
+        llm.record_sent_payload(llm._capture_ctx.get(), {"model": "child"})
+        llm.reset_capture_context(tok)
+    got = llm.get_sent_payload(ctx)
+    assert got is not None and got["model"] == "m"  # child write was a no-op
+    llm.clear_captured()
+
+
+def test_capture_lru_evicts_oldest() -> None:
+    llm.clear_captured()
+    cap = llm._CAPTURE_CAP
+    for i in range(cap + 5):
+        llm.record_sent_payload(("c", "u", str(i)), {"model": str(i)})
+    assert len(llm._LAST_SENT) == cap
+    assert llm.get_sent_payload(("c", "u", "0")) is None  # oldest evicted
+    assert llm.get_sent_payload(("c", "u", str(cap + 4))) is not None
+    llm.clear_captured()
+
+
+def test_inspect_payload_renders_captured_request(tmp_path) -> None:
+    asyncio.run(_seed(tmp_path))
+    client = _client(tmp_path)
+    llm.clear_captured()
+    llm.record_sent_payload(
+        ("telegram", "u1", "c1"),
+        {
+            "captured_at": 1_700_000_000.0,
+            "provider": "anthropic",
+            "model": "claude-test",
+            "max_tokens": 8192,
+            "system": "SYSTEM_PROMPT_MARKER",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"name": "send_message"}],
+        },
+    )
+    r = client.get(
+        "/inspect/payload",
+        params={"channel": "telegram", "user_id": "u1", "chat_id": "c1"},
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    assert "claude-test" in r.text
+    assert "SYSTEM_PROMPT_MARKER" in r.text  # the exact system prompt is shown
+    assert "send_message" in r.text  # tool defs included
+    llm.clear_captured()
+
+
+def test_inspect_payload_empty_for_uncaptured_context(tmp_path) -> None:
+    asyncio.run(_seed(tmp_path))
+    client = _client(tmp_path)
+    llm.clear_captured()
+    r = client.get(
+        "/inspect/payload",
+        params={"channel": "telegram", "user_id": "nobody", "chat_id": "none"},
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    assert "No payload captured yet" in r.text
 
 
 def _wizard(tmp_path, **preset) -> str:

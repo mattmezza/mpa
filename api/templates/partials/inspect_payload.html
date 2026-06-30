@@ -1,0 +1,22 @@
+{# Last-sent LLM payload for one context (#99). Loaded into the Inspect card on
+   demand. `pretty` is the serialized request; `meta` summarises it. #}
+{%- if not payload %}
+<div class="text-muted text-xs border border-border rounded-md p-2">
+  No payload captured yet for this context. Send it a message while the agent is
+  running, then reopen this.
+</div>
+{%- else %}
+<div class="text-xs text-muted mb-1 break-all">
+  <span class="badge-ok">{{ meta.provider }}</span>
+  <code>{{ meta.model }}</code> ·
+  max_tokens {{ meta.max_tokens }} ·
+  {{ meta.n_messages }} message{{ '' if meta.n_messages == 1 else 's' }} ·
+  {{ meta.n_tools }} tool{{ '' if meta.n_tools == 1 else 's' }}
+  {%- if meta.captured_at %} · captured {{ meta.captured_at }}{% endif %}
+</div>
+<div class="text-muted mb-1" style="font-size:0.65rem">
+  Shown verbatim (admin-only). The assembled prompt references secrets by name,
+  not value.
+</div>
+<pre class="log-viewer">{{ pretty }}</pre>
+{%- endif %}
