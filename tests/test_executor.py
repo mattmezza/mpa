@@ -38,18 +38,23 @@ async def test_persona_override_strips_leaked_managed_env(monkeypatch) -> None:
     # A GH_TOKEN present in the process env (e.g. loaded from .env) must NOT leak
     # to a persona-scoped run whose override doesn't set it — otherwise a persona
     # that switched gh off could still act as the owner (#93 security boundary).
+    # GITHUB_TOKEN is gh's fallback var — it must be stripped too, not just GH_TOKEN.
     monkeypatch.setenv("GH_TOKEN", "owner-leaked")
+    monkeypatch.setenv("GITHUB_TOKEN", "owner-leaked-2")
     executor = ToolExecutor(tool_env={"GH_TOKEN": "owner-leaked"})
-    cmd = "python3 -c \"import os,sys; sys.stdout.write(os.environ.get('GH_TOKEN','NONE'))\""
+    cmd = (
+        'python3 -c "import os,sys; '
+        "sys.stdout.write(os.environ.get('GH_TOKEN','NONE')+'|'+os.environ.get('GITHUB_TOKEN','NONE'))\""
+    )
     resolved = executor._resolve_command(cmd)
 
-    # persona-scoped override with no GH_TOKEN → stripped from the subprocess env.
+    # persona-scoped override with no token → both gh vars stripped from the env.
     res = await executor._exec(resolved, 30, tool_env={})
-    assert res["stdout"].strip() == "NONE", res
+    assert res["stdout"].strip() == "NONE|NONE", res
 
     # default path (no override) still sees the configured token.
     res2 = await executor._exec(resolved, 30)
-    assert res2["stdout"].strip() == "owner-leaked", res2
+    assert res2["stdout"].strip().startswith("owner-leaked|"), res2
 
 
 def test_parse_json_output_handles_invalid_json() -> None:

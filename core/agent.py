@@ -2895,6 +2895,11 @@ class AgentCore:
             skills=narrow_scope(p_skills, requested.skills),
             tools=narrow_scope(p_tools, requested.tools),
             secrets=narrow_scope(p_secrets, requested.secrets),
+            # Tool identity travels verbatim with the persona (#93) — it is who the
+            # child IS (its own gh token / browser profile), not a caller-subset
+            # scope. Dropping it would silently fall back to the owner's token and
+            # re-open the very identity bleed this feature prevents.
+            tool_config=requested.tool_config,
         )
 
     async def _run_subagent_loop(

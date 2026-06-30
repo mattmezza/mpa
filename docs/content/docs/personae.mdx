@@ -157,8 +157,9 @@ card lists every system-enabled external tool with three states:
 - **Inherit** — use the system-wide config (shared with the owner). This is the default and
   matches pre-existing behaviour, so nothing changes until you opt a persona in.
 - **Enabled** — use *this persona's* own credentials/profile (configured below the toggle).
-- **Disabled** — this tool is off for this persona; its credential is stripped from the
-  command environment, so the persona can never fall back to the owner's.
+- **Disabled** — the tool is hidden from this persona's prompt and its credentials are
+  stripped from the command environment (every `GH_TOKEN`/`GITHUB_TOKEN` variant), so the
+  persona can never fall back to the owner's.
 
 Supported tools:
 
@@ -181,6 +182,10 @@ per-persona token requires a master key (configure one in the **Secrets** tab fi
 > as the system `GH_TOKEN` (a machine key on the data volume), not the password-gated persona
 > vault. That is a deliberate trade-off so the tokens are available headlessly; treat the
 > data volume accordingly.
+>
+> Per-persona `gh` isolation assumes **token-based** auth. A shared `gh auth login` writes
+> credentials to `~/.config/gh` (a shared HOME), which token env vars can't override — so
+> authenticate `gh` via per-persona tokens here, not an interactive login.
 
 ## Bot-per-persona
 

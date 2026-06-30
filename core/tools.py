@@ -154,9 +154,20 @@ _REGISTRY: tuple[ToolSpec, ...] = (
 # Env vars the tool registry manages. When a per-persona env override is applied
 # (#93), any managed key absent from the override is stripped from the inherited
 # process environment too — so a persona that switched `gh` off can never inherit
-# a GH_TOKEN that leaked in via `.env`/Docker ENV and act as the owner.
+# a token that leaked in via `.env`/Docker ENV and act as the owner. `gh` reads
+# GH_TOKEN, then GITHUB_TOKEN, then the enterprise variants (in that precedence),
+# so ALL of them must be stripped, not just GH_TOKEN.
 MANAGED_TOOL_ENV_KEYS: frozenset[str] = frozenset(
-    {"GH_TOKEN", "BROWSER_HEADLESS", "BROWSER_CDP_URL", "BROWSER_USER_AGENT", "BROWSER_PROFILE"}
+    {
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "BROWSER_HEADLESS",
+        "BROWSER_CDP_URL",
+        "BROWSER_USER_AGENT",
+        "BROWSER_PROFILE",
+    }
 )
 
 
@@ -212,8 +223,11 @@ def gh_token_secret_name(persona_name: str) -> str:
     Namespaced per persona so each agent authenticates as a distinct GitHub user.
     Stored in the *infra* vault (machine-key, boot-unsealed) so it works headless
     and in scheduled jobs — same on-disk posture as the system-wide ``GH_TOKEN``.
+
+    The slug is kept verbatim (case preserved; infra names are case-sensitive) so
+    two personae whose slugs differ only by case don't collide on one token.
     """
-    slug = re.sub(r"[^A-Za-z0-9_-]+", "_", (persona_name or "").strip()).upper()
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "_", (persona_name or "").strip())
     return f"GH_TOKEN_{slug}"
 
 
@@ -289,9 +303,10 @@ if __name__ == "__main__":
     cfg.tools.gh.token = "owner-token"
     cfg.tools.browser.enabled = True
 
-    assert gh_token_secret_name("coding-helper") == "GH_TOKEN_CODING-HELPER"
+    assert gh_token_secret_name("coding-helper") == "GH_TOKEN_coding-helper"
+    assert gh_token_secret_name("Hopper") != gh_token_secret_name("hopper")  # case-distinct
 
-    vault = {"GH_TOKEN_HOPPER": "hopper-token"}
+    vault = {"GH_TOKEN_hopper": "hopper-token"}
     resolve = vault.get  # Callable[[str], str | None]
 
     # No persona → system token, no profile.

@@ -94,3 +94,15 @@ async def test_persona_without_tool_config_inherits(agent: AgentCore, monkeypatc
     plain = Persona(name="plain")
     cap = await _run(agent, plain, monkeypatch)
     assert cap["tool_env"]["GH_TOKEN"] == "owner-token"
+
+
+async def test_subagent_keeps_persona_tool_identity(agent: AgentCore) -> None:
+    # A subagent spawned AS a persona must keep that persona's tool identity — else
+    # it falls back to the owner's token (the bleed #93 prevents). _narrow_persona
+    # narrows skills/tools/secrets but tool_config is identity, copied verbatim.
+    parent_state = agent._new_request_state(None)
+    enabled = Persona(name="hopper", tool_config={"gh": {"enabled": True}})
+    assert agent._narrow_persona(enabled, parent_state).tool_setting("gh") == {"enabled": True}
+    # A persona explicitly DENIED gh stays denied as a subagent.
+    denied = Persona(name="lingua", tool_config={"gh": {"enabled": False}})
+    assert agent._narrow_persona(denied, parent_state).tool_setting("gh") == {"enabled": False}
