@@ -213,6 +213,14 @@ class TestPartialRoutes:
         assert "text/html" in resp.headers["content-type"]
         assert "run_command" in resp.text
 
+    def test_workspace_partial(self):
+        client = _client(setup_complete=True)
+        resp = client.get("/partials/workspace", headers=AUTH)
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Coding harness" in resp.text
+        assert "workspace.directory" in resp.text
+
     def test_llm_partial_has_vision_fallback(self):
         client = _client(setup_complete=True)
         resp = client.get("/partials/llm", headers=AUTH)

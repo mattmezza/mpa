@@ -45,8 +45,9 @@ async def test_himalaya_command_sets_env(monkeypatch) -> None:
     executor = ToolExecutor()
     created = {}
 
-    async def _fake_subprocess_shell(command, stdout, stderr, env):
+    async def _fake_subprocess_shell(command, stdout, stderr, env, cwd=None):
         created["env"] = env
+        created["cwd"] = cwd
 
         class _Proc:
             returncode = 0

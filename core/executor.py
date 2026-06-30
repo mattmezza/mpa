@@ -98,7 +98,15 @@ class ToolExecutor:
         """
         return await self._exec(self._resolve_command(command), timeout)
 
-    async def _exec(self, command: str, timeout: int) -> dict:
+    async def run_in_dir(self, command: str, cwd: str, timeout: int = 120) -> dict:
+        """Run a shell command in ``cwd`` (no prefix whitelist) for the coding
+        harness (#76). Confinement of ``cwd`` to the workspace and per-call ASK
+        approval are enforced by the caller (core/coding.py + the agent); this
+        only adds the working directory. Builds/tests get a longer default
+        timeout than the 30s interactive default."""
+        return await self._exec(command, timeout, cwd=cwd)
+
+    async def _exec(self, command: str, timeout: int, cwd: str | None = None) -> dict:
         """Run a shell command and capture output."""
         env = None
         wants_wacli_label = "wacli" in command and "WACLI_DEVICE_LABEL" not in os.environ
@@ -116,6 +124,7 @@ class ToolExecutor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            cwd=cwd,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)

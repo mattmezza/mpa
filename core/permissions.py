@@ -186,6 +186,19 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:git*commit*": "ASK",
     "web_search": "ALWAYS",
     "recall_memory": "ALWAYS",
+    # Coding harness (#76) — reads pre-approved, writes/exec ask (confined to the
+    # configured workspace root regardless; see core/coding.py).
+    "read_file": "ALWAYS",
+    "list_dir": "ALWAYS",
+    "grep": "ALWAYS",
+    "write_file": "ASK",
+    "edit_file": "ASK",
+    # run_command_in_dir has NO bare-name rule on purpose: it is keyed as
+    # "run_command:<command>" (see _build_match_key), so it inherits every
+    # run_command rule — the hard NEVER rails block it, an owner's ALWAYS rule for
+    # a safe read command (git log, rg, …) runs it without a prompt, and anything
+    # else falls through to the default ASK. It is also a write action, so a run
+    # is never deduped/cached: repeat builds/tests re-ask each time.
     # Write operations — ask first
     "send_email": "ASK",
     "reply_email": "ASK",
@@ -287,7 +300,12 @@ class PermissionEngine:
         return scope in self._yolo
 
     def _build_match_key(self, tool_name: str, params: dict | None = None) -> str:
-        if tool_name == "run_command" and params and "command" in params:
+        # ``run_command_in_dir`` (#76) shares ``run_command``'s rule namespace: the
+        # same shell command must hit the same ALWAYS/ASK/NEVER rails — including
+        # the hard NEVER ones (sqlite DROP/ALTER, wacli dbs, operator path bans) and
+        # the shell-control guard in check() — whether it runs in a workspace dir or
+        # not. cwd-confinement only bounds the working directory, not the command.
+        if tool_name in ("run_command", "run_command_in_dir") and params and "command" in params:
             return f"run_command:{params['command']}"
         # Publishing an on-disk file is gated separately from inline writes.
         if tool_name == "write_artifact" and params and params.get("source_path"):
@@ -366,6 +384,9 @@ class PermissionEngine:
             "schedule_task",
             "manage_jobs",
             "spawn_subagent",
+            "write_file",
+            "edit_file",
+            "run_command_in_dir",
         }:
             return True
 
@@ -549,6 +570,14 @@ def format_approval_message(tool_name: str, params: dict) -> str:
         cmd = params.get("command", "?")
         purpose = params.get("purpose", "")
         return f"Run command: {cmd}" + (f"\n({purpose})" if purpose else "")
+    if tool_name == "write_file":
+        return f"Write file: {params.get('path', '?')}"
+    if tool_name == "edit_file":
+        return f"Edit file: {params.get('path', '?')}"
+    if tool_name == "run_command_in_dir":
+        cmd = params.get("command", "?")
+        workdir = params.get("workdir", "?")
+        return f"Run in {workdir}: {cmd}"
     if tool_name == "write_artifact":
         return f"Publish a file as a public web artifact:\n{params.get('source_path', '?')}"
     return f"{tool_name}: {params}"

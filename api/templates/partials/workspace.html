@@ -1,0 +1,71 @@
+{# Workspace tab partial — coding harness file tools (issue #76) #}
+<div class="space-y-6">
+  <div class="card">
+    <h2 class="text-base mb-1">Workspace</h2>
+    <p class="text-muted text-xs mb-4">
+      A coding harness that lets the assistant read, write, edit, search, and run
+      commands on a real codebase directly — instead of dictating every change in
+      chat for you to apply by hand.
+    </p>
+  </div>
+
+  <div class="card" x-data="{
+    enabled: {{ workspace_enabled|default('false', true)|tojson|forceescape }},
+    directory: {{ workspace_directory|default('', true)|tojson|forceescape }},
+    result: '', resultOk: false,
+    save() {
+      const vals = {
+        'workspace.enabled': String(this.enabled === true || this.enabled === 'true'),
+        'workspace.directory': this.directory.trim()
+      };
+      fetch('/config', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')},
+        body: JSON.stringify({values: vals})
+      })
+      .then(r => { this.resultOk = r.ok; return r.json(); })
+      .then(d => {
+        this.result = this.resultOk ? 'Workspace settings saved' : (d.detail || 'Error');
+        if (this.resultOk && window.showToast) { window.showToast('Workspace settings saved'); }
+      })
+      .catch(e => { this.resultOk = false; this.result = e.message; });
+    }
+  }">
+    <div class="flex items-center justify-between gap-3 mb-1">
+      <h3 class="text-sm text-accent">Coding harness</h3>
+      <div class="flex items-center gap-2">
+        <label class="label mb-0">Enabled</label>
+        <input type="checkbox" x-model="enabled" :checked="enabled === 'true' || enabled === true">
+      </div>
+    </div>
+    <p class="text-muted text-xs mb-4">
+      File tools (<code>read_file</code>, <code>write_file</code>, <code>edit_file</code>,
+      <code>list_dir</code>, <code>grep</code>) confined to the directory below — paths
+      escaping it (via <code>..</code> or a symlink) are blocked. Reads run without asking;
+      writes ask for your approval. <code>run_command_in_dir</code> runs a shell command in
+      a directory below (linters, tests, builds): only its working directory is confined —
+      the command itself runs with full process privileges, gated by approval (it shares
+      the <strong>Permissions</strong> rules for <code>run_command</code>). Disabled, or with
+      a blank directory, the tools are hidden from the assistant entirely. Changes take
+      effect on the assistant's next turn — no restart or <code>/new</code> needed.
+    </p>
+    <div class="space-y-3" x-show="enabled === 'true' || enabled === true">
+      <div>
+        <label class="label">Allowed workspace directory</label>
+        <input type="text" class="input-sm" style="max-width:500px" x-model="directory"
+               placeholder="~/projects/my-repo">
+        <p class="text-muted text-xs mt-1">
+          Absolute path (or <code>~</code>) to the only directory the assistant may
+          touch. Leave blank to keep the harness inert. There is no default — the
+          assistant cannot reach the filesystem until you point it at one.
+        </p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 mt-4">
+      <button class="btn-primary btn-sm" @click="save()">Save</button>
+    </div>
+    <template x-if="result">
+      <div :class="resultOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
+    </template>
+  </div>
+</div>

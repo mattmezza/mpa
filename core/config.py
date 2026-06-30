@@ -378,6 +378,21 @@ class ToolsConfig(BaseModel):
     imagegen: ImageGenToolConfig = ImageGenToolConfig()
 
 
+class WorkspaceConfig(BaseModel):
+    """Coding harness — confined file read/write/edit/list/grep tools (issue #76).
+
+    Off by default. When enabled, the agent gets ``read_file``/``write_file``/
+    ``edit_file``/``list_dir``/``grep``/``run_command_in_dir`` tools, all confined
+    to ``directory``. Reads are pre-approved; writes ask first. An empty/blank
+    ``directory`` keeps the tools inert even if ``enabled`` is true — there is no
+    default root, so the agent can never touch the filesystem until the owner
+    points it at one (e.g. ``~/projects``). See core/coding.py.
+    """
+
+    enabled: bool = False
+    directory: str = ""  # allowed workspace root; blank = no access
+
+
 class ArtifactsConfig(BaseModel):
     """Agent-crafted web artifacts served at /artifacts/<id> (see core/artifacts.py)."""
 
@@ -434,6 +449,7 @@ class Config(BaseModel):
     you: YouConfig = YouConfig()
     prompt: PromptConfig = PromptConfig()
     tools: ToolsConfig = ToolsConfig()
+    workspace: WorkspaceConfig = WorkspaceConfig()
     artifacts: ArtifactsConfig = ArtifactsConfig()
     subagents: SubagentsConfig = SubagentsConfig()
     subagent_summary: SubagentSummaryConfig = SubagentSummaryConfig()

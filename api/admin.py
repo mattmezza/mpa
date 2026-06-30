@@ -833,6 +833,7 @@ def create_admin_app(
     _EMAIL_PREFIX = "email."
     _PROMPT_PREFIX = "prompt."
     _TOOLS_PREFIX = "tools."
+    _WORKSPACE_PREFIX = "workspace."
     _COMPACTION_PREFIX = "compaction."
 
     def _is_managed_key(key: str) -> bool:
@@ -852,6 +853,7 @@ def create_admin_app(
             _EMAIL_PREFIX,
             _PROMPT_PREFIX,
             _TOOLS_PREFIX,
+            _WORKSPACE_PREFIX,
             _COMPACTION_PREFIX,
         ):
             if key.startswith(prefix):
@@ -946,10 +948,16 @@ def create_admin_app(
         sub_enabled = await config_store.get("subagents.enabled")
         sub_on = sub_enabled is None or sub_enabled == "true"
         ig_on = (await config_store.get("tools.imagegen.enabled")) == "true"
+        ws_on = (await config_store.get("workspace.enabled")) == "true" and bool(
+            (await config_store.get("workspace.directory") or "").strip()
+        )
         return {
             "all_skills": all_skills,
             "all_tools": gateable_tools_for(
-                artifacts.enabled, subagents_enabled=sub_on, imagegen_enabled=ig_on
+                artifacts.enabled,
+                subagents_enabled=sub_on,
+                imagegen_enabled=ig_on,
+                workspace_enabled=ws_on,
             ),
         }
 
@@ -1342,6 +1350,18 @@ def create_admin_app(
             imagegen_key_vaulted=ig_key_vaulted,
             imagegen_daily_budget=ig_daily,
             imagegen_monthly_budget=ig_monthly,
+        )
+
+    @app.get("/partials/workspace", dependencies=[Depends(auth)])
+    async def partial_workspace() -> HTMLResponse:
+        """Workspace tab partial — coding harness file tools (issue #76)."""
+        ws_enabled = await config_store.get("workspace.enabled")
+        ws_enabled = ws_enabled if ws_enabled is not None else "false"
+        ws_directory = await config_store.get("workspace.directory") or ""
+        return _render_partial(
+            "partials/workspace.html",
+            workspace_enabled=ws_enabled,
+            workspace_directory=ws_directory,
         )
 
     @app.post("/tools/gh/test", dependencies=[Depends(auth)])
@@ -3729,11 +3749,29 @@ GATEABLE_TOOLS = [
     "write_artifact",
     "spawn_subagent",
     "generate_image",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "list_dir",
+    "grep",
+    "run_command_in_dir",
 ]
+
+_WORKSPACE_TOOLS = (
+    "read_file",
+    "write_file",
+    "edit_file",
+    "list_dir",
+    "grep",
+    "run_command_in_dir",
+)
 
 
 def gateable_tools_for(
-    artifacts_enabled: bool, subagents_enabled: bool = True, imagegen_enabled: bool = True
+    artifacts_enabled: bool,
+    subagents_enabled: bool = True,
+    imagegen_enabled: bool = True,
+    workspace_enabled: bool = True,
 ) -> list[str]:
     """GATEABLE_TOOLS minus tools whose feature is globally disabled."""
     out = list(GATEABLE_TOOLS)
@@ -3743,6 +3781,8 @@ def gateable_tools_for(
         out = [t for t in out if t != "spawn_subagent"]
     if not imagegen_enabled:
         out = [t for t in out if t != "generate_image"]
+    if not workspace_enabled:
+        out = [t for t in out if t not in _WORKSPACE_TOOLS]
     return out
 
 
