@@ -26,16 +26,25 @@ All paths are relative to the configured workspace root (or absolute *inside* it
 | `edit_file(path, old_string, new_string, multiple=false)` | **asks first** | Find-and-replace. `old_string` must match exactly and, unless `multiple` is true, be unique. |
 | `run_command_in_dir(command, workdir=".")` | **asks first** | Run a shell command (linter, tests, build) in a workspace directory. Returns `stdout`, `stderr`, `exit_code`. |
 
-Reads are pre-approved (`ALWAYS`); writes and commands are write-actions that ask for
-your approval on every call, surfaced through the same [permission](/docs/permissions)
-flow as email/calendar/message sends.
+Reads are pre-approved (`ALWAYS`); `write_file`/`edit_file` are write-actions that ask
+for your approval on every call, surfaced through the same [permission](/docs/permissions)
+flow as email/calendar/message sends. `run_command_in_dir` shares the `run_command`
+permission rules: the hard `NEVER` rails always apply, a command you've globally marked
+`ALWAYS` (e.g. `git log`) runs without a prompt, and anything else asks.
 
 ## Confinement
 
-Everything is confined to the single **workspace directory** you configure. The check
-is `realpath`-based: a path is resolved (following symlinks and collapsing `..`) and
-must land on the workspace root or a descendant of it. So neither `../../etc/passwd`
-nor a symlink pointing outside the workspace can escape — both are blocked (`NEVER`).
+The **file** tools (`read_file`/`write_file`/`edit_file`/`list_dir`/`grep`) are confined
+to the single **workspace directory** you configure. The check is `realpath`-based: a
+path is resolved (following symlinks and collapsing `..`) and must land on the workspace
+root or a descendant of it. So neither `../../etc/passwd` nor a symlink pointing outside
+the workspace can escape — both are blocked (`NEVER`).
+
+`run_command_in_dir` confines only the **working directory** it runs in — *not* the
+command itself. The command runs through the shell with the full privileges of the MPA
+process, so it can still read paths outside the workspace (e.g. `cat /etc/passwd`). Its
+real boundary is the permission gate (the `run_command` rules above), not the workspace.
+Enable it only if you're comfortable with that.
 
 There is **no default workspace**. With the harness disabled, or with a blank
 directory, the tools are hidden from the agent entirely and the handlers refuse — the
@@ -51,9 +60,9 @@ workspace:
   directory: "~/projects/my-repo"   # the only directory the agent may touch
 ```
 
-When enabled, the file tools appear in the agent's tool set from the next `/new`
-conversation (in session history mode). Each call is written to the agent tool log on
-the **Logs** tab.
+Config is applied live — the tool set is recomputed each turn, so a change takes effect
+on the agent's next turn (no restart or `/new` needed). Each call is written to the agent
+tool log on the **Logs** tab.
 
 Like every tool, the harness can be scoped per [persona](/docs/personae) — grant it to
 a "developer" persona and leave it off everywhere else.

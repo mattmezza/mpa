@@ -27,7 +27,6 @@
       .then(d => {
         this.result = this.resultOk ? 'Workspace settings saved' : (d.detail || 'Error');
         if (this.resultOk && window.showToast) { window.showToast('Workspace settings saved'); }
-        if (this.resultOk && window.notifyRestartRequired) { window.notifyRestartRequired(); }
       })
       .catch(e => { this.resultOk = false; this.result = e.message; });
     }
@@ -41,12 +40,14 @@
     </div>
     <p class="text-muted text-xs mb-4">
       File tools (<code>read_file</code>, <code>write_file</code>, <code>edit_file</code>,
-      <code>list_dir</code>, <code>grep</code>, <code>run_command_in_dir</code>) confined
-      to the directory below. Reads run without asking; writes and commands ask for
-      your approval each time. Paths that escape the directory (via <code>..</code> or a
-      symlink) are blocked. Disabled, or with a blank directory, the tools are hidden
-      from the assistant entirely. Newly enabled, they appear from the next
-      <code>/new</code> conversation in session history mode.
+      <code>list_dir</code>, <code>grep</code>) confined to the directory below — paths
+      escaping it (via <code>..</code> or a symlink) are blocked. Reads run without asking;
+      writes ask for your approval. <code>run_command_in_dir</code> runs a shell command in
+      a directory below (linters, tests, builds): only its working directory is confined —
+      the command itself runs with full process privileges, gated by approval (it shares
+      the <strong>Permissions</strong> rules for <code>run_command</code>). Disabled, or with
+      a blank directory, the tools are hidden from the assistant entirely. Changes take
+      effect on the assistant's next turn — no restart or <code>/new</code> needed.
     </p>
     <div class="space-y-3" x-show="enabled === 'true' || enabled === true">
       <div>

@@ -16,7 +16,18 @@ from core.permissions import PermissionEngine, PermissionLevel
 
 def test_resolve_relative_stays_in_workspace(tmp_path):
     target = coding.resolve_in_workspace(str(tmp_path), "sub/file.txt")
-    assert str(target).startswith(str(tmp_path.resolve()))
+    assert target == tmp_path.resolve() / "sub" / "file.txt"
+
+
+def test_resolve_rejects_symlinked_dir_traversal(tmp_path):
+    outside = tmp_path.parent / "outside_dir"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "d").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(coding.WorkspaceError):
+        coding.resolve_in_workspace(str(ws), "d/secret.txt")
 
 
 def test_resolve_rejects_parent_escape(tmp_path):
@@ -63,6 +74,13 @@ def test_read_file_paginates_with_line_numbers(tmp_path):
 
 def test_read_file_missing(tmp_path):
     assert "error" in coding.read_file(str(tmp_path), "nope.txt")
+
+
+def test_read_file_rejects_oversize(tmp_path, monkeypatch):
+    monkeypatch.setattr(coding, "MAX_READ_BYTES", 10)
+    (tmp_path / "big.txt").write_text("x" * 50)
+    out = coding.read_file(str(tmp_path), "big.txt")
+    assert "error" in out and "too large" in out["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +171,35 @@ def test_grep_skips_binary(tmp_path):
     assert out["count"] == 0
 
 
+def test_grep_does_not_follow_symlink_escaping_workspace(tmp_path):
+    outside = tmp_path.parent / "outside_grep_secret.txt"
+    outside.write_text("TOPSECRET token")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "leak.txt").symlink_to(outside)
+    (ws / "real.txt").write_text("nothing here")
+    out = coding.grep(str(ws), "TOPSECRET", ".")
+    assert out["count"] == 0  # the escaping symlink is not read
+
+
+def test_grep_skips_oversize(tmp_path, monkeypatch):
+    monkeypatch.setattr(coding, "MAX_READ_BYTES", 10)
+    (tmp_path / "big.txt").write_text("needle\n" * 5)
+    assert coding.grep(str(tmp_path), "needle", ".")["count"] == 0
+
+
+def test_list_dir_skips_escaping_symlink(tmp_path):
+    outside = tmp_path.parent / "outside_listed.txt"
+    outside.write_text("data")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "leak").symlink_to(outside)
+    (ws / "ok.txt").write_text("x")
+    names = {e["name"] for e in coding.list_dir(str(ws), ".")["entries"]}
+    assert "ok.txt" in names
+    assert "leak" not in names
+
+
 def test_grep_caps_results(tmp_path, monkeypatch):
     monkeypatch.setattr(coding, "GREP_MAX_MATCHES", 5)
     (tmp_path / "f.txt").write_text("\n".join("hit" for _ in range(20)))
@@ -182,6 +229,17 @@ def test_write_tools_are_write_actions(tmp_path):
     assert p.is_write_action("edit_file", {"path": "x"})
     assert p.is_write_action("run_command_in_dir", {"command": "ls"})
     assert not p.is_write_action("read_file", {"path": "x"})
+
+
+def test_run_command_in_dir_inherits_run_command_never_rails(tmp_path):
+    # The hard NEVER rails defined for run_command must also block run_command_in_dir,
+    # not be silently downgraded to ASK (the security regression caught in review).
+    p = PermissionEngine(db_path=str(tmp_path / "config.db"))
+    drop = {"command": 'sqlite3 /app/data/x.db "DROP TABLE t"'}
+    assert p.check("run_command", drop) == PermissionLevel.NEVER
+    assert p.check("run_command_in_dir", drop) == PermissionLevel.NEVER
+    # An unknown command still defaults to ASK.
+    assert p.check("run_command_in_dir", {"command": "make test"}) == PermissionLevel.ASK
 
 
 _FILE_TOOLS = {"read_file", "write_file", "edit_file", "list_dir", "grep", "run_command_in_dir"}

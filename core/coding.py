@@ -26,10 +26,20 @@ from pathlib import Path
 # narrow the pattern or path to see more. Bump if it bites in practice.
 GREP_MAX_MATCHES = 200
 _LINE_CLIP = 400  # max chars per returned grep/line snippet
+# read_file/grep read whole files into memory and are pre-approved (no prompt), so
+# cap file size to avoid an accidental multi-GB OOM. Source files are far smaller;
+# bigger blobs should be inspected with run_command_in_dir. ponytail: flat cap,
+# stream line-by-line only if huge code files ever become a real need.
+MAX_READ_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 
 class WorkspaceError(Exception):
     """A path escaped the workspace, or no workspace is configured."""
+
+
+def _contained(root: Path, target: Path) -> bool:
+    """True if ``target`` is the workspace root or a descendant of it."""
+    return target == root or root in target.parents
 
 
 def resolve_in_workspace(workspace: str, path: str) -> Path:
@@ -46,7 +56,7 @@ def resolve_in_workspace(workspace: str, path: str) -> Path:
     root = Path(workspace).expanduser().resolve()
     raw = Path(path).expanduser()
     target = (raw if raw.is_absolute() else root / raw).resolve()
-    if target != root and root not in target.parents:
+    if not _contained(root, target):
         raise WorkspaceError(f"Path is outside the allowed workspace: {path}")
     return target
 
@@ -56,6 +66,14 @@ def read_file(workspace: str, path: str, offset: int = 0, limit: int = 100) -> d
     target = resolve_in_workspace(workspace, path)
     if not target.is_file():
         return {"error": f"Not a file: {path}"}
+    size = target.stat().st_size
+    if size > MAX_READ_BYTES:
+        return {
+            "error": (
+                f"File too large to read ({size} bytes > {MAX_READ_BYTES}); "
+                "search it with grep or inspect it via run_command_in_dir."
+            )
+        }
     offset = max(0, int(offset))
     limit = max(1, int(limit))
     lines = target.read_text(errors="replace").splitlines()
@@ -123,6 +141,10 @@ def list_dir(workspace: str, path: str = ".") -> dict:
     entries: list[dict] = []
     for child in sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name)):
         try:
+            # A symlink pointing outside the workspace must not leak its target's
+            # type/size — confine to the workspace, same boundary as every read.
+            if child.is_symlink() and not _contained(target, child.resolve()):
+                continue
             is_dir = child.is_dir()
             entries.append(
                 {
@@ -140,7 +162,9 @@ def grep(workspace: str, pattern: str, path: str = ".", include: str = "") -> di
     """Regex-search files under ``path`` (recursive), optionally filtered by glob.
 
     Returns ``[{file, line, content}]``, capped at :data:`GREP_MAX_MATCHES`.
-    Binary files (those with a NUL byte) are skipped.
+    Binary files (those with a NUL byte) and files above :data:`MAX_READ_BYTES`
+    are skipped. Symlinks resolving outside the workspace are skipped — `rglob`
+    can surface them (or descend a symlinked dir), so each file is re-confined.
     """
     root = resolve_in_workspace(workspace, path)
     try:
@@ -153,6 +177,10 @@ def grep(workspace: str, pattern: str, path: str = ".", include: str = "") -> di
         if include and not fnmatch.fnmatch(f.name, include):
             continue
         try:
+            if not _contained(root, f.resolve()):
+                continue  # symlink escaping the workspace
+            if f.stat().st_size > MAX_READ_BYTES:
+                continue  # too large; don't materialize it
             text = f.read_text(errors="replace")
         except OSError:
             continue
