@@ -212,12 +212,8 @@ DEFAULT_RULES: dict[str, str] = {
     # Delegating to a subagent is approved once per spawn; the subagent then runs
     # autonomously within its narrowed scope (system semantics), like a job.
     "spawn_subagent": "ASK",
-    # Publishing inline content the agent authored is low-risk and reversible
-    # (TTL cleanup) — no prompt, like web_search / load_skill. But copying an
-    # on-disk file to a public URL can expose data the agent didn't author, so
-    # that variant (source_path) asks first.
-    "write_artifact": "ALWAYS",
-    "write_artifact:publish_file": "ASK",
+    # Publishing a web artifact is now just a write_file under {workspace}/artifacts/
+    # (issue #82) — it inherits the write_file ASK rule, no separate entry.
     # Dangerous — never allow
     "run_command:sqlite3*DROP*": "NEVER",
     "run_command:sqlite3*ALTER*": "NEVER",
@@ -313,9 +309,6 @@ class PermissionEngine:
         # not. cwd-confinement only bounds the working directory, not the command.
         if tool_name in ("run_command", "run_command_in_dir") and params and "command" in params:
             return f"run_command:{params['command']}"
-        # Publishing an on-disk file is gated separately from inline writes.
-        if tool_name == "write_artifact" and params and params.get("source_path"):
-            return "write_artifact:publish_file"
         return tool_name
 
     @staticmethod
@@ -411,11 +404,6 @@ class PermissionEngine:
             "run_command_in_dir",
         }:
             return True
-
-        # Inline artifact writes are not write-actions (frictionless); publishing
-        # an on-disk file is (it exposes a file and needs per-call approval).
-        if tool_name == "write_artifact":
-            return bool(params and params.get("source_path"))
 
         match_key = self._build_match_key(tool_name, params)
         if match_key.startswith("run_command:"):
@@ -625,6 +613,4 @@ def format_approval_message(tool_name: str, params: dict) -> str:
         cmd = _preview(params.get("command", "?"))
         workdir = params.get("workdir", "?")
         return f"Run in {workdir}: {cmd}"
-    if tool_name == "write_artifact":
-        return f"Publish a file as a public web artifact:\n{params.get('source_path', '?')}"
     return f"{tool_name}: {params}"

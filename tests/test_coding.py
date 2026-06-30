@@ -248,18 +248,14 @@ _FILE_TOOLS = {"read_file", "write_file", "edit_file", "list_dir", "grep", "run_
 def test_feature_gate_hides_file_tools_when_off():
     from core.agent import TOOLS
 
-    gated = apply_feature_gates(
-        TOOLS, secrets_available=False, artifacts_enabled=True, workspace_enabled=False
-    )
+    gated = apply_feature_gates(TOOLS, secrets_available=False, workspace_enabled=False)
     assert not (_FILE_TOOLS & {t["name"] for t in gated})
 
 
 def test_feature_gate_shows_file_tools_when_on():
     from core.agent import TOOLS
 
-    gated = apply_feature_gates(
-        TOOLS, secrets_available=False, artifacts_enabled=True, workspace_enabled=True
-    )
+    gated = apply_feature_gates(TOOLS, secrets_available=False, workspace_enabled=True)
     assert _FILE_TOOLS <= {t["name"] for t in gated}
 
 
