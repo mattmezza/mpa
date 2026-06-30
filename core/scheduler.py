@@ -259,7 +259,8 @@ class AgentScheduler:
         """Parse a one-shot job's ``run_at`` into a tz-aware datetime.
 
         Returns ``None`` when absent or unparseable. Naive datetimes are
-        assumed to be in the configured timezone.
+        assumed to be in the configured timezone (e.g. a naive
+        ``2026-02-20T18:00:00`` is read in the agent's timezone, not UTC).
         """
         run_at_str = job.get("run_at")
         if not run_at_str:

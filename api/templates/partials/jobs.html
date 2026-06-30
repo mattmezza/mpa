@@ -80,6 +80,7 @@
             </button>
             <button class="btn-danger btn-sm ml-0.5"
                     hx-post="/jobs/delete" hx-target="#tab-content" hx-swap="innerHTML"
+                    hx-include="#jobs-show-completed"
                     hx-vals='{"job_id": {{ job.id|tojson }} }'
                     hx-confirm="Delete job &quot;{{ job.id }}&quot;?">
               x
@@ -99,7 +100,8 @@
 
   {# Add / edit job form #}
   <h3 class="text-xs text-muted uppercase tracking-wider mt-5 mb-2" x-text="editing ? 'Edit job' : 'Add new job'">Add new job</h3>
-  <form hx-post="/jobs" hx-target="#tab-content" hx-swap="innerHTML">
+  <form hx-post="/jobs" hx-target="#tab-content" hx-swap="innerHTML"
+        hx-include="#jobs-show-completed">
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div>
         <label class="label">Job ID</label>

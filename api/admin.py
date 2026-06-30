@@ -1638,9 +1638,15 @@ def create_admin_app(
 
         log.info("Job %r upserted via admin: %s (%s)", job_id, cron, job_type)
 
-        jobs = _get_jobs_list()
+        show_completed = str(body.get("show_completed", "")).strip().lower() in ("true", "on", "1")
+        jobs = _get_jobs_list(include_done=show_completed)
         agent_running = agent is not None
-        resp = _render_partial("partials/jobs.html", jobs=jobs, agent_running=agent_running)
+        resp = _render_partial(
+            "partials/jobs.html",
+            jobs=jobs,
+            agent_running=agent_running,
+            show_completed=show_completed,
+        )
         resp.headers["HX-Trigger"] = json.dumps({"showToast": f'Job "{job_id}" saved'})
         return resp
 
@@ -1669,9 +1675,15 @@ def create_admin_app(
 
         log.info("Job %r deleted via admin", job_id)
 
-        jobs = _get_jobs_list()
+        show_completed = str(body.get("show_completed", "")).strip().lower() in ("true", "on", "1")
+        jobs = _get_jobs_list(include_done=show_completed)
         agent_running = agent is not None
-        resp = _render_partial("partials/jobs.html", jobs=jobs, agent_running=agent_running)
+        resp = _render_partial(
+            "partials/jobs.html",
+            jobs=jobs,
+            agent_running=agent_running,
+            show_completed=show_completed,
+        )
         resp.headers["HX-Trigger"] = json.dumps({"showToast": f'Job "{job_id}" deleted'})
         return resp
 

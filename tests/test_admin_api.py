@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
 from api.admin import AgentState, create_admin_app
 from core.config_store import ConfigStore
+from core.job_store import JobStore
 
 
 class _ConfigStoreStub:
@@ -116,6 +119,70 @@ def test_agent_status_reports_channels_and_jobs() -> None:
         "channels": ["telegram"],
         "scheduler_jobs": 2,
     }
+
+
+class _JobsAgentStub:
+    def __init__(self, job_store):
+        self.channels = {"telegram": object()}
+        self.job_store = job_store
+        self.scheduler = SimpleNamespace(
+            scheduler=SimpleNamespace(get_jobs=lambda: []),
+            sync_job=AsyncMock(),
+        )
+
+
+def _toggle_checked(html: str) -> bool:
+    m = re.search(r'<input id="jobs-show-completed"[^>]*>', html)
+    assert m, "show-completed toggle not rendered"
+    return "checked" in m.group(0)
+
+
+def _jobs_client(tmp_path):
+    store = JobStore(db_path=str(tmp_path / "jobs.db"))
+    store.upsert_job_sync("alpha-live", cron="0 7 * * *", task="t", status="active")
+    store.upsert_job_sync("omega-done", cron="0 7 * * *", task="t", status="done")
+    store.upsert_job_sync("victim-live", cron="0 7 * * *", task="t", status="active")
+    cfg = _ConfigStoreStub(setup_complete=True)
+    agent_state = AgentState(agent=cast(Any, _JobsAgentStub(store)))
+    app, _auth = create_admin_app(agent_state, cast(ConfigStore, cfg))
+    return TestClient(app)
+
+
+def test_partial_jobs_hides_completed_by_default(tmp_path) -> None:
+    client = _jobs_client(tmp_path)
+    headers = {"Authorization": "Bearer secret"}
+
+    resp = client.get("/partials/jobs", headers=headers)
+    assert resp.status_code == 200
+    assert "alpha-live" in resp.text
+    assert "omega-done" not in resp.text  # completed hidden by default
+    assert _toggle_checked(resp.text) is False
+
+
+def test_partial_jobs_show_completed_reveals_done(tmp_path) -> None:
+    client = _jobs_client(tmp_path)
+    headers = {"Authorization": "Bearer secret"}
+
+    resp = client.get("/partials/jobs?show_completed=true", headers=headers)
+    assert resp.status_code == 200
+    assert "omega-done" in resp.text  # completed revealed
+    assert _toggle_checked(resp.text) is True
+
+
+def test_delete_job_preserves_show_completed_toggle(tmp_path) -> None:
+    """Deleting a job while 'Show completed' is on keeps the toggle and completed jobs (#68)."""
+    client = _jobs_client(tmp_path)
+    headers = {"Authorization": "Bearer secret"}
+
+    resp = client.post(
+        "/jobs/delete",
+        data={"job_id": "victim-live", "show_completed": "true"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert "victim-live" not in resp.text  # deleted
+    assert "omega-done" in resp.text  # completed still shown
+    assert _toggle_checked(resp.text) is True  # toggle preserved
 
 
 def test_install_log_buffer_routes_reasoning_to_buffer_not_console() -> None:
