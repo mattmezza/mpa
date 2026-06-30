@@ -653,6 +653,11 @@ class PromptPreviewIn(BaseModel):
     include_reflections: bool = True
 
 
+class VoicePreviewIn(BaseModel):
+    voice: str = ""
+    text: str = "Hi! This is a quick preview of how this voice sounds."
+
+
 # ---------------------------------------------------------------------------
 # Auth dependency
 # ---------------------------------------------------------------------------
@@ -944,6 +949,8 @@ def create_admin_app(
         A globally-disabled feature (e.g. artifacts) is dropped so its tool is
         hidden from the persona scope UI.
         """
+        from voice.pipeline import KOKORO_VOICES
+
         store = await _skills_store_from_config(config_store)
         all_skills = [s["name"] for s in await store.list_skills()]
         sub_enabled = await config_store.get("subagents.enabled")
@@ -959,6 +966,7 @@ def create_admin_app(
                 imagegen_enabled=ig_on,
                 workspace_enabled=ws_on,
             ),
+            "kokoro_voices": KOKORO_VOICES,
         }
 
     @app.get("/admin/personae/new", response_model=None)
@@ -1033,12 +1041,16 @@ def create_admin_app(
     @app.get("/partials/identity", dependencies=[Depends(auth)])
     async def partial_identity() -> HTMLResponse:
         """Agent identity tab partial."""
+        from voice.pipeline import KOKORO_VOICES
+
         character = await config_store.get("agent.character") or ""
         personalia = await config_store.get("agent.personalia") or ""
         agent_name = await config_store.get("agent.name") or ""
         stt_model = await config_store.get("voice.stt_model") or "base"
         tts_voice = await config_store.get("voice.tts_voice") or "en-US-AvaNeural"
         tts_enabled = await config_store.get("voice.tts_enabled") or "true"
+        backend = await config_store.get("voice.backend") or "edge-tts"
+        kokoro_voice = await config_store.get("voice.kokoro.default_voice") or "af_bella"
         return _render_partial(
             "partials/identity.html",
             character=character,
@@ -1047,6 +1059,9 @@ def create_admin_app(
             stt_model=stt_model,
             tts_voice=tts_voice,
             tts_enabled=tts_enabled,
+            backend=backend,
+            kokoro_voice=kokoro_voice,
+            kokoro_voices=KOKORO_VOICES,
         )
 
     @app.get("/partials/you", dependencies=[Depends(auth)])
@@ -2011,6 +2026,24 @@ def create_admin_app(
             "updated": list(values.keys()),
             "restart_required": _config_requires_restart(changed),
         }
+
+    @app.post("/voice/preview", dependencies=[Depends(auth)])
+    async def voice_preview(body: VoicePreviewIn) -> Response:
+        """Synthesize a short sample of the given voice and return the audio so
+        the admin UI can play it (voice selection/testing, #84).  Edge-tts
+        voices preview anytime; Kokoro voices need the Kokoro backend loaded."""
+        agent = agent_state.agent
+        pipeline = getattr(agent, "voice", None) if agent else None
+        if pipeline is None:
+            raise HTTPException(
+                503, "Voice pipeline not loaded — enable TTS and restart the agent."
+            )
+        text = (body.text or "").strip() or "Hi! This is a quick preview of this voice."
+        try:
+            audio, mime = await pipeline.preview(text, body.voice.strip())
+        except Exception as exc:
+            raise HTTPException(503, f"Preview failed: {exc}") from exc
+        return Response(content=audio, media_type=mime)
 
     @app.post("/debug/system-prompt/preview", dependencies=[Depends(auth)])
     async def system_prompt_preview(body: PromptPreviewIn) -> dict:

@@ -206,6 +206,36 @@ class TestPartialRoutes:
         assert "text/html" in resp.headers["content-type"]
         assert "character" in resp.text.lower() or "personalia" in resp.text.lower()
 
+    def test_identity_partial_has_voice_backend_and_kokoro(self):
+        # #84: backend selector + Kokoro voice picker + preview wiring.
+        client = _client(setup_complete=True)
+        resp = client.get("/partials/identity", headers=AUTH)
+        assert resp.status_code == 200
+        assert "TTS backend" in resp.text
+        assert "kokoro" in resp.text.lower()
+        assert "af_bella" in resp.text
+        assert "previewVoice" in resp.text
+
+
+class TestVoicePreview:
+    def test_preview_503_without_voice_pipeline(self):
+        # Agent present but no voice pipeline loaded → graceful 503.
+        client = _client(agent=cast(Any, SimpleNamespace()))
+        resp = client.post("/voice/preview", json={"voice": "af_bella"}, headers=AUTH)
+        assert resp.status_code == 503
+
+    def test_preview_returns_audio(self):
+        class _VoiceStub:
+            async def preview(self, text: str, voice: str):
+                assert voice == "en-US-AvaNeural"
+                return b"AUDIO-BYTES", "audio/mpeg"
+
+        client = _client(agent=cast(Any, SimpleNamespace(voice=_VoiceStub())))
+        resp = client.post("/voice/preview", json={"voice": "en-US-AvaNeural"}, headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "audio/mpeg"
+        assert resp.content == b"AUDIO-BYTES"
+
     def test_permissions_partial(self):
         client = _client(setup_complete=True)
         resp = client.get("/partials/permissions", headers=AUTH)

@@ -45,6 +45,62 @@ def _is_kokoro_voice(voice: str | None) -> bool:
     return bool(re.match(r"[a-z][fm]_", voice or ""))
 
 
+# Kokoro v1.0 voice names, grouped by language, for the admin voice picker.
+# Free-text fields still accept any name; this is the suggestion/selection list.
+KOKORO_VOICES: tuple[str, ...] = (
+    # English (US)
+    "af_bella",
+    "af_heart",
+    "af_nicole",
+    "af_nova",
+    "af_sarah",
+    "af_sky",
+    "am_adam",
+    "am_echo",
+    "am_eric",
+    "am_fenrir",
+    "am_liam",
+    "am_michael",
+    "am_onyx",
+    "am_puck",
+    # English (UK)
+    "bf_alice",
+    "bf_emma",
+    "bf_isabella",
+    "bf_lily",
+    "bm_daniel",
+    "bm_fable",
+    "bm_george",
+    "bm_lewis",
+    # French
+    "ff_siwis",
+    # Italian
+    "if_sara",
+    "im_nicola",
+    # Japanese
+    "jf_alpha",
+    "jf_gongitsune",
+    "jf_nezumi",
+    "jm_kumo",
+    # Mandarin Chinese
+    "zf_xiaobei",
+    "zf_xiaoxiao",
+    "zm_yunjian",
+    "zm_yunxi",
+    # Spanish
+    "ef_dora",
+    "em_alex",
+    # Hindi
+    "hf_alpha",
+    "hf_beta",
+    "hm_omega",
+    "hm_psi",
+    # Brazilian Portuguese
+    "pf_dora",
+    "pm_alex",
+)
+
+
 def _pcm_to_wav(samples, sample_rate: int) -> bytes:
     """Encode float32 PCM samples (-1..1) from Kokoro into 16-bit mono WAV bytes."""
     import numpy as np
@@ -231,3 +287,19 @@ class VoicePipeline:
         audio = _wav_to_ogg(_pcm_to_wav(samples, sample_rate))
         log.info("Synthesized %d chars → %d bytes audio (kokoro/%s)", len(text), len(audio), voice)
         return audio
+
+    async def preview(self, text: str, voice: str) -> tuple[bytes, str]:
+        """Synthesize a short sample with a SPECIFIC voice for the admin voice
+        picker.  The engine is chosen from the voice name (Kokoro-style →
+        Kokoro, else edge-tts), independent of the configured backend.  Returns
+        ``(audio_bytes, mime_type)``.
+        """
+        text = clean_for_speech(text) or text
+        if _is_kokoro_voice(voice):
+            if self._kokoro is None:
+                raise RuntimeError(
+                    "Kokoro model isn't loaded — switch the TTS backend to "
+                    "'kokoro' and restart to preview Kokoro voices."
+                )
+            return await self._synthesize_kokoro(text, voice), "audio/ogg"
+        return await self._synthesize_edge(text, voice), "audio/mpeg"
