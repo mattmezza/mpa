@@ -195,16 +195,19 @@ async def test_turn_preamble_carries_datetime(agent) -> None:
 
 
 @pytest.mark.asyncio
-async def test_turn_preamble_artifact_base_url_only_when_servable(agent, tmp_path) -> None:
-    # Default config: workspace off → artifacts not servable → no base-URL line (#82).
-    assert "Web artifact base URL" not in await agent._turn_preamble(None)
-    # Workspace on + dir set + artifacts on → the link base is surfaced to the model.
+async def test_turn_preamble_artifact_public_warning_only_when_servable(agent, tmp_path) -> None:
+    # Default config: workspace off → artifacts not servable → no warning/base URL (#82).
+    assert "artifacts/' folder is PUBLIC" not in await agent._turn_preamble(None)
+    # Workspace on + dir set + artifacts on → the model is warned the folder is public
+    # and given the link base.
     agent.config.workspace.enabled = True
     agent.config.workspace.directory = str(tmp_path)
-    assert "Web artifact base URL" in await agent._turn_preamble(None)
+    served = await agent._turn_preamble(None)
+    assert "artifacts/' folder is PUBLIC" in served
+    assert "/artifacts/<slug>/" in served
     # Public route off → withhold it again even with the workspace on.
     agent.config.artifacts.enabled = False
-    assert "Web artifact base URL" not in await agent._turn_preamble(None)
+    assert "artifacts/' folder is PUBLIC" not in await agent._turn_preamble(None)
 
 
 @pytest.mark.asyncio

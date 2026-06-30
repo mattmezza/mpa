@@ -1167,13 +1167,19 @@ class AgentCore:
         stamp = now.strftime("%A, %B %d, %Y %H:%M %Z")
         preamble = f"[Current date & time: {stamp}]"
 
-        # Web artifact base URL (#82): artifacts are files the agent writes under
-        # artifacts/<slug>/ in the workspace and shares as a link. The deployment's
-        # public URL (MPA_BASE_URL) isn't otherwise visible to the model, so surface
-        # it — but only when artifacts are actually servable (the workspace harness
-        # provides the write path, and the public route must be on).
+        # Web artifacts (#82): the workspace 'artifacts/' folder is published to the
+        # public internet with no auth. The agent can write_file anywhere in the
+        # workspace, so it must KNOW this folder is special before it (or a request)
+        # drops something private there — and it needs the base URL to share a link,
+        # which isn't otherwise visible to the model. One always-on preamble line
+        # carries both, gated to when artifacts are actually servable (workspace
+        # harness on + public route on) so the warning only shows when it's true.
         if self._workspace_dir() and self.config.artifacts.enabled:
-            preamble += f"\n[Web artifact base URL: {self._base_url()}/artifacts/<slug>/]"
+            preamble += (
+                "\n[The workspace 'artifacts/' folder is PUBLIC: anything you write under "
+                f"artifacts/<slug>/ is served at {self._base_url()}/artifacts/<slug>/ with no "
+                "login. Write there only to share deliberately — never private data.]"
+            )
 
         # Skills index, scoped to the persona's allowlist. Rebuilt fresh per turn
         # so a skill added mid-session (e.g. via skill-creator) is immediately
