@@ -77,8 +77,15 @@ class ToolExecutor:
             return command
         return command.replace("/app/tools/", f"{local_tools_dir}/")
 
-    async def run_command(self, command: str, timeout: int = 30) -> dict:
-        """Execute a shell command and return its output."""
+    async def run_command(
+        self, command: str, timeout: int = 30, tool_env: dict[str, str] | None = None
+    ) -> dict:
+        """Execute a shell command and return its output.
+
+        ``tool_env`` overrides the default :attr:`tool_env` for this one call —
+        used to inject the active persona's own tool identity (own GH_TOKEN,
+        browser profile) so each agent authenticates as itself (#93).
+        """
         # Security: validate against whitelist
         if not any(command.startswith(p) for p in self.ALLOWED_PREFIXES):
             return {
@@ -88,7 +95,7 @@ class ToolExecutor:
         # minutes, not the 30s default — otherwise it's always killed mid-booking.
         if "browser.py explore" in command:
             timeout = max(timeout, 480)
-        return await self._exec(self._resolve_command(command), timeout)
+        return await self._exec(self._resolve_command(command), timeout, tool_env=tool_env)
 
     async def run_command_trusted(self, command: str, timeout: int = 30) -> dict:
         """Execute a shell command without prefix validation.
@@ -106,19 +113,36 @@ class ToolExecutor:
         timeout than the 30s interactive default."""
         return await self._exec(command, timeout, cwd=cwd)
 
-    async def _exec(self, command: str, timeout: int, cwd: str | None = None) -> dict:
+    async def _exec(
+        self,
+        command: str,
+        timeout: int,
+        cwd: str | None = None,
+        tool_env: dict[str, str] | None = None,
+    ) -> dict:
         """Run a shell command and capture output."""
+        # Per-call override (active persona's identity) wins over the shared default.
+        persona_scoped = tool_env is not None
+        effective_tool_env = self.tool_env if tool_env is None else tool_env
         env = None
         wants_wacli_label = "wacli" in command and "WACLI_DEVICE_LABEL" not in os.environ
-        if "himalaya" in command or self.tool_env or wants_wacli_label:
+        if "himalaya" in command or effective_tool_env or wants_wacli_label or persona_scoped:
             env = os.environ.copy()
             if "himalaya" in command:
                 env.update(himalaya_env())
             # wacli: identify the linked device as MPA (matches the Docker ENV).
             if wants_wacli_label:
                 env.setdefault("WACLI_DEVICE_LABEL", "MPA")
+            # A persona-scoped override is authoritative over the registry's managed
+            # keys: strip any it didn't set so a persona can't inherit a tool
+            # credential (e.g. GH_TOKEN from .env) its policy dropped (#93).
+            if persona_scoped:
+                from core.tools import MANAGED_TOOL_ENV_KEYS
+
+                for key in MANAGED_TOOL_ENV_KEYS - effective_tool_env.keys():
+                    env.pop(key, None)
             # Tool auth (e.g. GH_TOKEN) — only set when a tool is enabled.
-            env.update(self.tool_env)
+            env.update(effective_tool_env)
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,

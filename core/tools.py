@@ -17,10 +17,15 @@ entry to ``_REGISTRY`` below describing its env + prompt advertisement.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from core.config import Config
+
+if TYPE_CHECKING:
+    from core.personae import Persona
 
 # Advertisement injected into the system prompt when `gh` is active.
 _GH_PROMPT = """<tool name="gh">
@@ -146,6 +151,15 @@ _REGISTRY: tuple[ToolSpec, ...] = (
 )
 
 
+# Env vars the tool registry manages. When a per-persona env override is applied
+# (#93), any managed key absent from the override is stripped from the inherited
+# process environment too — so a persona that switched `gh` off can never inherit
+# a GH_TOKEN that leaked in via `.env`/Docker ENV and act as the owner.
+MANAGED_TOOL_ENV_KEYS: frozenset[str] = frozenset(
+    {"GH_TOKEN", "BROWSER_HEADLESS", "BROWSER_CDP_URL", "BROWSER_USER_AGENT", "BROWSER_PROFILE"}
+)
+
+
 def registry() -> tuple[ToolSpec, ...]:
     """Return all known optional tools."""
     return _REGISTRY
@@ -156,14 +170,27 @@ def _is_enabled(config: Config, key: str) -> bool:
     return bool(getattr(sub, "enabled", False))
 
 
-def active_tool_prompts(config: Config) -> list[str]:
-    """Return system-prompt advertisement blocks for every *enabled* tool."""
+def active_tool_prompts(config: Config, persona: Persona | None = None) -> list[str]:
+    """Return system-prompt advertisement blocks for every *enabled* tool.
+
+    When ``persona`` is active and has per-tool config (#93), a tool it opted out
+    of is dropped, and a note about its own identity (own ``gh`` token, own browser
+    profile) is injected into the tool block so the model authenticates as itself.
+    """
     blocks: list[str] = []
     for spec in _REGISTRY:
-        if _is_enabled(config, spec.key):
-            block = spec.prompt(config).strip()
-            if block:
-                blocks.append(block)
+        if not _is_enabled(config, spec.key):
+            continue
+        setting = persona.tool_setting(spec.key) if persona else None
+        if setting is not None and not setting.get("enabled"):
+            continue  # this persona has the tool switched off
+        block = spec.prompt(config).strip()
+        if not block:
+            continue
+        note = _persona_tool_note(spec.key, setting, persona)
+        if note:
+            block = block.replace("</tool>", f"{note}\n</tool>", 1)
+        blocks.append(block)
     return blocks
 
 
@@ -174,3 +201,131 @@ def tool_env(config: Config) -> dict[str, str]:
         if _is_enabled(config, spec.key):
             env.update(spec.env(config))
     return env
+
+
+# -- Per-persona tool identity (#93) ----------------------------------------
+
+
+def gh_token_secret_name(persona_name: str) -> str:
+    """Infra-vault name holding a persona's own GitHub token.
+
+    Namespaced per persona so each agent authenticates as a distinct GitHub user.
+    Stored in the *infra* vault (machine-key, boot-unsealed) so it works headless
+    and in scheduled jobs — same on-disk posture as the system-wide ``GH_TOKEN``.
+    """
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "_", (persona_name or "").strip()).upper()
+    return f"GH_TOKEN_{slug}"
+
+
+def _persona_tool_note(key: str, setting: dict | None, persona: Persona | None) -> str:
+    """A one-line identity note injected into a tool's prompt block for a persona."""
+    if persona is None or setting is None:
+        return ""
+    if key == "gh":
+        return (
+            f'Running as persona "{persona.name}": `gh` is authenticated with this '
+            "persona's OWN GitHub token (a distinct identity from the owner). Every "
+            "gh/git action appears as this persona's GitHub user."
+        )
+    if key == "browser":
+        profile = (setting.get("profile") or persona.name).strip()
+        if profile:
+            return (
+                f'Running as persona "{persona.name}": your browser profile is '
+                f'"{profile}" — it is used by default, so your logged-in sessions are '
+                "isolated from other personae. Pass `--profile " + profile + "` "
+                "explicitly when a command needs it."
+            )
+    return ""
+
+
+def effective_tool_env(
+    config: Config,
+    persona: Persona | None,
+    resolve_secret: Callable[[str], str | None],
+) -> dict[str, str]:
+    """The tool environment for a turn, adjusted for the active persona (#93).
+
+    Starts from the system-wide :func:`tool_env` and, for a persona that has its
+    own tool config, swaps in its own identity:
+
+    * ``gh`` — replace ``GH_TOKEN`` with the persona's own token (resolved from the
+      infra vault). If the persona switched ``gh`` off, ``GH_TOKEN`` is *removed*
+      so it can never act as the owner; if it has no own token, it also falls back
+      to no token rather than silently borrowing the owner's.
+    * ``browser`` — set ``BROWSER_PROFILE`` to the persona's isolated profile.
+
+    A persona with no entry for a tool inherits the system config unchanged, so
+    existing setups keep working (migration §6).
+    """
+    env = tool_env(config)
+    if persona is None:
+        return env
+
+    gh = persona.tool_setting("gh")
+    if gh is not None:
+        # Persona has an explicit gh policy → never inherit the owner's token.
+        env.pop("GH_TOKEN", None)
+        if gh.get("enabled") and config.tools.gh.enabled:
+            token = resolve_secret(gh_token_secret_name(persona.name))
+            if token:
+                env["GH_TOKEN"] = token
+
+    browser = persona.tool_setting("browser")
+    if browser is not None and browser.get("enabled") and config.tools.browser.enabled:
+        profile = (browser.get("profile") or persona.name).strip()
+        if profile:
+            env["BROWSER_PROFILE"] = profile
+
+    return env
+
+
+if __name__ == "__main__":
+    # ponytail: one runnable check covering per-persona env swap + prompt notes.
+    from core.personae import Persona
+
+    cfg = Config()
+    cfg.tools.gh.enabled = True
+    cfg.tools.gh.token = "owner-token"
+    cfg.tools.browser.enabled = True
+
+    assert gh_token_secret_name("coding-helper") == "GH_TOKEN_CODING-HELPER"
+
+    vault = {"GH_TOKEN_HOPPER": "hopper-token"}
+    resolve = vault.get  # Callable[[str], str | None]
+
+    # No persona → system token, no profile.
+    base = effective_tool_env(cfg, None, resolve)
+    assert base["GH_TOKEN"] == "owner-token" and "BROWSER_PROFILE" not in base
+
+    # Persona with no tool_config → inherits system config unchanged (migration).
+    plain = Persona(name="plain")
+    assert effective_tool_env(cfg, plain, resolve)["GH_TOKEN"] == "owner-token"
+
+    # Persona with its own gh token + browser profile → own identity.
+    hopper = Persona(
+        name="hopper",
+        tool_config={"gh": {"enabled": True}, "browser": {"enabled": True, "profile": "hop"}},
+    )
+    env = effective_tool_env(cfg, hopper, resolve)
+    assert env["GH_TOKEN"] == "hopper-token", env.get("GH_TOKEN")
+    assert env["BROWSER_PROFILE"] == "hop"
+
+    # gh enabled but no own token stored → no token (never borrows the owner's).
+    atlas = Persona(name="atlas", tool_config={"gh": {"enabled": True}})
+    assert "GH_TOKEN" not in effective_tool_env(cfg, atlas, resolve)
+
+    # gh explicitly disabled → GH_TOKEN removed.
+    lingua = Persona(name="lingua", tool_config={"gh": {"enabled": False}})
+    assert "GH_TOKEN" not in effective_tool_env(cfg, lingua, resolve)
+
+    # Prompts: hopper sees gh + browser, with identity notes; lingua's gh is hidden.
+    hp = "\n".join(active_tool_prompts(cfg, hopper))
+    assert 'persona "hopper"' in hp and "OWN GitHub token" in hp and "hop" in hp
+    lp = "\n".join(active_tool_prompts(cfg, lingua))
+    assert 'name="gh"' not in lp and 'name="browser"' in lp
+    # No persona → plain blocks, no identity notes.
+    nop = "\n".join(active_tool_prompts(cfg))
+    assert 'name="gh"' in nop and "Running as persona" not in nop
+
+    print("tools.py self-check OK")

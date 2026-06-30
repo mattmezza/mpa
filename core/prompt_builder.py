@@ -173,7 +173,7 @@ def build_prompt_sections(
     about_user = f"<about_user>\n{about_user_block}\n</about_user>" if about_user_block else ""
     tool_usage = f"<tool_usage>\n{tool_usage_text}\n</tool_usage>"
 
-    tool_blocks = active_tool_prompts(config)
+    tool_blocks = active_tool_prompts(config, persona)
     tools_section = ""
     if tool_blocks:
         tools_section = "<tools>\n" + "\n\n".join(tool_blocks) + "\n</tools>"
