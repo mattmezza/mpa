@@ -29,6 +29,11 @@ dependencies = [
     "cryptography",
 ]
 
+[project.optional-dependencies]
+# Offline on-device TTS (issue #84). Optional: pulls onnxruntime (~200MB), only
+# needed when voice.backend = "kokoro". Install with `uv sync --extra kokoro`.
+kokoro = ["kokoro-onnx>=0.4"]
+
 [dependency-groups]
 dev = [
     "pytest",

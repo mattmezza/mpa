@@ -73,14 +73,19 @@ async def _start_agent(config_store: ConfigStore):
     voice: VoicePipeline | None = None
     if config.voice.tts_enabled:
         log.info(
-            "Initializing voice pipeline (model=%s, voice=%s)…",
+            "Initializing voice pipeline (model=%s, voice=%s, backend=%s)…",
             config.voice.stt_model,
             config.voice.tts_voice,
+            config.voice.backend,
         )
         voice = VoicePipeline(
             stt_model=config.voice.stt_model,
             tts_voice=config.voice.tts_voice,
             tts_enabled=config.voice.tts_enabled,
+            backend=config.voice.backend,
+            kokoro_model_path=config.voice.kokoro.model_path,
+            kokoro_voices_path=config.voice.kokoro.voices_path,
+            kokoro_default_voice=config.voice.kokoro.default_voice,
         )
         agent.voice = voice
 
