@@ -22,14 +22,17 @@ Write a complete HTML document to `artifacts/<slug>/index.html`:
 write_file(path="artifacts/q3-report/index.html", content="<!doctype html><html>…</html>")
 ```
 
-The page is then live at `<base>/artifacts/q3-report/`, where `<base>` is this
-assistant's public web address (the admin app; if `MPA_BASE_URL` is configured,
-that's the base — otherwise it's the host the user reaches the admin UI on).
-Give the user that link.
+The page is then live at `<base>/artifacts/q3-report/`. The exact `<base>` for
+this deployment is given to you each turn as `[Web artifact base URL: …]` in the
+context preamble — use that verbatim to build the link you give the user (it
+already reflects `MPA_BASE_URL` when configured). If that line is absent,
+artifacts aren't servable here (the workspace harness is off).
 
 - `<slug>` must be letters, digits, `-` and `_` only (e.g. `q3-report`,
-  `expenses_2026`). No spaces, slashes, or dots. Reuse a slug to overwrite an
-  existing artifact in place; pick a fresh one for a new artifact.
+  `expenses_2026`). No spaces, slashes, or dots. A slug outside this charset
+  still *writes* fine but will **404 when served** — so stick to the charset.
+  Reuse a slug to overwrite an existing artifact in place; pick a fresh one for
+  a new artifact.
 - The directory is created for you on first write.
 
 ## Publish a multi-file site
@@ -68,6 +71,9 @@ directly. Point `index.html` at it, or link to the file by name.
   update it; use `list_dir("artifacts")` to see what's published; remove an old
   one by clearing its directory with `run_command_in_dir` (`rm -rf artifacts/<slug>`)
   if that tool is available.
+- **The workspace may be a real git repo.** Artifacts land in `artifacts/` at the
+  workspace root; if the workspace is a code repo, suggest the user add
+  `artifacts/` to its `.gitignore` so published pages aren't committed by accident.
 - **Served without authentication, by design.** The slug is public and
   guessable — anyone with the link can open it. **Don't put secrets in an
   artifact.** Pages run sandboxed (a `Content-Security-Policy: sandbox`), so

@@ -195,6 +195,19 @@ async def test_turn_preamble_carries_datetime(agent) -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_preamble_artifact_base_url_only_when_servable(agent, tmp_path) -> None:
+    # Default config: workspace off → artifacts not servable → no base-URL line (#82).
+    assert "Web artifact base URL" not in await agent._turn_preamble(None)
+    # Workspace on + dir set + artifacts on → the link base is surfaced to the model.
+    agent.config.workspace.enabled = True
+    agent.config.workspace.directory = str(tmp_path)
+    assert "Web artifact base URL" in await agent._turn_preamble(None)
+    # Public route off → withhold it again even with the workspace on.
+    agent.config.artifacts.enabled = False
+    assert "Web artifact base URL" not in await agent._turn_preamble(None)
+
+
+@pytest.mark.asyncio
 async def test_build_user_message_prepends_preamble(agent) -> None:
     preamble = await agent._turn_preamble(None)
     msg = await agent._build_user_message("hello", None, preamble)

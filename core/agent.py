@@ -1167,6 +1167,14 @@ class AgentCore:
         stamp = now.strftime("%A, %B %d, %Y %H:%M %Z")
         preamble = f"[Current date & time: {stamp}]"
 
+        # Web artifact base URL (#82): artifacts are files the agent writes under
+        # artifacts/<slug>/ in the workspace and shares as a link. The deployment's
+        # public URL (MPA_BASE_URL) isn't otherwise visible to the model, so surface
+        # it — but only when artifacts are actually servable (the workspace harness
+        # provides the write path, and the public route must be on).
+        if self._workspace_dir() and self.config.artifacts.enabled:
+            preamble += f"\n[Web artifact base URL: {self._base_url()}/artifacts/<slug>/]"
+
         # Skills index, scoped to the persona's allowlist. Rebuilt fresh per turn
         # so a skill added mid-session (e.g. via skill-creator) is immediately
         # visible without a /new (#46). Cheap: a local DB read, like memory.
