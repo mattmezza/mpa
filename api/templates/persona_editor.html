@@ -135,6 +135,54 @@
         <textarea class="textarea" x-model="secretsText" style="min-height:64px; font-size:0.75rem"
                   placeholder="persona:fitness-coach:*"></textarea>
       </div>
+
+      {# ── Tool identities (#93) ── #}
+      <div class="card">
+        <h3 class="text-xs text-muted uppercase tracking-wider mb-2">Tool identities</h3>
+        <p class="text-xs text-muted mb-3">
+          Give this persona its own credentials for the external CLI tools, so it acts
+          as a distinct identity. <strong>Inherit</strong> = use the system-wide config
+          (shared with the owner). <strong>Enabled</strong> = use this persona's own
+          token/profile below. <strong>Disabled</strong> = this tool is off for this persona.
+        </p>
+        {% for spec in tool_specs %}
+        <div class="mb-3 pb-3 border-b border-border last:border-0 last:mb-0 last:pb-0">
+          <div class="flex items-center justify-between gap-2">
+            <label class="label mb-0">{{ spec.label }}</label>
+            <select class="select input-sm" style="max-width:160px" x-model="modes['{{ spec.key }}']">
+              <option value="inherit">Inherit</option>
+              <option value="on">Enabled</option>
+              <option value="off">Disabled</option>
+            </select>
+          </div>
+          {% if spec.key == "gh" %}
+          <div x-show="modes['gh'] === 'on'" class="mt-2">
+            <template x-if="!infraAvailable">
+              <p class="text-xs text-warn">Set a master key in the <strong>Secrets</strong> tab to store a per-persona token.</p>
+            </template>
+            <template x-if="infraAvailable">
+              <div>
+                <input type="password" class="input-sm" autocomplete="new-password"
+                       x-model="ghToken" placeholder="ghp_… (leave blank to keep current)">
+                <p class="text-xs text-muted mt-1">
+                  <span x-show="ghTokenSet">🔒 A token is stored for this persona — type a new one to replace it.</span>
+                  <span x-show="!ghTokenSet">Stored encrypted in the infra vault; injected as this persona's <code>GH_TOKEN</code>.</span>
+                </p>
+              </div>
+            </template>
+          </div>
+          {% elif spec.key == "browser" %}
+          <div x-show="modes['browser'] === 'on'" class="mt-2">
+            <input type="text" class="input-sm" x-model="profiles['browser']"
+                   :placeholder="name.trim() || 'profile'">
+            <p class="text-xs text-muted mt-1">Isolated browser profile (cookies/sessions). Blank = the persona slug.</p>
+          </div>
+          {% endif %}
+        </div>
+        {% else %}
+        <p class="text-xs text-muted">No external tools are enabled system-wide. Enable them in the <strong>Tools</strong> tab first.</p>
+        {% endfor %}
+      </div>
     </div>
   </div>
 
@@ -175,6 +223,37 @@
       result: '',
       ok: false,
 
+      // Per-persona tool identities (#93).
+      toolConfig: {{ persona.tool_config|tojson }},
+      toolKeys: {{ tool_specs|map(attribute='key')|list|tojson }},
+      ghToken: '',
+      ghTokenSet: {{ gh_token_set|tojson }},
+      infraAvailable: {{ infra_available|tojson }},
+      modes: {},
+      profiles: {},
+
+      init() {
+        for (const k of this.toolKeys) {
+          const e = this.toolConfig[k];
+          this.modes[k] = !e ? 'inherit' : (e.enabled ? 'on' : 'off');
+          this.profiles[k] = (e && e.profile) || '';
+        }
+      },
+
+      // Only configured tools get an entry; 'inherit' leaves them out so the
+      // persona keeps using the system-wide config (migration-safe).
+      buildToolConfig() {
+        const tc = {};
+        for (const k of this.toolKeys) {
+          const m = this.modes[k];
+          if (m === 'inherit') continue;
+          const e = { enabled: m === 'on' };
+          if (k === 'browser' && (this.profiles[k] || '').trim()) e.profile = this.profiles[k].trim();
+          tc[k] = e;
+        }
+        return tc;
+      },
+
       // Regenerate the raw doc from the structured fields before showing it.
       syncRaw() {
         const esc = (s) => (s || '').replace(/\n/g, '\n  ');
@@ -192,6 +271,7 @@
           'skills: ' + list(this.skills) + '\n' +
           'tools: ' + list(this.tools) + '\n' +
           'secrets: ' + list(secrets) + '\n' +
+          'tool_config: ' + JSON.stringify(this.buildToolConfig()) + '\n' +
           'personalia: |\n  ' + esc(this.personalia) + '\n' +
           'character: |\n  ' + esc(this.character) + '\n' +
           '---\n';
@@ -206,7 +286,7 @@
 
       _upsert(name) {
         const body = this.mode === 'raw'
-          ? { name: name, raw: this.raw }
+          ? { name: name, raw: this.raw, gh_token: this.ghToken }
           : {
               name: name, agent_name: this.agent_name, role: this.role,
               emoji: this.emoji, voice: this.voice,
@@ -214,12 +294,16 @@
               skills: this.skills, tools: this.tools,
               secrets: this.secretsText.split('\n').map(s => s.trim()).filter(Boolean),
               bot_token: this.bot_token, allowed_user_ids: this.allowedUserIds,
+              tool_config: this.buildToolConfig(), gh_token: this.ghToken,
             };
         fetch('/personae', { method: 'POST', headers: this._headers(), body: JSON.stringify(body) })
           .then(r => { this.ok = r.ok; return r.text().then(t => ({ ok: r.ok, t })); })
           .then(({ ok, t }) => {
             this.result = ok ? 'Saved.' : ('Error: ' + t.slice(0, 200));
-            if (ok && window.showToast) window.showToast('Persona saved');
+            if (ok) {
+              if (this.ghToken.trim()) { this.ghTokenSet = true; this.ghToken = ''; }
+              if (window.showToast) window.showToast('Persona saved');
+            }
           })
           .catch(e => { this.ok = false; this.result = e.message; });
       },
