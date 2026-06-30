@@ -186,6 +186,17 @@ def test_learn_always_rule_skips_degenerate_run_command(tmp_path) -> None:
     assert "run_command" not in PermissionEngine(db_path=db).rules
 
 
+def test_skill_catalogue_reads_are_default_always() -> None:
+    # Seeded as defaults (#79) so refusing to auto-learn whole-tool keys does
+    # not make these frequent read-only browse tools re-prompt every turn.
+    engine = PermissionEngine()
+    assert engine.check("search_skills", {}) == PermissionLevel.ALWAYS
+    assert engine.check("list_skills", {}) == PermissionLevel.ALWAYS
+    # Secret-vault tools stay gated.
+    assert engine.check("list_secrets", {}) == PermissionLevel.ASK
+    assert engine.check("request_secret", {}) == PermissionLevel.ASK
+
+
 def test_learn_always_rule_skips_whole_tool_key(tmp_path) -> None:
     engine = PermissionEngine(db_path=str(tmp_path / "config.db"))
     engine.learn_always_rule("generate_image", generalize=False)  # read auto-approve

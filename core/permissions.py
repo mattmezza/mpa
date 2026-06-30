@@ -222,6 +222,12 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:sqlite3*DROP*": "NEVER",
     "run_command:sqlite3*ALTER*": "NEVER",
     "load_skill": "ALWAYS",
+    # Read-only skill-catalogue browsing — safe and high-frequency, same as
+    # load_skill. Seeded as defaults so they don't rely on auto-learning a rule
+    # (which #79 now refuses for whole-tool keys). The secret-vault read tools
+    # (list_secrets/request_secret) are deliberately left to ASK.
+    "search_skills": "ALWAYS",
+    "list_skills": "ALWAYS",
 }
 
 
