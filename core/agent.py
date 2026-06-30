@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import shlex
 import time
 import uuid
@@ -150,8 +151,15 @@ def _as_int(value: object, default: int) -> int:
 
 # Control marker the LLM appends to request a spoken reply (see the <voice> prompt
 # block). It is internal signalling and must never reach the user, whether or not
-# synthesis ran.
+# synthesis ran. An optional ":lang" suffix (e.g. [respond_with_voice:it]) tells
+# TTS the language the reply is written in so it isn't spoken with the wrong
+# phonemes (issue #95). VOICE_MARKER stays the canonical bare form for prompts.
 VOICE_MARKER = "[respond_with_voice]"
+# Match the marker with ANY ":suffix" (or none) so it is always stripped — even
+# when the model writes a malformed code like ":english" or ":it-IT". A strict
+# suffix pattern would fail to match those and leak the raw marker to the user;
+# voice_request_lang validates the code separately.
+_VOICE_MARKER_RE = re.compile(r"\[respond_with_voice(?::([^\]]*))?\]")
 
 # Cap an approval prompt's text on the fail-closed retry so an over-long
 # description (e.g. a huge run_command) fits a channel's message limit. Well
@@ -166,8 +174,22 @@ def _truncate_approval(text: str) -> str:
 
 
 def strip_voice_marker(text: str) -> str:
-    """Remove the voice control marker so it never leaks into a user-visible reply."""
-    return text.replace(VOICE_MARKER, "").strip()
+    """Remove the voice control marker (bare or with a ``:lang`` suffix) so it
+    never leaks into a user-visible reply."""
+    return _VOICE_MARKER_RE.sub("", text).strip()
+
+
+def voice_request_lang(text: str) -> str | None:
+    """ISO-639-1 language tagged on the voice marker (``[respond_with_voice:it]``
+    → ``"it"``), or ``None`` when the marker is bare, absent, or carries a code
+    we can't read as a 2-letter language (issue #95). Tolerates a region suffix
+    (``it-IT`` → ``it``) and a full name's first two letters (``english`` → ``en``)
+    while rejecting junk (``123``, ``-``) so a bad tag degrades to default voice."""
+    m = _VOICE_MARKER_RE.search(text)
+    if not m:
+        return None
+    code = (m.group(1) or "").strip().lower()[:2]
+    return code if re.fullmatch(r"[a-z]{2}", code) else None
 
 
 def _strip_command_suffix(message: str) -> str:
@@ -1899,10 +1921,11 @@ class AgentCore:
     async def _maybe_synthesize_voice(self, text: str, voice: str | None = None) -> bytes | None:
         """Synthesize voice if requested by the LLM, using the persona's voice
         when one is set (else the configured default)."""
-        if VOICE_MARKER in text and self.voice:
+        if _VOICE_MARKER_RE.search(text) and self.voice:
             clean_text = strip_voice_marker(text)
+            lang = voice_request_lang(text)
             try:
-                return await self.voice.synthesize(clean_text, voice=voice)
+                return await self.voice.synthesize(clean_text, voice=voice, lang=lang)
             except Exception:
                 log.exception("TTS synthesis failed, sending text only")
         return None
