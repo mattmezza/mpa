@@ -14,7 +14,7 @@ A self-hosted personal AI agent that runs in a single Docker container. MPA acts
 - **Scheduled tasks** — Cron-based jobs for morning briefings, email checks, contact sync, and custom tasks
 - **Subagents** — Delegate a scoped subtask to a sub-loop under a chosen persona, on demand or scheduled. Runs sync (result returned in-turn) or in the background; a finished background batch is distilled by a summary inference into a one-line chat notification + a concise context digest (raw output never reaches the user or the agent's context). The agent sizes each run (steps / token budget / thinking effort) and defaults the persona to its own; scope is a subset of the caller's (inherit-never-widen). Monitor and cancel from Telegram (`/jobs`) or the admin UI
 - **Reactions** — On Telegram the agent can acknowledge a message with an emoji (`set_reaction`) instead of a text reply — thumbsup for "got it", heart for thanks, eyes for a photo, and so on. Cosmetic and pre-approved, so a quick ack never interrupts with a prompt
-- **Voice** — Speech-to-text (faster-whisper) and text-to-speech (edge-tts)
+- **Voice** — Speech-to-text (faster-whisper) and text-to-speech (edge-tts, or Kokoro 82M for fully offline multilingual voice)
 - **Image generation** — Optional `generate_image` tool (OpenRouter, fal.ai, or OpenAI) that creates images on request and sends them as native photos. Reuses an existing OpenRouter/OpenAI LLM key, with a daily/monthly budget cap (off by default)
 - **Coding harness** — Optional file tools (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `run_command_in_dir`) that let the agent work on a real codebase directly. The file tools are confined to one configurable workspace directory (paths escaping it via `..` or symlink are blocked); `run_command_in_dir` confines only its working directory — the command runs with full process privileges, gated by per-call approval. Reads are pre-approved; writes ask first (off by default)
 - **Web search** — Tavily integration for real-time information
@@ -37,7 +37,7 @@ MPA follows a **Python orchestrator + CLI tools** design. Python glues everythin
 | Contacts | Built-in contacts CLI |
 | Calendar | python-caldav |
 | Storage | SQLite (4 databases) |
-| Voice | faster-whisper (STT) + edge-tts (TTS) |
+| Voice | faster-whisper (STT) + edge-tts / Kokoro 82M (TTS) |
 | Admin UI | FastAPI + HTMX + Tailwind CSS |
 
 Instead of hardcoded integrations, the agent learns to use CLI tools via markdown "skill" files in `skills/`. Adding a new capability means writing a markdown file and adding the tool's command prefix to the executor whitelist.
@@ -120,7 +120,7 @@ api/            Admin web interface
   templates/      Jinja2 templates
   static/         CSS (Tailwind)
 voice/          Voice pipeline
-  pipeline.py     Whisper STT + edge-tts TTS
+  pipeline.py     Whisper STT + edge-tts/Kokoro TTS
 tools/          CLI helper scripts
   calendar_read.py   CalDAV event reader
   calendar_write.py  CalDAV event creator
@@ -186,7 +186,7 @@ The binary is installed from a pinned upstream tag (`WACLI_VERSION` in the `Dock
 - **FastAPI** + **Jinja2** + **HTMX** + **Alpine.js** + **Tailwind CSS v4** for the admin UI
 - **python-telegram-bot** for the Telegram channel
 - **APScheduler** for cron jobs
-- **faster-whisper** + **edge-tts** for voice
+- **faster-whisper** + **edge-tts** (or **Kokoro 82M**, offline) for voice
 - **ruff** for linting and formatting
 - **pytest** with asyncio and xdist for testing
 - **Docker** for production deployment

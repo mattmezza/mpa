@@ -119,6 +119,10 @@
     ttsEnabled: {{ tts_enabled|default('true', true)|tojson|forceescape }},
     sttModel: {{ stt_model|default('base', true)|tojson|forceescape }},
     ttsVoice: {{ tts_voice|default('en-US-AvaNeural', true)|tojson|forceescape }},
+    backend: {{ backend|default('edge-tts', true)|tojson|forceescape }},
+    kokoroVoice: {{ kokoro_voice|default('af_bella', true)|tojson|forceescape }},
+    previewText: '',
+    previewLang: '',
     voiceResult: '',
     voiceOk: false
   }">
@@ -144,9 +148,53 @@
       </div>
 
       <div>
+        <label class="label">TTS backend</label>
+        <select class="input-sm" style="max-width:240px" x-model="backend">
+          <option value="edge-tts">Edge TTS (cloud)</option>
+          <option value="kokoro">Kokoro 82M (offline, multilingual)</option>
+        </select>
+        <p class="text-muted text-xs mt-1">Kokoro runs on-device (model bundled by default); it falls back to Edge TTS if the model isn't available. Restart after changing.</p>
+      </div>
+
+      {# Edge voice #}
+      <div x-show="backend === 'edge-tts'">
         <label class="label">TTS voice</label>
         <input type="text" class="input-sm" style="max-width:260px" x-model="ttsVoice" placeholder="en-US-AvaNeural">
         <p class="text-muted text-xs mt-1">Use Edge TTS voice names. Example: en-US-AvaNeural.</p>
+      </div>
+
+      {# Kokoro default voice #}
+      <div x-show="backend === 'kokoro'">
+        <label class="label">Default Kokoro voice</label>
+        <select class="input-sm" style="max-width:260px" x-model="kokoroVoice">
+          {% for v in kokoro_voices %}
+          <option value="{{ v }}">{{ v }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-muted text-xs mt-1">Voice prefix sets the default language (af/am = English, ff = French, jf/jm = Japanese, …). Preview needs the Kokoro backend running.</p>
+      </div>
+
+      {# Preview — type text, pick a language (Kokoro), hear the selected voice #}
+      <div>
+        <label class="label">Preview</label>
+        <div class="flex items-center gap-2 flex-wrap">
+          <input type="text" class="input-sm" style="max-width:300px" x-model="previewText"
+                 placeholder="Type a few words to hear… (blank = sample)">
+          <select x-show="backend === 'kokoro'" class="input-sm" style="max-width:180px"
+                  x-model="previewLang" title="Pronunciation language">
+            <option value="">Auto (match voice)</option>
+            {% for code, label in kokoro_languages %}
+            <option value="{{ code }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="btn btn-sm"
+                  @click="previewVoice(
+                    backend === 'kokoro' ? kokoroVoice : ttsVoice,
+                    previewText,
+                    backend === 'kokoro' ? previewLang : '',
+                    $event.currentTarget)">▶ Preview</button>
+        </div>
+        <p class="text-muted text-xs mt-1" x-show="backend === 'kokoro'">Language sets pronunciation independently of the voice — e.g. an Italian voice can read English text.</p>
       </div>
       {% include "partials/restart_note.html" %}
     </div>
@@ -157,7 +205,9 @@
                 const vals = {
                   'voice.tts_enabled': String(ttsEnabled === true || ttsEnabled === 'true'),
                   'voice.stt_model': sttModel,
-                  'voice.tts_voice': ttsVoice
+                  'voice.backend': backend,
+                  'voice.tts_voice': ttsVoice,
+                  'voice.kokoro.default_voice': kokoroVoice
                 };
                 fetch('/config', {
                   method: 'PATCH',

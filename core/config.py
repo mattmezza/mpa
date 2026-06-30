@@ -181,10 +181,18 @@ class CalendarConfig(BaseModel):
     providers: list[CalendarProvider] = Field(default_factory=list)
 
 
+class KokoroConfig(BaseModel):
+    model_path: str = "models/kokoro/kokoro-v1.0.onnx"
+    voices_path: str = "models/kokoro/voices-v1.0.bin"
+    default_voice: str = "af_bella"
+
+
 class VoiceConfig(BaseModel):
     stt_model: str = "base"
     tts_voice: str = "en-US-AvaNeural"
     tts_enabled: bool = True
+    backend: str = "edge-tts"  # "edge-tts" | "kokoro"
+    kokoro: KokoroConfig = KokoroConfig()
 
 
 class SchedulerJob(BaseModel):

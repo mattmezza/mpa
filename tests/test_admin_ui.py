@@ -206,6 +206,62 @@ class TestPartialRoutes:
         assert "text/html" in resp.headers["content-type"]
         assert "character" in resp.text.lower() or "personalia" in resp.text.lower()
 
+    def test_identity_partial_has_voice_backend_and_kokoro(self):
+        # #84: backend selector + Kokoro voice picker + preview wiring.
+        client = _client(setup_complete=True)
+        resp = client.get("/partials/identity", headers=AUTH)
+        assert resp.status_code == 200
+        assert "TTS backend" in resp.text
+        assert "kokoro" in resp.text.lower()
+        assert "af_bella" in resp.text
+        assert "previewVoice" in resp.text
+
+
+class TestVoicePreview:
+    def test_preview_503_without_voice_pipeline(self):
+        # Agent present but no voice pipeline loaded → graceful 503.
+        client = _client(agent=cast(Any, SimpleNamespace()))
+        resp = client.post("/voice/preview", json={"voice": "af_bella"}, headers=AUTH)
+        assert resp.status_code == 503
+
+    def test_preview_rejects_oversized_text(self):
+        # #84: bounded input so an admin can't request megabytes of synthesis.
+        client = _client(setup_complete=True)
+        resp = client.post(
+            "/voice/preview", json={"voice": "af_bella", "text": "x" * 1000}, headers=AUTH
+        )
+        assert resp.status_code == 422
+
+    def test_preview_returns_audio(self):
+        class _VoiceStub:
+            async def preview(self, text: str, voice: str, lang: str = ""):
+                assert voice == "en-US-AvaNeural"
+                return b"AUDIO-BYTES", "audio/mpeg"
+
+        client = _client(agent=cast(Any, SimpleNamespace(voice=_VoiceStub())))
+        resp = client.post("/voice/preview", json={"voice": "en-US-AvaNeural"}, headers=AUTH)
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "audio/mpeg"
+        assert resp.content == b"AUDIO-BYTES"
+
+    def test_preview_passes_text_and_lang(self):
+        # #84: custom preview text + Kokoro language override reach the pipeline.
+        seen = {}
+
+        class _VoiceStub:
+            async def preview(self, text: str, voice: str, lang: str = ""):
+                seen.update(text=text, voice=voice, lang=lang)
+                return b"OGG", "audio/ogg"
+
+        client = _client(agent=cast(Any, SimpleNamespace(voice=_VoiceStub())))
+        resp = client.post(
+            "/voice/preview",
+            json={"voice": "if_sara", "text": "Hello world", "lang": "en-us"},
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        assert seen == {"text": "Hello world", "voice": "if_sara", "lang": "en-us"}
+
     def test_permissions_partial(self):
         client = _client(setup_complete=True)
         resp = client.get("/partials/permissions", headers=AUTH)

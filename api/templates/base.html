@@ -82,6 +82,36 @@
     }
     window.restartAgentNow = restartAgentNow;
 
+    // Voice preview (#84): synthesize `text` in `voice` and play it. The engine
+    // is chosen server-side from the voice name; `lang` (Kokoro only) overrides
+    // the pronunciation language. `text`/`lang` blank → server defaults. `btn`
+    // (optional) shows progress.
+    function previewVoice(voice, text, lang, btn) {
+      const key = localStorage.getItem('admin_api_key') || '';
+      const original = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = '…'; }
+      fetch('/voice/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        body: JSON.stringify({ voice: voice || '', text: text || '', lang: lang || '' })
+      })
+        .then(async r => {
+          if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'Preview failed'); }
+          return r.blob();
+        })
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          const cleanup = () => URL.revokeObjectURL(url);
+          audio.onended = cleanup;
+          audio.onerror = cleanup;
+          audio.play().catch(cleanup);  // autoplay rejection etc. — don't leak the URL
+        })
+        .catch(e => { if (window.showToast) showToast(e.message, false); })
+        .finally(() => { if (btn) { btn.disabled = false; btn.textContent = original || '▶ Preview'; } });
+    }
+    window.previewVoice = previewVoice;
+
     function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel, rdEnabled, rdProvider, rdModel, rdThinkingLevel, rdGroupOnly, rdMaxReplies, rdWindowSeconds, maxTokens) {
       const currentProvider = provider || 'anthropic';
       return {

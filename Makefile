@@ -1,4 +1,4 @@
-.PHONY: help setup setup-hooks install install-dev sync lock lint format test run repl dev dev-agent dev-css dev-wa clean release css docs docs-dev
+.PHONY: help setup setup-hooks install install-dev sync lock lint format test run repl dev dev-agent dev-css dev-wa kokoro clean release css docs docs-dev
 
 PORT := 8001
 PYTHON := uv run python
@@ -9,6 +9,11 @@ CSS_OUT := api/static/style.css
 
 # Pinned upstream wacli (github.com/openclaw/wacli). Keep in sync with Dockerfile.
 WACLI_VERSION := v0.11.0
+
+# Kokoro offline TTS model (github.com/thewh1teagle/kokoro-onnx releases).
+# Keep the version + paths in sync with the Dockerfile and KokoroConfig.
+KOKORO_DIR := models/kokoro
+KOKORO_BASE_URL := https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
 
 # Show available targets
 help:
@@ -22,6 +27,7 @@ help:
 	@echo "    make install-dev  Install all dependencies (including dev tools)"
 	@echo "    make sync         Re-sync venv with lockfile"
 	@echo "    make lock         Update lockfile after changing pyproject.toml"
+	@echo "    make kokoro       Install Kokoro offline TTS + download its model (local runs)"
 	@echo ""
 	@echo "  Development:"
 	@echo "    make repl         Chat with the agent from the terminal (no Telegram)"
@@ -133,6 +139,18 @@ dev-wa:
 			go install -tags sqlite_fts5 github.com/openclaw/wacli/cmd/wacli@$(WACLI_VERSION); \
 	}
 	@wacli version 2>/dev/null || "$(HOME)/go/bin/wacli" version
+
+# Install the Kokoro offline TTS extra + download its model for local (non-Docker)
+# runs. The Docker image bundles these via INSTALL_KOKORO. After this, set
+# voice.backend: kokoro and restart. Idempotent — existing files are kept.
+kokoro:
+	$(UV) sync --extra kokoro
+	@mkdir -p $(KOKORO_DIR)
+	@test -f $(KOKORO_DIR)/kokoro-v1.0.onnx || \
+		curl -fL $(KOKORO_BASE_URL)/kokoro-v1.0.onnx -o $(KOKORO_DIR)/kokoro-v1.0.onnx
+	@test -f $(KOKORO_DIR)/voices-v1.0.bin || \
+		curl -fL $(KOKORO_BASE_URL)/voices-v1.0.bin -o $(KOKORO_DIR)/voices-v1.0.bin
+	@echo "Kokoro ready in $(KOKORO_DIR). Set voice.backend: kokoro and restart the agent."
 
 # Remove venv and caches
 clean:
