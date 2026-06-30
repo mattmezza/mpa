@@ -478,7 +478,7 @@ async def _approve(name, params, channel, user_id):
     return "approved"
 
 
-async def _ok_manage_jobs(params):
+async def _ok_manage_jobs(params, request_state=None):
     return {"ok": True, "job_id": "job_" + params.get("task", ""), "task": params.get("task")}
 
 
@@ -604,6 +604,79 @@ async def test_recreate_active_job_id_blocked_by_id_not_generic_guard(agent, mon
     assert first.get("ok") is True
     assert "already exists and is active" in second.get("error", "")
     assert "already completed" not in second.get("error", "")
+
+
+@pytest.mark.asyncio
+async def test_create_captures_origin_persona_and_chat(agent, monkeypatch) -> None:
+    """Issue #71: a created job records the persona + chat it was scheduled in,
+    so the scheduler can later run it as that persona in that chat. A job with no
+    origin (pre-#71, CLI, config) keeps empty strings and the legacy behaviour."""
+    monkeypatch.setattr(agent.scheduler, "sync_job", _no_sync)
+
+    origin_state = {
+        "origin": {"channel": "telegram:coach", "user_id": "u7", "chat_id": "-100200:5"},
+        "persona_name": "coach",
+    }
+    res = await agent._tool_manage_jobs(
+        {"action": "create", "task": "remind the group", "run_at": "2099-01-01T09:00:00"},
+        origin_state,
+    )
+    assert res.get("ok") is True
+    job = await agent.job_store.get_job(res["job_id"])
+    assert job["persona"] == "coach"
+    assert job["origin_user_id"] == "u7"
+    assert job["origin_chat_id"] == "-100200:5"
+    assert job["channel"] == "telegram:coach"  # deliver from the same bot
+    assert job["created_by"] == "coach"
+
+    # No request_state → empty origin, default channel (back-compat / CLI path).
+    res2 = await agent._tool_manage_jobs(
+        {"action": "create", "task": "owner ping", "run_at": "2099-01-01T09:00:00"},
+        None,
+    )
+    job2 = await agent.job_store.get_job(res2["job_id"])
+    assert job2["persona"] == ""
+    assert job2["origin_chat_id"] == ""
+    assert job2["channel"] == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_reupsert_without_origin_keeps_it(agent, monkeypatch) -> None:
+    """Editing a job (admin UI / CLI) re-upserts without the origin fields. The
+    persona + chat captured at creation must survive (#71), else the fix silently
+    regresses the first time the owner edits a chat-scheduled reminder."""
+    monkeypatch.setattr(agent.scheduler, "sync_job", _no_sync)
+    state = {
+        "origin": {"channel": "telegram:coach", "user_id": "u7", "chat_id": "-100200:5"},
+        "persona_name": "coach",
+    }
+    res = await agent._tool_manage_jobs(
+        {
+            "action": "create",
+            "job_id": "grp-reminder",
+            "task": "ping",
+            "run_at": "2099-01-01T09:00:00",
+        },
+        state,
+    )
+    assert res.get("ok") is True
+
+    # Simulate an admin/CLI edit: a full upsert that omits persona + origin.
+    await agent.job_store.upsert_job(
+        job_id="grp-reminder",
+        type="agent",
+        schedule="once",
+        run_at="2099-02-02T09:00:00",
+        task="ping edited",
+        channel="telegram",
+        status="active",
+        description="changed",
+    )
+    job = await agent.job_store.get_job("grp-reminder")
+    assert job["task"] == "ping edited"  # the edit applied
+    assert job["persona"] == "coach"  # …but identity + origin survived
+    assert job["origin_user_id"] == "u7"
+    assert job["origin_chat_id"] == "-100200:5"
 
 
 @pytest.mark.asyncio

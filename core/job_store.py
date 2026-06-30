@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_by  TEXT NOT NULL DEFAULT 'admin',
     description TEXT NOT NULL DEFAULT '',
     persona     TEXT NOT NULL DEFAULT '',
+    origin_user_id TEXT NOT NULL DEFAULT '',
+    origin_chat_id TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -40,6 +42,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 # name → ALTER statement; applied only when the column is missing.
 _MIGRATIONS = {
     "persona": "ALTER TABLE jobs ADD COLUMN persona TEXT NOT NULL DEFAULT ''",
+    "origin_user_id": "ALTER TABLE jobs ADD COLUMN origin_user_id TEXT NOT NULL DEFAULT ''",
+    "origin_chat_id": "ALTER TABLE jobs ADD COLUMN origin_chat_id TEXT NOT NULL DEFAULT ''",
 }
 
 # Valid values. "subagent" runs the spawn_subagent primitive under ``persona``.
@@ -130,6 +134,8 @@ class JobStore:
         created_by: str = "admin",
         description: str = "",
         persona: str = "",
+        origin_user_id: str = "",
+        origin_chat_id: str = "",
     ) -> dict:
         """Synchronous upsert for CLI/admin use."""
         self._ensure_schema_sync()
@@ -137,8 +143,9 @@ class JobStore:
             db.row_factory = sqlite3.Row
             db.execute(
                 """INSERT INTO jobs (id, type, schedule, cron, run_at, task, channel,
-                                     status, created_by, description, persona, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                                     status, created_by, description, persona,
+                                     origin_user_id, origin_chat_id, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                    ON CONFLICT(id) DO UPDATE SET
                        type = excluded.type,
                        schedule = excluded.schedule,
@@ -148,7 +155,14 @@ class JobStore:
                        channel = excluded.channel,
                        status = excluded.status,
                        description = excluded.description,
-                       persona = excluded.persona,
+                       -- Identity/origin are sticky (#71): a re-upsert that omits
+                       -- them (admin "edit", CLI edit/cancel) must not wipe what
+                       -- job creation captured. A non-empty new value still wins.
+                       persona = COALESCE(NULLIF(excluded.persona, ''), persona),
+                       origin_user_id =
+                           COALESCE(NULLIF(excluded.origin_user_id, ''), origin_user_id),
+                       origin_chat_id =
+                           COALESCE(NULLIF(excluded.origin_chat_id, ''), origin_chat_id),
                        updated_at = datetime('now')
                 """,
                 (
@@ -163,6 +177,8 @@ class JobStore:
                     created_by,
                     description,
                     persona,
+                    origin_user_id,
+                    origin_chat_id,
                 ),
             )
             db.commit()
@@ -222,6 +238,8 @@ class JobStore:
         created_by: str = "admin",
         description: str = "",
         persona: str = "",
+        origin_user_id: str = "",
+        origin_chat_id: str = "",
     ) -> dict:
         """Insert or update a job. Returns the job dict."""
         await self._ensure_schema()
@@ -229,8 +247,9 @@ class JobStore:
             db.row_factory = aiosqlite.Row
             await db.execute(
                 """INSERT INTO jobs (id, type, schedule, cron, run_at, task, channel,
-                                     status, created_by, description, persona, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                                     status, created_by, description, persona,
+                                     origin_user_id, origin_chat_id, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                    ON CONFLICT(id) DO UPDATE SET
                        type = excluded.type,
                        schedule = excluded.schedule,
@@ -240,7 +259,14 @@ class JobStore:
                        channel = excluded.channel,
                        status = excluded.status,
                        description = excluded.description,
-                       persona = excluded.persona,
+                       -- Identity/origin are sticky (#71): a re-upsert that omits
+                       -- them (admin "edit", CLI edit/cancel) must not wipe what
+                       -- job creation captured. A non-empty new value still wins.
+                       persona = COALESCE(NULLIF(excluded.persona, ''), persona),
+                       origin_user_id =
+                           COALESCE(NULLIF(excluded.origin_user_id, ''), origin_user_id),
+                       origin_chat_id =
+                           COALESCE(NULLIF(excluded.origin_chat_id, ''), origin_chat_id),
                        updated_at = datetime('now')
                 """,
                 (
@@ -255,6 +281,8 @@ class JobStore:
                     created_by,
                     description,
                     persona,
+                    origin_user_id,
+                    origin_chat_id,
                 ),
             )
             await db.commit()
