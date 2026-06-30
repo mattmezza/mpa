@@ -237,7 +237,7 @@ async def test_substitution_only_in_run_command(agent: AgentCore, monkeypatch) -
     placeholder in an email body is sent literally (no exfiltration)."""
     captured: dict[str, str] = {}
 
-    async def fake_exec(command, timeout):
+    async def fake_exec(command, timeout, cwd=None, tool_env=None):
         captured["cmd"] = command
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
@@ -277,7 +277,7 @@ async def test_run_command_acl_denies_out_of_scope(agent: AgentCore, monkeypatch
     monkeypatch.setattr(agent.permissions, "check", lambda *a, **k: PermissionLevel.ALWAYS)
     ran = {"called": False}
 
-    async def fake_exec(command, timeout):
+    async def fake_exec(command, timeout, cwd=None, tool_env=None):
         ran["called"] = True
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
