@@ -641,6 +641,45 @@ async def test_create_captures_origin_persona_and_chat(agent, monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_reupsert_without_origin_keeps_it(agent, monkeypatch) -> None:
+    """Editing a job (admin UI / CLI) re-upserts without the origin fields. The
+    persona + chat captured at creation must survive (#71), else the fix silently
+    regresses the first time the owner edits a chat-scheduled reminder."""
+    monkeypatch.setattr(agent.scheduler, "sync_job", _no_sync)
+    state = {
+        "origin": {"channel": "telegram:coach", "user_id": "u7", "chat_id": "-100200:5"},
+        "persona_name": "coach",
+    }
+    res = await agent._tool_manage_jobs(
+        {
+            "action": "create",
+            "job_id": "grp-reminder",
+            "task": "ping",
+            "run_at": "2099-01-01T09:00:00",
+        },
+        state,
+    )
+    assert res.get("ok") is True
+
+    # Simulate an admin/CLI edit: a full upsert that omits persona + origin.
+    await agent.job_store.upsert_job(
+        job_id="grp-reminder",
+        type="agent",
+        schedule="once",
+        run_at="2099-02-02T09:00:00",
+        task="ping edited",
+        channel="telegram",
+        status="active",
+        description="changed",
+    )
+    job = await agent.job_store.get_job("grp-reminder")
+    assert job["task"] == "ping edited"  # the edit applied
+    assert job["persona"] == "coach"  # …but identity + origin survived
+    assert job["origin_user_id"] == "u7"
+    assert job["origin_chat_id"] == "-100200:5"
+
+
+@pytest.mark.asyncio
 async def test_cancelled_job_id_can_be_recreated(agent, monkeypatch) -> None:
     """A done/cancelled id is free to recreate (only live ids block)."""
     monkeypatch.setattr(agent, "_request_approval", _approve)

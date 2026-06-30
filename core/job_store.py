@@ -155,9 +155,14 @@ class JobStore:
                        channel = excluded.channel,
                        status = excluded.status,
                        description = excluded.description,
-                       persona = excluded.persona,
-                       origin_user_id = excluded.origin_user_id,
-                       origin_chat_id = excluded.origin_chat_id,
+                       -- Identity/origin are sticky (#71): a re-upsert that omits
+                       -- them (admin "edit", CLI edit/cancel) must not wipe what
+                       -- job creation captured. A non-empty new value still wins.
+                       persona = COALESCE(NULLIF(excluded.persona, ''), persona),
+                       origin_user_id =
+                           COALESCE(NULLIF(excluded.origin_user_id, ''), origin_user_id),
+                       origin_chat_id =
+                           COALESCE(NULLIF(excluded.origin_chat_id, ''), origin_chat_id),
                        updated_at = datetime('now')
                 """,
                 (
@@ -254,9 +259,14 @@ class JobStore:
                        channel = excluded.channel,
                        status = excluded.status,
                        description = excluded.description,
-                       persona = excluded.persona,
-                       origin_user_id = excluded.origin_user_id,
-                       origin_chat_id = excluded.origin_chat_id,
+                       -- Identity/origin are sticky (#71): a re-upsert that omits
+                       -- them (admin "edit", CLI edit/cancel) must not wipe what
+                       -- job creation captured. A non-empty new value still wins.
+                       persona = COALESCE(NULLIF(excluded.persona, ''), persona),
+                       origin_user_id =
+                           COALESCE(NULLIF(excluded.origin_user_id, ''), origin_user_id),
+                       origin_chat_id =
+                           COALESCE(NULLIF(excluded.origin_chat_id, ''), origin_chat_id),
                        updated_at = datetime('now')
                 """,
                 (
