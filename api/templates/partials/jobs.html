@@ -1,13 +1,20 @@
 {# Jobs tab partial #}
 <div x-data="jobsTab()">
   <div class="flex items-center gap-2 mb-4 flex-wrap">
-    <button class="btn btn-sm" hx-get="/partials/jobs" hx-target="#tab-content" hx-swap="innerHTML">
+    <button class="btn btn-sm" hx-get="/partials/jobs" hx-target="#tab-content" hx-swap="innerHTML"
+            hx-include="#jobs-show-completed">
       Refresh
     </button>
     <span class="text-muted text-xs">{{ jobs|length }} job{{ 's' if jobs|length != 1 else '' }}</span>
     {% if not agent_running %}
     <span class="badge-off text-[0.65rem]">agent stopped — jobs won't run</span>
     {% endif %}
+    <label class="flex items-center gap-1.5 text-xs text-muted cursor-pointer ml-auto" title="Show completed, cancelled, and past one-time jobs">
+      <input id="jobs-show-completed" type="checkbox" name="show_completed" value="true"
+             hx-get="/partials/jobs" hx-target="#tab-content" hx-swap="innerHTML" hx-include="this"
+             {% if show_completed %}checked{% endif %}>
+      Show completed
+    </label>
   </div>
 
   {# Subagent runs (issue #15) — live status, polled every 3s #}

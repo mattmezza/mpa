@@ -1508,10 +1508,14 @@ def create_admin_app(
 
         return JobStore(db_path="data/jobs.db")
 
-    def _get_jobs_list() -> list[dict]:
-        """Build a list of job dicts from the JobStore + APScheduler next_run times."""
+    def _get_jobs_list(include_done: bool = False) -> list[dict]:
+        """Build a list of job dicts from the JobStore + APScheduler next_run times.
+
+        By default only live jobs (active/paused) are returned; pass
+        ``include_done=True`` to also include completed/cancelled jobs.
+        """
         store = _get_job_store()
-        db_jobs = store.list_jobs_sync(include_done=False)
+        db_jobs = store.list_jobs_sync(include_done=include_done)
         agent = agent_state.agent
 
         # Build a map of APScheduler next_run times
@@ -1549,11 +1553,16 @@ def create_admin_app(
         return jobs
 
     @app.get("/partials/jobs", dependencies=[Depends(auth)])
-    async def partial_jobs() -> HTMLResponse:
-        """Jobs tab partial."""
-        jobs = _get_jobs_list()
+    async def partial_jobs(show_completed: bool = False) -> HTMLResponse:
+        """Jobs tab partial. ``show_completed`` reveals done/cancelled jobs."""
+        jobs = _get_jobs_list(include_done=show_completed)
         agent_running = agent_state.agent is not None
-        return _render_partial("partials/jobs.html", jobs=jobs, agent_running=agent_running)
+        return _render_partial(
+            "partials/jobs.html",
+            jobs=jobs,
+            agent_running=agent_running,
+            show_completed=show_completed,
+        )
 
     @app.post("/jobs", dependencies=[Depends(auth)])
     async def upsert_job(request: Request) -> HTMLResponse:
