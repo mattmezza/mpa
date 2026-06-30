@@ -139,7 +139,7 @@ class ReflectionStore:
     formatting past lessons for system prompt injection.
     """
 
-    def __init__(self, db_path: str = "data/reflections.db", max_reflections: int = 50):
+    def __init__(self, db_path: str = "data/reflections.db", max_reflections: int = 12):
         self.db_path = db_path
         self.max_reflections = max_reflections
         self._ready = False
@@ -174,7 +174,11 @@ class ReflectionStore:
             return ""
 
         lines: list[str] = []
+        seen: set[str] = set()  # #5: drop exact-duplicate lessons (the store has many repeats)
         for r in reflections:
+            if r["lesson"] in seen:
+                continue
+            seen.add(r["lesson"])
             outcome_marker = ""
             if r["outcome"] != "success":
                 outcome_marker = f" [{r['outcome']}]"

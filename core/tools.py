@@ -65,38 +65,22 @@ from scratch — there is NO shared session or page state between calls. So you
 CANNOT do a flow step-by-step across several commands; each call would restart
 from the beginning and lose all progress. A whole interactive flow MUST be ONE
 explore call that carries the entire task.
-How to use it well:
-- Put the ENTIRE task in one `--task`, as numbered steps, with every concrete
-  value the flow needs (product, dates/times, name, email, phone, full card
-  number/expiry/CVC/ZIP). It cannot ask you mid-run, so give it everything up
-  front. Example for a booking:
-  python3 /app/tools/browser.py explore --url https://shop.example/book --task \
-    "1) click 'Book now'. 2) select the Single Kayak product. 3) set pickup and
-     return date 2026-06-26, start 09:00, end 10:00. 4) click Next through each
-     step. 5) fill name Matteo Merola, email m@x.com, phone +41770000000.
-     6) at payment fill card 4242424242424242 exp 03/29 cvc 736 zip 8000 and
-     click Pay. 7) report the confirmation."
-- It runs autonomously for a few minutes and returns ONE JSON result with an
-  `answer`. That is expected — do NOT treat the wait as a hang, do NOT split the
-  task, do NOT retry, and do NOT fall back to `read`/`act` (they only see the top
-  page, never the widget/iframe, and will mislead you with stale content).
-- Quote its returned `answer` (and screenshot path) back to the user. If it
-  reports a pending/awaiting-approval status, say so — don't upgrade it to
-  "confirmed".
-- If the result has `done:false` and a `reason`, the flow could NOT be completed
-  (stuck, control not found, dead end). Tell the user what blocked it and share
-  the screenshot — do NOT claim success and do NOT blindly re-run the same task;
-  the loop already gave up on purpose to avoid wasting effort.
-`read`/`screenshot` run without asking. `act` changes state (click/fill/submit)
-so it asks for approval each time; on chat channels the approval shows a
-screenshot of the page. `--steps` is an ordered JSON array of single-key objects:
-  [{"fill":["#user","alice"]},{"fill":["#pass","s3cr3t"]},{"click":"#login"}]
-Steps: fill[sel,val], click[sel], select[sel,val], press[sel,key], wait[ms|sel], goto[url].
-Guided first-time login: screenshot the login page so the user can follow along,
-ask the user for credentials (never store them), then `act` to fill+submit. If
-2FA appears, screenshot it and ask the user for the code, then `act` again. After
-login the `--profile` session persists, so later visits skip the login.
-Some sites with strong bot-management may still block headless automation.
+CAUTION: `explore` self-drives to completion under a SINGLE approval — there is NO
+per-step gate once it starts. Do NOT use it to spend money or submit irreversible
+actions on its own: for purchases/payments confirm the exact details with the owner
+first, and prefer guided `act` steps (each fill/submit is approved separately).
+How to use it well: put the ENTIRE flow in one `--task` as numbered steps with every
+value it needs (product, dates, name, email, phone, card details) — it cannot ask
+mid-run. It runs for a few minutes and returns ONE JSON `answer`: do NOT treat the wait
+as a hang, split the task, retry, or fall back to `read`/`act` (those only see the top
+page, never the widget/iframe). Quote the `answer` (and screenshot) back; if it reports
+pending/awaiting-approval don't upgrade to "confirmed"; if it returns `done:false` with a
+`reason`, report what blocked it and don't blindly re-run.
+`read`/`screenshot` run without asking; `act` asks approval each call (shows a screenshot
+on chat) and takes `--steps`, a JSON array of single-key objects, e.g.
+  [{"fill":["#user","alice"]},{"click":"#login"}]   (fill/click/select/press/wait/goto).
+For the full reference — steps syntax, guided first-time login + 2FA, profiles — run
+`load_skill browser`.
 </tool>"""
 
 

@@ -216,8 +216,10 @@ TOOLS = [
     {
         "name": "run_command",
         "description": (
-            "Execute a CLI command. Use skill documentation to construct correct syntax. "
-            "Returns stdout, stderr, and exit_code."
+            "Execute a CLI command — general/system commands, read/query operations, and "
+            "CLI writes that have no dedicated structured tool. For builds/tests/linters "
+            "inside the workspace use run_command_in_dir instead. Use skill documentation "
+            "to construct correct syntax. Returns stdout, stderr, and exit_code."
         ),
         "input_schema": {
             "type": "object",
@@ -400,7 +402,9 @@ TOOLS = [
             "illustration, diagram, concept art, logo, or any visual. The image is "
             "sent to the user automatically — do NOT put the file path or base64 in "
             "your reply, just briefly say what you made. Load the 'image_generation' "
-            "skill for prompting tips."
+            "skill for prompting tips. A daily/monthly image budget may apply (resets "
+            "00:00 UTC); if it's reached you get an error — tell the owner instead of "
+            "retrying."
         ),
         "input_schema": {
             "type": "object",
@@ -465,6 +469,34 @@ TOOLS = [
             "know what you're after. Call `load_skill` with a name to read one in full."
         ),
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "remember",
+        "description": (
+            "Save a durable long-term memory — a fact, preference, or relationship about "
+            "the owner or their contacts. Use it proactively whenever you learn something "
+            "worth keeping. Reading is automatic: relevant memories are injected each turn, "
+            "and recall_memory searches the rest."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The fact to remember, as a clear standalone sentence.",
+                },
+                "subject": {
+                    "type": "string",
+                    "description": "Who or what it is about, e.g. 'matteo' or a contact's name.",
+                },
+                "category": {
+                    "type": "string",
+                    "enum": ["fact", "preference", "relationship", "work"],
+                    "description": "Kind of memory. Defaults to 'fact'.",
+                },
+            },
+            "required": ["content"],
+        },
     },
     {
         "name": "recall_memory",
@@ -779,7 +811,8 @@ TOOLS = [
         "name": "run_command_in_dir",
         "description": (
             "Run a shell command in a workspace directory — for linters, tests, "
-            "builds, formatters. The working directory must be inside the "
+            "builds, formatters (NOT a general-purpose CLI; for arbitrary or system "
+            "commands use run_command). The working directory must be inside the "
             "workspace. Returns stdout, stderr, and exit_code. Asks the owner for "
             "approval first."
         ),
@@ -827,6 +860,7 @@ def scoped_tools(persona: Persona | None) -> list[dict]:
         "search_skills",
         "list_skills",
         "recall_memory",
+        "remember",
         "list_secrets",
         "request_secret",
     }
@@ -880,6 +914,7 @@ class AgentCore:
         # unsealed by an admin login is visible to the agent at runtime.
         self.secret_store = secret_store
         self.llm: LLMClient = LLMClient.from_agent_config(config.agent)
+        self.llm.temperature = config.agent.temperature  # #12: configurable sampling temp
         self.skills = SkillsEngine(
             db_path=config.agent.skills_db_path,
             seed_dir=config.agent.skills_dir,
@@ -2181,6 +2216,9 @@ class AgentCore:
             allowed = (request_state or {}).get("allowed_skills")
             return {"skills": await self.skills.index_entries(allow=allowed)}
 
+        if name == "remember":
+            return await self._tool_remember(params, request_state)
+
         if name == "recall_memory":
             return await self._tool_recall_memory(params, request_state)
 
@@ -2748,6 +2786,27 @@ class AgentCore:
                 return {"error": "Must specify 'cron' for recurring or 'run_at' for one-time jobs."}
 
         return {"error": f"Unknown action: {action!r}. Use 'create', 'list', or 'cancel'."}
+
+    async def _tool_remember(self, params: dict, request_state: dict | None = None) -> dict:
+        """Save a long-term memory via the structured store (#13).
+
+        Replaces hand-built sqlite3 INSERTs from the memory skill: parameterised, so
+        arbitrary user text can't break quoting or inject SQL. Scope follows the active
+        persona — same boundary recall and injection use.
+        """
+        content = str(params.get("content", "")).strip()
+        if not content:
+            return {"error": "Missing 'content'."}
+        subject = str(params.get("subject", "")).strip()
+        category = str(params.get("category", "") or "fact").strip()
+        scope = (request_state or {}).get("persona_name") or ""
+        try:
+            await self.memory.remember(content, subject=subject, category=category, scope=scope)
+        except Exception:
+            log.exception("remember failed for: %s", content[:80])
+            return {"error": "Saving the memory failed."}
+        log.info("Tool call: remember — %s/%s", category, subject or "-")
+        return {"ok": True, "remembered": content}
 
     async def _tool_recall_memory(self, params: dict, request_state: dict | None = None) -> dict:
         """Deliberate semantic search over the full long-term memory store (#47).

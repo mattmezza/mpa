@@ -240,6 +240,9 @@ class LLMClient:
         self.provider = _normalize_provider(provider)
         # "" (off) | "low" | "medium" | "high" — applied only to the main generate() call
         self.thinking_level = (thinking_level or "").strip().lower()
+        # Sampling temperature (#12). None = use the provider default. Set by the
+        # caller on the main agent client; applied via _sampling_kwargs().
+        self.temperature: float | None = None
         self._client: Any
         if self.provider == "anthropic":
             self._client = AsyncAnthropic(api_key=api_key, timeout=60)
@@ -268,6 +271,17 @@ class LLMClient:
         if self.provider == "anthropic":
             return {"thinking": {"type": "adaptive"}, "output_config": {"effort": level}}
         return {"reasoning_effort": level}
+
+    def _sampling_kwargs(self) -> dict[str, Any]:
+        """Reasoning kwargs plus an explicit temperature when configured (#12).
+
+        Temperature is skipped on reasoning calls — several providers reject an
+        explicit temperature alongside reasoning_effort/thinking.
+        """
+        kwargs = self._reasoning_kwargs()
+        if self.temperature is not None and not kwargs:
+            kwargs["temperature"] = self.temperature
+        return kwargs
 
     @classmethod
     def from_agent_config(cls, config) -> LLMClient:
@@ -353,7 +367,7 @@ class LLMClient:
                 system=cast(Any, system_param),
                 messages=cast(Any, messages),
                 tools=cast(Any, tools),
-                **self._reasoning_kwargs(),
+                **self._sampling_kwargs(),
             )
             tool_calls = []
             text_parts = []
@@ -458,7 +472,7 @@ class LLMClient:
                 model=resolved_model,
                 max_tokens=max_tokens,
                 messages=cast(Any, [{"role": "user", "content": prompt}]),
-                **self._reasoning_kwargs(),
+                **self._sampling_kwargs(),
             )
             for block in response.content:
                 block_any = cast(Any, block)

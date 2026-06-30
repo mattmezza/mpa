@@ -182,10 +182,13 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:*browser.py screenshot*": "ALWAYS",
     "run_command:*browser.py profiles*": "ALWAYS",
     "run_command:*browser.py act*": "ASK",
+    # explore self-drives autonomously under one approval (#2); always confirm.
+    "run_command:*browser.py explore*": "ASK",
     "run_command:git*push*": "ASK",
     "run_command:git*commit*": "ASK",
     "web_search": "ALWAYS",
     "recall_memory": "ALWAYS",
+    "remember": "ALWAYS",  # local memory write, low-stakes — no prompt (#13)
     # Coding harness (#76) — reads pre-approved, writes/exec ask (confined to the
     # configured workspace root regardless; see core/coding.py).
     "read_file": "ALWAYS",

@@ -1209,6 +1209,7 @@ def create_admin_app(
         model = await config_store.get("agent.model") or "claude-4-6-sonnet"
         max_tokens = await config_store.get("agent.max_tokens") or "8192"
         thinking_level = await config_store.get("agent.thinking_level") or ""
+        temperature = await config_store.get("agent.temperature") or "0.5"
         extraction_provider = await config_store.get("memory.extraction_provider") or "deepseek"
         extraction_model = await config_store.get("memory.extraction_model") or "deepseek-v4-flash"
         consolidation_provider = (
@@ -1229,6 +1230,7 @@ def create_admin_app(
         tr_enabled = tr_enabled if tr_enabled is not None else "true"
         tr_provider = await config_store.get("task_reflection.provider") or "deepseek"
         tr_model = await config_store.get("task_reflection.model") or "deepseek-v4-flash"
+        tr_max_reflections = await config_store.get("task_reflection.max_reflections") or "12"
         gd_thinking_level = await config_store.get("goal_decomposition.thinking_level") or ""
         tr_thinking_level = await config_store.get("task_reflection.thinking_level") or ""
         rd_enabled = await config_store.get("reply_decision.enabled")
@@ -1272,6 +1274,7 @@ def create_admin_app(
             deepseek_base_url=deepseek_base_url,
             model=model,
             max_tokens=max_tokens,
+            temperature=temperature,
             thinking_level=thinking_level,
             extraction_provider=extraction_provider,
             extraction_model=extraction_model,
@@ -1286,6 +1289,7 @@ def create_admin_app(
             tr_enabled=tr_enabled,
             tr_provider=tr_provider,
             tr_model=tr_model,
+            tr_max_reflections=tr_max_reflections,
             tr_thinking_level=tr_thinking_level,
             rd_enabled=rd_enabled,
             rd_provider=rd_provider,
@@ -2040,6 +2044,7 @@ def create_admin_app(
                 new_config = await _resolved_config()
                 agent.config = new_config
                 agent.llm = LLMClient.from_agent_config(new_config.agent)
+                agent.llm.temperature = new_config.agent.temperature  # #12: live temp update
                 agent.executor.tool_env = tool_env(new_config)
                 agent.history_mode = new_config.history.mode
                 mem_cfg = new_config.memory
