@@ -20,7 +20,7 @@ A self-hosted personal AI agent that runs in a single Docker container. MPA acts
 - **Web artifacts** — The agent publishes pages, multi-file sites, or documents (PDF, image, slides) as shareable links at `/artifacts/<id>/`, with unguessable ids, a sandbox CSP, agent-chosen TTL cleanup, and approval before publishing an on-disk file
 - **Secrets vault** — Encrypted, two-tier secrets store: infrastructure keys (machine-key sealed, served into config via `${vault:NAME}`) and per-persona login/agent secrets (admin-password sealed, used by reference as `{{secret:NAME}}` in commands — values never enter the model's context). Bitwarden import + secure-link credential requests
 - **Permissions** — Glob-pattern rules (ALWAYS/ASK/NEVER) with interactive Telegram approval for write actions
-- **Admin UI** — Web dashboard for configuration, persona & per-chat binding, skills editing, memory inspection, job management, and agent lifecycle control
+- **Admin UI** — Web dashboard for configuration, persona & per-chat binding, skills editing, memory inspection, job management, per-agent log streams (filterable by stream / level / time / text), and agent lifecycle control
 - **Skills** — Teach the agent new capabilities by writing markdown files instead of code
 - **Setup wizard** — Step-by-step first-boot configuration via the admin UI
 
