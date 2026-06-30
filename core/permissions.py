@@ -222,6 +222,12 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:sqlite3*DROP*": "NEVER",
     "run_command:sqlite3*ALTER*": "NEVER",
     "load_skill": "ALWAYS",
+    # Read-only skill-catalogue browsing — safe and high-frequency, same as
+    # load_skill. Seeded as defaults so they don't rely on auto-learning a rule
+    # (which #79 now refuses for whole-tool keys). The secret-vault read tools
+    # (list_secrets/request_secret) are deliberately left to ASK.
+    "search_skills": "ALWAYS",
+    "list_skills": "ALWAYS",
 }
 
 
@@ -366,6 +372,22 @@ class PermissionEngine:
             return match_key
         return prefix + " ".join(kept) + "*"
 
+    @staticmethod
+    def _may_autolearn(pattern: str) -> bool:
+        """Whether a freshly-approved rule is specific enough to auto-persist.
+
+        Auto-learning a rule from a single approval is only safe when the key
+        names a specific command shape — a ``tool:subkey`` scope. A bare tool
+        name (no ``:`` sub-scope, or an empty one) — ``run_command`` when the
+        command arg was missing, ``run_command:`` when it was empty, or a whole
+        tool like ``generate_image`` — would whitelist the ENTIRE tool and
+        nullify the allowlist (issue #79). Refuse those: the action keeps
+        asking. A rule that broad must be set deliberately via the admin UI,
+        never learned from one click.
+        """
+        _, sep, rest = pattern.partition(":")
+        return bool(sep and rest.strip())
+
     def match_key(self, tool_name: str, params: dict | None = None) -> str:
         """Public helper to build the match key for a tool call."""
         return self._build_match_key(tool_name, params)
@@ -450,6 +472,22 @@ class PermissionEngine:
         self._persist_rule(pattern, level)
         log.info("Permission rule added: %s → %s", pattern, level)
 
+    def learn_always_rule(self, match_key: str, *, generalize: bool = True) -> None:
+        """Persist an ALWAYS rule learned from a single user approval — but only
+        when the key is specific enough to be safe (see :meth:`_may_autolearn`).
+
+        ``generalize`` widens a concrete command into a ``<prog> <subcmd>*`` glob
+        (the "always allow" button); leave it False to learn the exact command
+        (read-action auto-approve). A degenerate/over-broad key is skipped so the
+        action keeps asking instead of blanket-whitelisting the whole tool (#79).
+        """
+        pattern = self._rule_pattern(match_key) if generalize else match_key
+        if not self._may_autolearn(pattern):
+            log.warning("Refusing to auto-learn over-broad ALWAYS rule from %r", match_key)
+            return
+        if pattern not in self.rules:
+            self.add_rule(pattern, PermissionLevel.ALWAYS)
+
     def remove_rule(self, pattern: str) -> bool:
         """Remove a permission rule if it exists."""
         existed = pattern in self.rules
@@ -511,9 +549,9 @@ class PermissionEngine:
                 # Persist a GENERALIZED pattern, not the exact command — otherwise
                 # "always" only ever matches that one verbatim invocation and the
                 # next (different --url/--task/args) prompts again. See _rule_pattern.
-                pattern = self._rule_pattern(match_key)
-                if pattern not in self.rules:
-                    self.add_rule(pattern, PermissionLevel.ALWAYS)
+                # A degenerate key (bare run_command/generate_image) is refused so
+                # one click can't whitelist the whole tool (#79).
+                self.learn_always_rule(match_key, generalize=True)
         if skipped:
             future.set_result("skipped")
         elif approved:

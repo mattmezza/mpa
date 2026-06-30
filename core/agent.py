@@ -153,6 +153,17 @@ def _as_int(value: object, default: int) -> int:
 # synthesis ran.
 VOICE_MARKER = "[respond_with_voice]"
 
+# Cap an approval prompt's text on the fail-closed retry so an over-long
+# description (e.g. a huge run_command) fits a channel's message limit. Well
+# under Telegram's 4096 even with the channel's "Permission request:" prefix.
+# ponytail: fixed cap; the channel-layer delivery fix (#77-style) may supersede.
+_APPROVAL_TEXT_CAP = 3500
+
+
+def _truncate_approval(text: str) -> str:
+    """Clip an approval prompt to a length channels can deliver (see cap above)."""
+    return text if len(text) <= _APPROVAL_TEXT_CAP else text[: _APPROVAL_TEXT_CAP - 1] + "…"
+
 
 def strip_voice_marker(text: str) -> str:
     """Remove the voice control marker so it never leaks into a user-visible reply."""
@@ -1986,9 +1997,13 @@ class AgentCore:
                 return {"error": "Action denied by user."}
 
             if not is_write_action:
-                self.permissions.add_rule(
-                    self.permissions.match_key(name, params),
-                    PermissionLevel.ALWAYS,
+                # Learn an exact-command ALWAYS rule so this read auto-approves
+                # next time — but never from a degenerate key. A bare
+                # `run_command` (command arg missing) would whitelist every
+                # command and nullify the allowlist (#79); learn_always_rule
+                # refuses those and keeps asking.
+                self.permissions.learn_always_rule(
+                    self.permissions.match_key(name, params), generalize=False
                 )
 
         # --- Dispatch ---
@@ -3346,9 +3361,21 @@ class AgentCore:
             self.permissions.resolve_approval(request_id, True)
             return "approved"
         except Exception:
-            log.exception("Failed to send approval request")
-            self.permissions.resolve_approval(request_id, True)
-            return "approved"
+            # The prompt couldn't be delivered (commonly: too long for the
+            # channel's message limit — a huge run_command). Retry once with a
+            # clipped, image-less prompt so a legitimate long action stays
+            # approvable. The request_id still maps to the real action, so
+            # truncating the *display* text changes nothing that executes.
+            log.warning("Approval send failed; retrying with truncated prompt", exc_info=True)
+            try:
+                await ch.send_approval_request(user_id, request_id, _truncate_approval(description))
+            except Exception:
+                # Still undeliverable — fail CLOSED. A gate that cannot ask the
+                # user must never silently approve (#79). Drop the pending
+                # request and skip the action.
+                log.exception("Approval request undeliverable; skipping action (fail-closed)")
+                self.permissions._pending.pop(request_id, None)
+                return "skipped"
 
         # Wait for the user's response (timeout after 2 minutes)
         try:

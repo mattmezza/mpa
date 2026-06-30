@@ -906,3 +906,41 @@ async def test_repeat_failure_breaker_stops_after_n(agent) -> None:
     assert all("command" in e for e in errors[:_MAX_REPEAT_FAILURES])
     assert errors[_MAX_REPEAT_FAILURES] == _REPEAT_FAILURE_NOTICE
     assert errors[-1] == _REPEAT_FAILURE_NOTICE
+
+
+# ---------------------------------------------------------------------------
+# Approval delivery (#79 B): fail closed when the prompt can't be sent
+# ---------------------------------------------------------------------------
+
+
+def test_truncate_approval_clips_only_when_over_cap() -> None:
+    from core.agent import _APPROVAL_TEXT_CAP, _truncate_approval
+
+    assert _truncate_approval("ok") == "ok"
+    out = _truncate_approval("z" * (_APPROVAL_TEXT_CAP + 50))
+    assert len(out) == _APPROVAL_TEXT_CAP
+    assert out.endswith("…")
+
+
+class _FailingChannel:
+    """Approval send always raises — exercises the fail-closed path."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def send_approval_request(self, user_id, request_id, description, image_path=None):
+        self.calls.append(description)
+        raise RuntimeError("message too long")
+
+
+@pytest.mark.asyncio
+async def test_undeliverable_approval_fails_closed(agent) -> None:
+    # A gate that can't ask the user must never silently approve. After one
+    # truncated retry the action is skipped, not run, and no request leaks.
+    ch = _FailingChannel()
+    agent.channels = {"tg": ch}
+    result = await agent._await_approval("Run command: " + "x" * 9000, "tg", "user1")
+    assert result == "skipped"
+    assert len(ch.calls) == 2  # original send + one truncated retry
+    assert len(ch.calls[1]) <= 3500  # the retry was truncated to fit
+    assert not agent.permissions._pending  # pending request dropped, no leak

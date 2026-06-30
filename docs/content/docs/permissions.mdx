@@ -117,5 +117,7 @@ The permission system works alongside other security layers:
 - **User ID whitelist** — only allowed users can interact with the bot
 - **Permission patterns** — glob-based rules control what the agent can do
 - **Approval flow** — interactive confirmation for write operations
+- **Fail-closed approval** — if an approval prompt can't be delivered (e.g. an over-long message), it's retried once truncated and otherwise the action is skipped, never auto-run
+- **Scoped auto-approve** — approving an action can only learn a rule for that specific command shape; it never whitelists a whole tool, so the allowlist always stays in force
 - **Audit trail** — every `run_command` includes a `purpose` field for logging
 - **Timeout** — commands have a default 30-second timeout
