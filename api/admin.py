@@ -1104,17 +1104,28 @@ def create_admin_app(
             you_personalia=you_personalia,
         )
 
-    @app.get("/partials/permissions", dependencies=[Depends(auth)])
-    async def partial_permissions() -> HTMLResponse:
-        """Permissions tab partial."""
+    async def _render_permissions(scope: str = "") -> HTMLResponse:
+        """Render the permissions tab for one scope (#100): "" = global default,
+        else a persona slug whose own overrides are shown."""
         agent = agent_state.agent
+        store = await _persona_store_from_config(config_store)
+        personae = [p.name for p in await store.list_personae()]
         if agent:
-            rules = agent.permissions.rules
+            rules = agent.permissions.rules_for_scope(scope)
+        elif scope:
+            rules = {}
         else:
             from core.permissions import DEFAULT_RULES
 
             rules = dict(DEFAULT_RULES)
-        return _render_partial("partials/permissions.html", rules=rules)
+        return _render_partial(
+            "partials/permissions.html", rules=rules, scope=scope, personae=personae
+        )
+
+    @app.get("/partials/permissions", dependencies=[Depends(auth)])
+    async def partial_permissions(scope: str = "") -> HTMLResponse:
+        """Permissions tab partial."""
+        return await _render_permissions(scope)
 
     @app.get("/partials/skills", dependencies=[Depends(auth)])
     async def partial_skills() -> HTMLResponse:
@@ -1528,6 +1539,8 @@ def create_admin_app(
             return {"ok": False, "error": "Domain is required."}
         if level not in ("ALWAYS", "ASK", "NEVER"):
             level = "ASK"
+        # Global default scope on purpose: a per-domain browser trust toggle applies
+        # to every persona, not just one (#100 scoping is opt-in via the perms tab).
         agent.permissions.add_rule(f"run_command:*browser.py act*{domain}*", level)
         return {"ok": True, "rules": _browser_rules()}
 
@@ -2473,11 +2486,11 @@ def create_admin_app(
     # ── Permissions API ────────────────────────────────────────────────
 
     @app.get("/permissions", dependencies=[Depends(auth)])
-    async def list_permissions() -> dict:
+    async def list_permissions(scope: str = "") -> dict:
         agent = agent_state.agent
         if not agent:
             raise HTTPException(503, "Agent not running")
-        return {"rules": agent.permissions.rules}
+        return {"scope": scope, "rules": agent.permissions.rules_for_scope(scope)}
 
     @app.post("/permissions", dependencies=[Depends(auth)])
     async def upsert_permission(request: Request) -> HTMLResponse:
@@ -2488,10 +2501,10 @@ def create_admin_app(
         body = await request.form()
         pattern = body.get("pattern", "")
         level = body.get("level", "ASK")
+        scope = str(body.get("scope", ""))
         if pattern:
-            agent.permissions.add_rule(str(pattern), str(level))
-        rules = agent.permissions.rules
-        return _render_partial("partials/permissions.html", rules=rules)
+            agent.permissions.add_rule(str(pattern), str(level), scope)
+        return await _render_permissions(scope)
 
     @app.post("/permissions/delete", dependencies=[Depends(auth)])
     async def delete_permission(request: Request) -> HTMLResponse:
@@ -2505,10 +2518,10 @@ def create_admin_app(
         else:
             body = await request.json()
         pattern = str(body.get("pattern", ""))
-        if pattern and pattern in agent.permissions.rules:
-            del agent.permissions.rules[pattern]
-        rules = agent.permissions.rules
-        return _render_partial("partials/permissions.html", rules=rules)
+        scope = str(body.get("scope", ""))
+        if pattern:
+            agent.permissions.remove_rule(pattern, scope)
+        return await _render_permissions(scope)
 
     # ── Skills API ────────────────────────────────────────────────────────
 

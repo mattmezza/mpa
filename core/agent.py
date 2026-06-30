@@ -1996,6 +1996,9 @@ class AgentCore:
         if request_state is None:
             request_state = self._new_request_state()
 
+        # Permission rules are scoped to the active persona (#100); "" = default.
+        persona_scope = request_state.get("persona_name") or ""
+
         is_write_action = self.permissions.is_write_action(name, params)
         # Write-state is tracked per distinct action (tool + params), so a
         # failure, skip, or completion of one write never blocks a different one.
@@ -2030,7 +2033,7 @@ class AgentCore:
             }
 
         # --- Permission check ---
-        level = self.permissions.check(name, params)
+        level = self.permissions.check(name, params, scope=persona_scope)
 
         if level == PermissionLevel.NEVER:
             log.warning("Permission DENIED (NEVER): %s — %s", name, params)
@@ -2055,7 +2058,9 @@ class AgentCore:
             elif not is_write_action and isinstance(approvals, dict) and match_key in approvals:
                 decision = approvals[match_key]
             else:
-                decision = await self._request_approval(name, params, channel, user_id)
+                decision = await self._request_approval(
+                    name, params, channel, user_id, scope=persona_scope
+                )
                 if is_write_action:
                     write_decisions[write_sig] = decision
                 elif isinstance(approvals, dict):
@@ -2081,7 +2086,9 @@ class AgentCore:
                 # command and nullify the allowlist (#79); learn_always_rule
                 # refuses those and keeps asking.
                 self.permissions.learn_always_rule(
-                    self.permissions.match_key(name, params), generalize=False
+                    self.permissions.match_key(name, params),
+                    generalize=False,
+                    scope=persona_scope,
                 )
 
         # --- Dispatch ---
@@ -3327,7 +3334,7 @@ class AgentCore:
         return result
 
     async def _request_approval(
-        self, tool_name: str, params: dict, channel: str, user_id: str
+        self, tool_name: str, params: dict, channel: str, user_id: str, scope: str = ""
     ) -> str:
         """Ask the user to approve a single tool call via their channel.
 
@@ -3339,6 +3346,7 @@ class AgentCore:
             user_id,
             tool_name,
             params,
+            scope=scope,
         )
 
     async def _batch_approve_writes(
@@ -3361,13 +3369,16 @@ class AgentCore:
         """
         if channel == "system" or request_state.get("yolo"):
             return  # YOLO: writes fall through to _execute_tool's auto-approve
+        scope = request_state.get("persona_name") or ""  # per-persona rules (#100)
         write_decisions = request_state.setdefault("write_decisions", {})
         pending: list[tuple[str, str]] = []  # (signature, description)
         seen: set[str] = set()
         for call in tool_calls:
             if not self.permissions.is_write_action(call.name, call.arguments):
                 continue
-            if self.permissions.check(call.name, call.arguments) != PermissionLevel.ASK:
+            if self.permissions.check(call.name, call.arguments, scope=scope) != (
+                PermissionLevel.ASK
+            ):
                 continue
             sig = self._write_signature(call.name, call.arguments)
             if sig in write_decisions or sig in seen:
@@ -3412,6 +3423,7 @@ class AgentCore:
         user_id: str,
         tool_name: str | None = None,
         params: dict | None = None,
+        scope: str = "",
     ) -> str:
         """Send an approval prompt to the channel and wait for the response.
 
@@ -3424,7 +3436,7 @@ class AgentCore:
             log.warning("No channel %r for approval, auto-approving", channel)
             return "approved"
 
-        request_id, future = self.permissions.create_approval_request(tool_name, params)
+        request_id, future = self.permissions.create_approval_request(tool_name, params, scope)
 
         # Send the approval prompt via the channel
         try:

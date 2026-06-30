@@ -513,7 +513,7 @@ def _job_call(call_id: str, **params):
     return LLMToolCall(id=call_id, name="manage_jobs", arguments={"action": "create", **params})
 
 
-async def _approve(name, params, channel, user_id):
+async def _approve(name, params, channel, user_id, scope=""):
     return "approved"
 
 
@@ -747,7 +747,7 @@ async def test_skipping_one_write_does_not_block_a_different_one(agent, monkeypa
     """Skipping a write blocks only that exact action, not other writes."""
     decisions = {"ping mum": "skipped", "ping dad": "approved"}
 
-    async def fake_approval(name, params, channel, user_id):
+    async def fake_approval(name, params, channel, user_id, scope=""):
         return decisions.get(params.get("task"), "approved")
 
     monkeypatch.setattr(agent, "_request_approval", fake_approval)

@@ -230,12 +230,33 @@ DEFAULT_RULES: dict[str, str] = {
 }
 
 
+# Rules are keyed by (scope, pattern): scope = persona/agent slug, "" = the
+# global default every persona falls back to (#100). SQLite can't add a column
+# to an existing primary key, so the migration in _ensure_schema rebuilds the
+# old single-scope table into this shape with existing rules as the default.
+_CREATE_PERMISSIONS = (
+    "CREATE TABLE IF NOT EXISTS permissions ("
+    "scope TEXT NOT NULL DEFAULT '', pattern TEXT NOT NULL, level TEXT NOT NULL, "
+    "created_at DATETIME DEFAULT (datetime('now')), "
+    "PRIMARY KEY (scope, pattern))"
+)
+
+
 class PermissionEngine:
-    """Check tool actions against permission rules using glob patterns."""
+    """Check tool actions against permission rules using glob patterns.
+
+    Rules are scoped per persona/agent (#100): each persona slug has its own
+    ruleset layered over the global default scope (``""``). ``self.rules`` is the
+    default set (seeded from :data:`DEFAULT_RULES` + persisted ``scope=''`` rows);
+    ``self.scoped`` holds each persona's overrides. A persona-specific rule wins
+    over a default rule of the same pattern; everything else falls back.
+    """
 
     def __init__(self, db_path: str = "data/config.db") -> None:
         self.db_path = db_path
         self.rules: dict[str, str] = dict(DEFAULT_RULES)
+        # persona/agent slug → its own {pattern: level} overrides (#100).
+        self.scoped: dict[str, dict[str, str]] = {}
         self._ready = False
         # Pending approval requests: request_id → PendingApproval
         self._pending: dict[str, PendingApproval] = {}
@@ -249,32 +270,63 @@ class PermissionEngine:
             return
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as db:
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS permissions ("
-                "pattern TEXT PRIMARY KEY, level TEXT NOT NULL, "
-                "created_at DATETIME DEFAULT (datetime('now'))"
-                ")"
-            )
+            cols = {row[1] for row in db.execute("PRAGMA table_info(permissions)").fetchall()}
+            if cols and "scope" not in cols:
+                # Pre-#100 table keyed by pattern only → rebuild with the composite
+                # key, existing rules becoming the global default scope ("").
+                # Drop any orphan from a prior interrupted migration so the rename
+                # can't fail on startup.
+                db.execute("DROP TABLE IF EXISTS permissions_legacy")
+                db.execute("ALTER TABLE permissions RENAME TO permissions_legacy")
+                db.execute(_CREATE_PERMISSIONS)
+                db.execute(
+                    "INSERT INTO permissions (scope, pattern, level, created_at) "
+                    "SELECT '', pattern, level, created_at FROM permissions_legacy"
+                )
+                db.execute("DROP TABLE permissions_legacy")
+            else:
+                db.execute(_CREATE_PERMISSIONS)
             db.execute("CREATE TABLE IF NOT EXISTS yolo (scope TEXT PRIMARY KEY)")
         self._ready = True
 
     def _load_persisted_rules(self) -> None:
         self._ensure_schema()
         with sqlite3.connect(self.db_path) as db:
-            rows = db.execute("SELECT pattern, level FROM permissions").fetchall()
-        for pattern, level in rows:
-            if level in (PermissionLevel.ALWAYS, PermissionLevel.ASK, PermissionLevel.NEVER):
+            rows = db.execute("SELECT scope, pattern, level FROM permissions").fetchall()
+        valid = (PermissionLevel.ALWAYS, PermissionLevel.ASK, PermissionLevel.NEVER)
+        for scope, pattern, level in rows:
+            if level not in valid:
+                continue
+            if scope:
+                self.scoped.setdefault(scope, {})[pattern] = level
+            else:
                 self.rules[pattern] = level
 
-    def _persist_rule(self, pattern: str, level: str) -> None:
+    def _persist_rule(self, pattern: str, level: str, scope: str = "") -> None:
         self._ensure_schema()
         with sqlite3.connect(self.db_path) as db:
             db.execute(
-                "INSERT INTO permissions (pattern, level) VALUES (?, ?) "
-                "ON CONFLICT(pattern) DO UPDATE SET level = excluded.level",
-                (pattern, level),
+                "INSERT INTO permissions (scope, pattern, level) VALUES (?, ?, ?) "
+                "ON CONFLICT(scope, pattern) DO UPDATE SET level = excluded.level",
+                (scope, pattern, level),
             )
             db.commit()
+
+    def _effective_rules(self, scope: str = "") -> dict[str, str]:
+        """The rules seen by ``scope``: persona overrides layered over the default.
+
+        No scope (or a persona with no own rules) → the default set unchanged, so
+        the hot ``check()`` path allocates nothing for the common case.
+        """
+        own = self.scoped.get(scope)
+        if not scope or not own:
+            return self.rules
+        return {**self.rules, **own}
+
+    def rules_for_scope(self, scope: str = "") -> dict[str, str]:
+        """Rules OWNED by a scope (for the admin editor): the default set for
+        ``""``, else just that persona's own overrides."""
+        return self.rules if not scope else self.scoped.get(scope, {})
 
     def _load_yolo(self) -> None:
         self._ensure_schema()
@@ -426,14 +478,19 @@ class PermissionEngine:
 
         return False
 
-    def check(self, tool_name: str, params: dict | None = None) -> str:
+    def check(self, tool_name: str, params: dict | None = None, scope: str = "") -> str:
         """Return the permission level for a tool call.
 
         Builds a match key like "run_command:himalaya envelope list ..."
         and checks it against all rules. First match wins, with more
         specific (longer) patterns tried first.
+
+        ``scope`` selects the persona/agent ruleset (#100): its own rules layer
+        over the global default, so a persona can tighten or loosen an action
+        without affecting others. Empty scope = the global default set.
         """
         match_key = self._build_match_key(tool_name, params)
+        rules = self._effective_rules(scope)
 
         # A run_command carrying shell control chars (; | & $() ` < > newline) can
         # chain a SECOND, unapproved command through /bin/sh -c. Such a command may
@@ -445,9 +502,9 @@ class PermissionEngine:
         )
 
         # Sort rules by pattern length descending so more specific rules match first
-        for pattern in sorted(self.rules, key=len, reverse=True):
+        for pattern in sorted(rules, key=len, reverse=True):
             if fnmatch.fnmatch(match_key, pattern):
-                level = self.rules[pattern]
+                level = rules[pattern]
                 if guard_wildcard_allow and level == PermissionLevel.ALWAYS and "*" in pattern:
                     continue  # a wildcard must not auto-approve a chained command
                 return level
@@ -455,15 +512,20 @@ class PermissionEngine:
         # Default: ASK for unknown actions (safe fallback)
         return PermissionLevel.ASK
 
-    def add_rule(self, pattern: str, level: str) -> None:
-        """Add or update a permission rule."""
+    def add_rule(self, pattern: str, level: str, scope: str = "") -> None:
+        """Add or update a permission rule in ``scope`` (default = global)."""
         if level not in (PermissionLevel.ALWAYS, PermissionLevel.ASK, PermissionLevel.NEVER):
             raise ValueError(f"Invalid permission level: {level!r}")
-        self.rules[pattern] = level
-        self._persist_rule(pattern, level)
-        log.info("Permission rule added: %s → %s", pattern, level)
+        if scope:
+            self.scoped.setdefault(scope, {})[pattern] = level
+        else:
+            self.rules[pattern] = level
+        self._persist_rule(pattern, level, scope)
+        log.info("Permission rule added [%s]: %s → %s", scope or "default", pattern, level)
 
-    def learn_always_rule(self, match_key: str, *, generalize: bool = True) -> None:
+    def learn_always_rule(
+        self, match_key: str, *, generalize: bool = True, scope: str = ""
+    ) -> None:
         """Persist an ALWAYS rule learned from a single user approval — but only
         when the key is specific enough to be safe (see :meth:`_may_autolearn`).
 
@@ -471,33 +533,43 @@ class PermissionEngine:
         (the "always allow" button); leave it False to learn the exact command
         (read-action auto-approve). A degenerate/over-broad key is skipped so the
         action keeps asking instead of blanket-whitelisting the whole tool (#79).
+
+        The rule is learned into ``scope`` (the approving persona), so its
+        approval doesn't silently widen other personae. Skipped if the effective
+        ruleset for that scope already covers it.
         """
         pattern = self._rule_pattern(match_key) if generalize else match_key
         if not self._may_autolearn(pattern):
             log.warning("Refusing to auto-learn over-broad ALWAYS rule from %r", match_key)
             return
-        if pattern not in self.rules:
-            self.add_rule(pattern, PermissionLevel.ALWAYS)
+        if pattern not in self._effective_rules(scope):
+            self.add_rule(pattern, PermissionLevel.ALWAYS, scope)
 
-    def remove_rule(self, pattern: str) -> bool:
-        """Remove a permission rule if it exists."""
-        existed = pattern in self.rules
+    def remove_rule(self, pattern: str, scope: str = "") -> bool:
+        """Remove a permission rule from ``scope`` if it exists."""
+        target = self.rules if not scope else self.scoped.get(scope, {})
+        existed = pattern in target
         if existed:
-            del self.rules[pattern]
+            del target[pattern]
             self._ensure_schema()
             with sqlite3.connect(self.db_path) as db:
-                db.execute("DELETE FROM permissions WHERE pattern = ?", (pattern,))
+                db.execute(
+                    "DELETE FROM permissions WHERE scope = ? AND pattern = ?", (scope, pattern)
+                )
                 db.commit()
         return existed
 
     def create_approval_request(
-        self, tool_name: str | None = None, params: dict | None = None
+        self, tool_name: str | None = None, params: dict | None = None, scope: str = ""
     ) -> tuple[str, asyncio.Future[str]]:
         """Create a pending approval request. Returns (request_id, future).
 
         The caller awaits the future. When the user approves/denies via
         a channel callback, resolve_approval() completes the future with
         one of ``"approved"``, ``"denied"``, or ``"skipped"``.
+
+        ``scope`` is the persona that asked, so an "always allow" learns the rule
+        into that persona's ruleset rather than the global default (#100).
         """
         request_id = uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
@@ -509,6 +581,7 @@ class PermissionEngine:
         self._pending[request_id] = {
             "future": future,
             "match_key": self._build_match_key(tool_name, params),
+            "scope": scope,
         }
         return request_id, future
 
@@ -542,7 +615,7 @@ class PermissionEngine:
                 # next (different --url/--task/args) prompts again. See _rule_pattern.
                 # A degenerate key (bare run_command/generate_image) is refused so
                 # one click can't whitelist the whole tool (#79).
-                self.learn_always_rule(match_key, generalize=True)
+                self.learn_always_rule(match_key, generalize=True, scope=entry.get("scope", ""))
         if skipped:
             future.set_result("skipped")
         elif approved:
@@ -555,6 +628,7 @@ class PermissionEngine:
 class PendingApproval(TypedDict):
     future: asyncio.Future[str]
     match_key: str
+    scope: str
 
 
 def _preview(text: str, limit: int = 200) -> str:

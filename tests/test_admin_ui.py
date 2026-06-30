@@ -102,9 +102,12 @@ class _AgentStub:
     def __init__(self):
         self.channels = {"telegram": object()}
         self.scheduler = SimpleNamespace(scheduler=SimpleNamespace(get_jobs=lambda: [1, 2]))
+        perm_rules = {"run_command:jq*": "ALWAYS"}
         self.permissions = SimpleNamespace(
-            rules={"run_command:jq*": "ALWAYS"},
-            add_rule=lambda pattern, level: None,
+            rules=perm_rules,
+            add_rule=lambda pattern, level, scope="": perm_rules.__setitem__(pattern, level),
+            remove_rule=lambda pattern, scope="": perm_rules.pop(pattern, None) is not None,
+            rules_for_scope=lambda scope="": perm_rules if not scope else {},
         )
 
 
