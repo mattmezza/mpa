@@ -58,7 +58,6 @@ def resolve_prompt_block(default_text: str, override_text: str | None) -> str:
 @dataclass(slots=True)
 class PromptSections:
     intro: str
-    personalia: str
     character: str
     about_user: str
     tool_usage: str
@@ -76,7 +75,6 @@ class PromptSections:
     def full_prompt(self) -> str:
         parts = [
             self.intro,
-            self.personalia,
             self.character,
             self.about_user,
             self.tool_usage,
@@ -103,7 +101,6 @@ class PromptSections:
     def as_dict(self) -> dict[str, str]:
         return {
             "intro": self.intro,
-            "personalia": self.personalia,
             "character": self.character,
             "about_user": self.about_user,
             "tool_usage": self.tool_usage,
@@ -152,10 +149,9 @@ def build_prompt_sections(
         getattr(config.prompt, "history_handling_override", ""),
     )
 
-    # When a persona is active it supplies its own identity (personalia +
-    # character); otherwise the configured defaults are used, so first-run
-    # behaviour with no persona is unchanged.
-    personalia_text = persona.personalia if persona else cfg.personalia
+    # When a persona is active it supplies its own identity (character); otherwise
+    # the configured default is used, so first-run behaviour with no persona is
+    # unchanged. (personalia was merged into character in #98.)
     character_text = persona.character if persona else cfg.character
     # A persona may go by its own name; otherwise the globally-configured name.
     agent_name = persona.agent_name if persona and persona.agent_name else cfg.name
@@ -168,7 +164,6 @@ def build_prompt_sections(
     if persona and persona.role:
         intro += f"\n\nYou are currently acting as the **{persona.role}** persona."
 
-    personalia = f"<personalia>\n{personalia_text}\n</personalia>"
     character = f"<character>\n{character_text}\n</character>"
     about_user = f"<about_user>\n{about_user_block}\n</about_user>" if about_user_block else ""
     tool_usage = f"<tool_usage>\n{tool_usage_text}\n</tool_usage>"
@@ -255,7 +250,6 @@ def build_prompt_sections(
 
     return PromptSections(
         intro=intro,
-        personalia=personalia,
         character=character,
         about_user=about_user,
         tool_usage=tool_usage,

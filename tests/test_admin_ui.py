@@ -39,8 +39,6 @@ class _ConfigStoreStub:
             return "salt"
         if key == "agent.character":
             return "# Test character"
-        if key == "agent.personalia":
-            return "# Test personalia"
         return None
 
     async def get_all_redacted(self) -> dict:
@@ -75,8 +73,6 @@ class _ConfigStoreStub:
                 cfg.agent.timezone = value
             elif key == "agent.character":
                 cfg.agent.character = value
-            elif key == "agent.personalia":
-                cfg.agent.personalia = value
             elif key == "you.personalia":
                 cfg.you.personalia = value
             elif key == "history.mode":
@@ -204,7 +200,7 @@ class TestPartialRoutes:
         resp = client.get("/partials/identity", headers=AUTH)
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
-        assert "character" in resp.text.lower() or "personalia" in resp.text.lower()
+        assert "character" in resp.text.lower()
 
     def test_identity_partial_has_voice_backend_and_kokoro(self):
         # #84: backend selector + Kokoro voice picker + preview wiring.
@@ -556,12 +552,6 @@ class TestConfigAPI:
         assert resp.status_code == 200
         assert resp.json()["content"] == "# Test character"
 
-    def test_get_personalia(self):
-        client = _client(setup_complete=True)
-        resp = client.get("/config/personalia", headers=AUTH)
-        assert resp.status_code == 200
-        assert resp.json()["content"] == "# Test personalia"
-
     def test_save_character(self):
         store = _ConfigStoreStub(setup_complete=True)
         agent_state = AgentState(agent=cast(Any, _AgentStub()))
@@ -575,20 +565,6 @@ class TestConfigAPI:
         )
         assert resp.status_code == 200
         assert store._data.get("agent.character") == "# New character"
-
-    def test_save_personalia(self):
-        store = _ConfigStoreStub(setup_complete=True)
-        agent_state = AgentState(agent=cast(Any, _AgentStub()))
-        app, _ = create_admin_app(agent_state, cast(ConfigStore, store))
-        client = TestClient(app, follow_redirects=False)
-
-        resp = client.post(
-            "/config/personalia",
-            json={"content": "# New personalia"},
-            headers=AUTH,
-        )
-        assert resp.status_code == 200
-        assert store._data.get("agent.personalia") == "# New personalia"
 
     def test_get_you_personalia(self):
         store = _ConfigStoreStub(setup_complete=True)
@@ -627,7 +603,6 @@ class TestConfigAPI:
         store._data["agent.name"] = "Clio"
         store._data["agent.owner_name"] = "Matteo"
         store._data["agent.character"] = "# Character"
-        store._data["agent.personalia"] = "# Personalia"
         store._data["you.personalia"] = "Likes espresso"
         agent_state = AgentState(agent=cast(Any, _AgentStub()))
         app, _ = create_admin_app(agent_state, cast(ConfigStore, store))

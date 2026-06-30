@@ -79,8 +79,7 @@ def test_persona_crud_and_activation(tmp_path) -> None:
             "role": "Fitness coach",
             "emoji": "🏋️",
             "voice": "en-US-GuyNeural",
-            "personalia": "You are Forge.",
-            "character": "Direct.",
+            "character": "You are Forge. Direct.",
             "skills": ["memory"],
             "tools": ["run_command"],
             "secrets": ["persona:coach:*"],
@@ -110,12 +109,13 @@ def test_persona_crud_and_activation(tmp_path) -> None:
 
 def test_persona_raw_markdown_upsert(tmp_path) -> None:
     client, _ = _client(tmp_path)
+    # A legacy `personalia:` key still parses — folded into character (#98).
     raw = "---\nrole: Writer\nskills: [memory]\ntools: []\npersonalia: |\n  Editor.\n---\n"
     r = client.post("/personae", json={"name": "writer", "raw": raw}, headers=AUTH)
     assert r.status_code == 200
     got = client.get("/personae/writer", headers=AUTH).json()
     assert got["role"] == "Writer" and got["skills"] == ["memory"]
-    assert "Editor." in got["personalia"]
+    assert "Editor." in got["character"]
 
 
 def test_persona_bot_fields_persist(tmp_path) -> None:
