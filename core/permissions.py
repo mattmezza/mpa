@@ -203,6 +203,9 @@ DEFAULT_RULES: dict[str, str] = {
     "send_email": "ASK",
     "reply_email": "ASK",
     "send_message": "ASK",
+    # Reactions are cosmetic, carry no data, and can't exfiltrate — pre-approved
+    # so a quick emoji ack never interrupts the user with a prompt (#70).
+    "set_reaction": "ALWAYS",
     "create_calendar_event": "ASK",
     "run_command:himalaya*send*": "ASK",
     "run_command:himalaya*delete*": "ASK",
