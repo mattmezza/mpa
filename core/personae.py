@@ -6,7 +6,9 @@ finance assistant, …). It is exactly four things (issue #13):
 - its own system-prompt identity (``personalia`` + ``character``),
 - a **skill allowlist** (which skills it may load — empty means *all*),
 - a **tool scope** (which function-tools are advertised — empty means *all*),
-- a **secret scope** (vault namespaces it may use — stored now, enforced by #19).
+- a **secret scope** (vault namespaces it may use — stored now, enforced by #19),
+- **tool identities** (``tool_config``: own ``gh`` token / browser profile per
+  external CLI tool — #93; empty means *inherit the system-wide config*).
 
 The store mirrors :mod:`core.skills`: markdown files with YAML frontmatter,
 seeded into SQLite at startup, editable in the admin UI. When no persona is
