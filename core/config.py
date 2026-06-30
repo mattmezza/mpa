@@ -74,6 +74,12 @@ class AgentConfig(BaseModel):
     deepseek_base_url: str = ""
     model: str = "deepseek-v4-flash"
     thinking_level: str = ""  # "" (off) | "low" | "medium" | "high" — only for reasoning models
+    # Hard ceiling on tokens the model may emit per response. The agentic loop
+    # truncates mid-tool-call when this is too small for the output (e.g. a large
+    # write_artifact payload), so keep it generous. 8192 is safe across providers;
+    # raise it on the LLM admin tab for capable models (Claude allows up to
+    # 128000 — note large non-streaming outputs can approach provider timeouts).
+    max_tokens: int = 8192
     timezone: str = "Europe/Zurich"
     skills_dir: str = "skills/"
     skills_db_path: str = "data/skills.db"

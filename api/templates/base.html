@@ -82,7 +82,7 @@
     }
     window.restartAgentNow = restartAgentNow;
 
-    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel, rdEnabled, rdProvider, rdModel, rdThinkingLevel, rdGroupOnly, rdMaxReplies, rdWindowSeconds) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel, rdEnabled, rdProvider, rdModel, rdThinkingLevel, rdGroupOnly, rdMaxReplies, rdWindowSeconds, maxTokens) {
       const currentProvider = provider || 'anthropic';
       return {
         providerOptions: [
@@ -95,6 +95,7 @@
         provider: currentProvider,
         apiKey: apiKey || '',
         model: model || '',
+        maxTokens: maxTokens || '8192',
         thinkingLevel: thinkingLevel || '',
         extractionThinkingLevel: extractionThinkingLevel || '',
         consolidationThinkingLevel: consolidationThinkingLevel || '',

@@ -60,6 +60,65 @@ async def test_anthropic_generate_text_sends_effort_when_set() -> None:
     assert kwargs["output_config"] == {"effort": "low"}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stop_reason", "expected"),
+    [("max_tokens", True), ("end_turn", False)],
+)
+async def test_anthropic_generate_flags_truncation(stop_reason: str, expected: bool) -> None:
+    """stop_reason == 'max_tokens' means the response (incl. tool args) was cut off (#77)."""
+    client = LLMClient("anthropic", "x")
+    resp = type("R", (), {"content": [], "usage": None, "stop_reason": stop_reason})()
+    create = AsyncMock(return_value=resp)
+    client._client = type("C", (), {"messages": type("M", (), {"create": create})()})()
+
+    out = await client.generate(model="claude-4-6-opus", system="s", messages=[], tools=[])
+    assert out.truncated is expected
+
+
+@pytest.mark.asyncio
+async def test_openai_generate_flags_truncation() -> None:
+    """OpenAI/DeepSeek signal the same cut-off via finish_reason == 'length' (#77)."""
+    client = LLMClient("openai", "x")
+    msg = type(
+        "Msg",
+        (),
+        {
+            "tool_calls": None,
+            "content": "hi",
+            "reasoning_content": None,
+            "reasoning": None,
+            "model_dump": lambda self, exclude_none=True: {"role": "assistant", "content": "hi"},
+        },
+    )()
+    choice = type("Choice", (), {"message": msg, "finish_reason": "length"})()
+    resp = type("R", (), {"choices": [choice], "usage": None})()
+    create = AsyncMock(return_value=resp)
+    completions = type("Co", (), {"create": create})()
+    client._client = type("C", (), {"chat": type("Ch", (), {"completions": completions})()})()
+
+    out = await client.generate(model="deepseek-v4-flash", system="s", messages=[], tools=[])
+    assert out.truncated is True
+
+
+def test_truncation_tool_results_carries_notice() -> None:
+    """A truncated round feeds back the notice per pending call instead of executing it (#77)."""
+    import json
+
+    from core.agent import _TRUNCATION_NOTICE, _truncation_tool_results
+
+    call = type("Call", (), {"id": "tu_1"})()
+    response = type("Resp", (), {"tool_calls": [call]})()
+    results = _truncation_tool_results(response)
+    assert results == [
+        {
+            "type": "tool_result",
+            "tool_use_id": "tu_1",
+            "content": json.dumps({"error": _TRUNCATION_NOTICE}),
+        }
+    ]
+
+
 def test_reasoning_kwargs_per_provider() -> None:
     assert LLMClient("openai", "x", thinking_level="high")._reasoning_kwargs() == {
         "reasoning_effort": "high"

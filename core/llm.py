@@ -79,6 +79,11 @@ class LLMResponse:
     # input_tokens, output_tokens, cache_read_input_tokens,
     # cache_creation_input_tokens, context_tokens (= full prompt size).
     usage: dict[str, int] | None = None
+    # True when the provider stopped at the output-token limit (Anthropic
+    # stop_reason == "max_tokens" / OpenAI finish_reason == "length"), i.e. the
+    # response — including any tool-call arguments — was cut off mid-stream. The
+    # agent loop surfaces this instead of running a half-built tool call.
+    truncated: bool = False
 
 
 def _anthropic_usage(response: Any) -> dict[str, int] | None:
@@ -314,6 +319,7 @@ class LLMClient:
                 reasoning=reasoning,
                 raw=response.content,
                 usage=_anthropic_usage(response),
+                truncated=getattr(response, "stop_reason", None) == "max_tokens",
             )
 
         openai_tools = _openai_tools(tools)
@@ -347,6 +353,7 @@ class LLMClient:
             reasoning=reasoning,
             raw=message.model_dump(exclude_none=True),
             usage=_openai_usage(response),
+            truncated=getattr(response.choices[0], "finish_reason", None) == "length",
         )
 
     def assistant_message(self, response: LLMResponse) -> dict[str, Any]:

@@ -12,6 +12,7 @@ agent:
   deepseek_api_key: "${DEEPSEEK_API_KEY}"
   deepseek_base_url: "${DEEPSEEK_BASE_URL}"
   model: "deepseek-v4-flash"
+  max_tokens: 8192                  # max tokens the model may emit per response; raise for capable models (Claude up to 128000)
   timezone: "Europe/Zurich"
   skills_dir: "skills/"
   personae_dir: "personae/"        # starter-gallery seed directory
