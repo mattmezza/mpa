@@ -439,8 +439,10 @@ class AgentState:
 # ---------------------------------------------------------------------------
 
 # Structured entries (not formatted strings) so the Logs tab can filter by
-# stream / level / time / text server-side (#75).
-_LOG_BUFFER: collections.deque[dict] = collections.deque(maxlen=500)
+# stream / level / time / text server-side (#75). 5000 lines ≈ a couple of MB and
+# gives the stream/time filters enough history to be useful (the view still caps
+# at the last 300 matches).
+_LOG_BUFFER: collections.deque[dict] = collections.deque(maxlen=5000)
 
 _LOG_INCLUDE_PREFIXES = ("core.", "channels.", "voice.", "tools.")
 _LOG_INCLUDE_NAMES = {"core", "channels", "voice", "tools"}
