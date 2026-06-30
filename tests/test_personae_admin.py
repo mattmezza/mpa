@@ -44,11 +44,20 @@ class _Store:
         return {}
 
 
+class _SchedulerSpy:
+    def __init__(self):
+        self.reloads = 0
+
+    async def load_jobs(self):
+        self.reloads += 1
+
+
 class _AgentStub:
     def __init__(self):
         self.config = Config()
         self.channels = {}
         self.job_store = None  # rename route reaches _get_job_store(); set per-test
+        self.scheduler = _SchedulerSpy()
 
 
 def _client(tmp_path):
@@ -194,6 +203,7 @@ def test_persona_rename_cascades(tmp_path) -> None:
     assert client.get("/personae/coach", headers=AUTH).status_code == 404
     assert client.get("/personae/trainer", headers=AUTH).status_code == 200
     assert agent.config.agent.active_persona == "trainer"
+    assert agent.scheduler.reloads == 1  # live scheduler re-registered the renamed job
 
     async def check() -> None:
         h = ConversationHistory(db_path=history_db)
@@ -208,6 +218,15 @@ def test_persona_rename_cascades(tmp_path) -> None:
         assert job["persona"] == "trainer" and job["channel"] == "telegram:trainer"
 
     asyncio.run(check())
+
+
+def test_persona_create_rejects_bad_slug(tmp_path) -> None:
+    # The slug guard applies to the create path too, so a malformed slug can't be
+    # introduced and then break channel/URL routing (#69).
+    client, _ = _client(tmp_path)
+    for bad in ("te:am", "my persona", "has/slash", ""):
+        r = client.post("/personae", json={"name": bad, "role": "X"}, headers=AUTH)
+        assert r.status_code == 400, bad
 
 
 def test_persona_rename_validation(tmp_path) -> None:

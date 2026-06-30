@@ -54,7 +54,9 @@ log = logging.getLogger(__name__)
 
 # A persona slug becomes part of a channel name (``telegram:<slug>``) and a URL
 # path (``/admin/personae/<slug>``), so it must avoid ':' , '/' and whitespace.
-_VALID_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+# Capped at 64 chars so it can't bloat every channel string it is embedded in.
+_VALID_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_SLUG_ERROR = "Slug must be 1-64 chars: letters, digits, '-' and '_' only (no spaces or ':')."
 
 # ---------------------------------------------------------------------------
 # Google OAuth 2.0 constants (for CalDAV calendar access)
@@ -2551,6 +2553,8 @@ def create_admin_app(
         name = body.name.strip()
         if not name:
             raise HTTPException(400, "Persona name is required")
+        if not _VALID_SLUG.match(name):
+            raise HTTPException(400, _SLUG_ERROR)
         # Raw markdown (power-user mode) wins over the structured fields.
         if body.raw.strip():
             persona = parse_markdown(body.raw, name=name)
@@ -2620,19 +2624,18 @@ def create_admin_app(
         if old == new:
             return await _personae_partial()  # no-op
         if not _VALID_SLUG.match(new):
-            raise HTTPException(
-                400, "Slug may contain only letters, digits, '-' and '_' (no spaces or ':')."
-            )
+            raise HTTPException(400, _SLUG_ERROR)
         store = await _persona_store_from_config(config_store)
-        try:
-            renamed = await store.rename(old, new)
-        except ValueError as exc:
-            raise HTTPException(409, str(exc))
-        if not renamed:
+        if await store.get(old) is None:
             raise HTTPException(404, f"Persona not found: {old}")
-        # ponytail: best-effort cascade across the separate SQLite DBs — there is
-        # no cross-DB transaction; a missed ref just falls back to the default
-        # identity at runtime, never corrupts data.
+        if await store.get(new) is not None:
+            raise HTTPException(409, f"A persona named '{new}' already exists")
+        # ponytail: best-effort cascade across the separate SQLite DBs — no cross-DB
+        # transaction. The references are repointed first and the personae PK row is
+        # renamed LAST, so if any step fails the old slug still fully resolves and the
+        # whole rename is safe to retry (the ref updates are idempotent no-ops once
+        # moved). A missed ref only ever falls back to the default identity, never
+        # corrupts data.
         history = await _history_from_config(config_store)
         await history.rename_persona(old, new)
         from core.memory import MemoryStore
@@ -2640,8 +2643,15 @@ def create_admin_app(
         memory_db = await config_store.get("memory.db_path") or "data/memory.db"
         await MemoryStore(db_path=memory_db).rename_scope(old, new)
         await _get_job_store().rename_persona(old, new)
+        await store.rename(old, new)
         if (await config_store.get("agent.active_persona") or "").strip() == old:
             await _set_active_persona(new)
+        # Re-register live scheduler jobs so a renamed persona's cron/once jobs fire
+        # under the new slug + channel immediately, not only after a restart. Bot
+        # channels still need a restart (they are created at startup).
+        agent = agent_state.agent
+        if agent is not None:
+            await agent.scheduler.load_jobs()
         return await _personae_partial()
 
     @app.post("/personae/activate", dependencies=[Depends(auth)])
