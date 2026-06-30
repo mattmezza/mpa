@@ -109,7 +109,23 @@ web-only; over Telegram you can see names and access but never values.
 
 ### Logs
 
-Real-time log viewer for debugging and monitoring agent behavior.
+Real-time log viewer for debugging and monitoring agent behavior. Each line is
+tagged with the **stream** it belongs to — the active persona's slug, or
+`default` for the base identity — shown as a colour-coded `[stream]` badge so
+concurrent agents are easy to tell apart. A [subagent](/docs/subagents)'s lines
+(its reasoning and tool calls) flow into the **same stream as the agent that
+spawned it**, prefixed `[subagent:<id>]`, so one stream is a full logical session
+regardless of how many subagents were involved.
+
+The filter bar narrows the view:
+
+- **Stream** — pick a name from the live list, or type a **regex** to match several
+- **Level** — minimum severity (`DEBUG` → `ERROR`)
+- **Search** — free-text match within the line
+- **From / To** — a timestamp range
+
+**Auto-refresh** re-polls every few seconds keeping the active filters; model
+chain-of-thought lines render in a distinct style.
 
 ## Setup wizard
 
