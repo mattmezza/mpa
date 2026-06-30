@@ -1,0 +1,58 @@
+{# Inspect tab — master/detail view of active contexts and the exact payload
+   last sent to the LLM for each (#99). Master lists contexts newest-active
+   first; selecting one loads its last-sent context into the detail pane. #}
+<div x-data="{ filter: '', selected: 0 }">
+  <div class="card mb-4">
+    <h2 class="text-base mb-0.5">Inspect</h2>
+    <p class="text-muted text-xs">
+      Every active context, most recently used first. Select one to see the exact
+      payload last sent to the model — system prompt/identity, history window, and
+      tool definitions — the last time it ran. Admin-only; captured in memory while
+      the agent runs, so a context is blank until it has had a turn since startup.
+    </p>
+  </div>
+
+  <div class="flex flex-col lg:flex-row gap-3">
+    {# Master — context list, newest-active first #}
+    <div class="lg:w-80 lg:shrink-0 flex flex-col gap-2">
+      <input type="text" class="input-sm" placeholder="Filter contexts..." x-model="filter">
+      <span class="text-muted text-xs">{{ chats|length }} context{{ '' if chats|length == 1 else 's' }}</span>
+      <div class="flex flex-col gap-1 overflow-y-auto" style="max-height: 32rem">
+        {% for c in chats %}
+        <button type="button"
+                class="card text-left flex flex-col gap-0.5 py-2"
+                :class="selected === {{ loop.index0 }} ? 'border-accent' : ''"
+                @click="selected = {{ loop.index0 }}"
+                x-show="!filter
+                        || {{ c.channel|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
+                        || {{ c.user_id|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
+                        || {{ c.chat_id|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())"
+                hx-get="/inspect/payload?channel={{ c.channel|urlencode }}&user_id={{ c.user_id|urlencode }}&chat_id={{ c.chat_id|urlencode }}"
+                hx-target="#inspect-detail" hx-swap="innerHTML"
+                hx-trigger="click{% if loop.first %}, load{% endif %}">
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="badge-ok whitespace-nowrap">{{ c.channel }}</span>
+            <span class="text-sm font-semibold break-all flex-1 min-w-0">{{ c.chat_id or '(default)' }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-muted text-xs break-all">user {{ c.user_id }}</span>
+            {% if c.last_active_h %}
+            <span class="text-muted text-xs whitespace-nowrap">{{ c.last_active_h }}</span>
+            {% endif %}
+          </div>
+        </button>
+        {% endfor %}
+        {% if not chats %}
+        <div class="text-muted text-xs text-center py-6">
+          No contexts yet. They appear here once a conversation has started.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Detail — last-sent payload for the selected context #}
+    <div id="inspect-detail" class="flex-1 min-w-0">
+      <div class="text-muted text-xs">Select a context to inspect its last-sent payload.</div>
+    </div>
+  </div>
+</div>

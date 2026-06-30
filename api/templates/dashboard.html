@@ -76,10 +76,6 @@
             @click="select('personae')">
       Personae
     </button>
-    <button class="tab-link" :class="tab === 'chats' && 'tab-link-active'"
-            @click="select('chats')">
-      Chats
-    </button>
     <button class="tab-link" :class="tab === 'llm' && 'tab-link-active'"
             @click="select('llm')">
       LLM
@@ -144,6 +140,10 @@
             @click="select('logs')">
       Logs
     </button>
+    <button class="tab-link" :class="tab === 'inspect' && 'tab-link-active'"
+            @click="select('inspect')">
+      Inspect
+    </button>
   </div>
 
   {# Tab content — initially loads config #}
@@ -162,6 +162,49 @@
     script.async = true;
     document.head.appendChild(script);
   })();
+
+  // Inspect tab — copy/download the raw last-sent payload (#99). Read the text
+  // straight from the rendered <pre> so there's no second copy to keep in sync.
+  function inspectRawText(btn) {
+    const pre = btn.closest('details').querySelector('[data-raw]');
+    return pre ? pre.textContent : '';
+  }
+  function inspectFlash(btn, msg) {
+    const orig = btn.dataset.orig || btn.textContent;
+    btn.dataset.orig = orig;
+    btn.textContent = msg;
+    setTimeout(() => { btn.textContent = orig; }, 1200);
+  }
+  function inspectCopyJSON(btn) {
+    const text = inspectRawText(btn);
+    const ok = () => inspectFlash(btn, 'Copied!');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok).catch(() => inspectCopyFallback(text, ok));
+    } else {
+      inspectCopyFallback(text, ok);
+    }
+  }
+  function inspectCopyFallback(text, ok) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); ok(); } catch (e) { /* clipboard blocked */ }
+    ta.remove();
+  }
+  function inspectDownloadJSON(btn) {
+    const blob = new Blob([inspectRawText(btn)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = btn.dataset.filename || 'inspect-payload.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
   function agentControl() {
     return {
       busy: false,
@@ -662,7 +705,6 @@
       identity: '/partials/identity',
       you: '/partials/you',
       personae: '/partials/personae',
-      chats: '/partials/chats',
       llm: '/partials/llm',
       memory: '/partials/memory',
       history: '/partials/history',
@@ -678,7 +720,8 @@
       email: '/partials/email',
       secrets: '/partials/secrets',
       admin: '/partials/admin',
-      logs: '/partials/logs'
+      logs: '/partials/logs',
+      inspect: '/partials/inspect'
     };
 
     return {
