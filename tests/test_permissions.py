@@ -332,6 +332,27 @@ def test_legacy_table_migrates_to_default_scope(tmp_path) -> None:
     assert "scope" in cols
 
 
+def test_migration_survives_orphan_legacy_table(tmp_path) -> None:
+    # A prior migration that died mid-way can leave a `permissions_legacy` table.
+    # The rename must not crash on the next startup.
+    db = str(tmp_path / "config.db")
+    with sqlite3.connect(db) as raw:
+        raw.execute(
+            "CREATE TABLE permissions ("
+            "pattern TEXT PRIMARY KEY, level TEXT NOT NULL, "
+            "created_at DATETIME DEFAULT (datetime('now')))"
+        )
+        raw.execute(
+            "INSERT INTO permissions (pattern, level) VALUES (?, ?)",
+            ("run_command:legacytool*", "ALWAYS"),
+        )
+        raw.execute("CREATE TABLE permissions_legacy (junk TEXT)")  # orphan
+        raw.commit()
+
+    engine = PermissionEngine(db_path=db)  # must not raise
+    assert engine.rules.get("run_command:legacytool*") == "ALWAYS"
+
+
 def test_format_approval_message_run_command_includes_purpose() -> None:
     engine = PermissionEngine()
     text = engine.format_approval_message(

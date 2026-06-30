@@ -274,6 +274,9 @@ class PermissionEngine:
             if cols and "scope" not in cols:
                 # Pre-#100 table keyed by pattern only → rebuild with the composite
                 # key, existing rules becoming the global default scope ("").
+                # Drop any orphan from a prior interrupted migration so the rename
+                # can't fail on startup.
+                db.execute("DROP TABLE IF EXISTS permissions_legacy")
                 db.execute("ALTER TABLE permissions RENAME TO permissions_legacy")
                 db.execute(_CREATE_PERMISSIONS)
                 db.execute(

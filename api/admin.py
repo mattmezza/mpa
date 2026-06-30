@@ -1539,6 +1539,8 @@ def create_admin_app(
             return {"ok": False, "error": "Domain is required."}
         if level not in ("ALWAYS", "ASK", "NEVER"):
             level = "ASK"
+        # Global default scope on purpose: a per-domain browser trust toggle applies
+        # to every persona, not just one (#100 scoping is opt-in via the perms tab).
         agent.permissions.add_rule(f"run_command:*browser.py act*{domain}*", level)
         return {"ok": True, "rules": _browser_rules()}
 
