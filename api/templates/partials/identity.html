@@ -151,7 +151,7 @@
           <option value="edge-tts">Edge TTS (cloud)</option>
           <option value="kokoro">Kokoro 82M (offline, multilingual)</option>
         </select>
-        <p class="text-muted text-xs mt-1">Kokoro runs on-device and needs the model bundled (<code>--build-arg INSTALL_KOKORO=true</code>); it falls back to Edge TTS if unavailable.</p>
+        <p class="text-muted text-xs mt-1">Kokoro runs on-device (model bundled by default); it falls back to Edge TTS if the model isn't available. Restart after changing.</p>
       </div>
 
       {# Edge voice #}

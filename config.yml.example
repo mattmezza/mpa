@@ -61,10 +61,10 @@ voice:
   tts_voice: "en-US-GuyNeural"
   tts_enabled: true
   backend: "edge-tts"          # "edge-tts" (cloud, default) | "kokoro" (offline, on-device)
-  # Kokoro 82M: offline multilingual TTS (#84). Build the image with
-  # --build-arg INSTALL_KOKORO=true to bundle the model, then set backend: kokoro.
-  # Falls back to edge-tts if the model can't load. Per-persona voices: set
-  # `voice: af_bella` in a persona's frontmatter.
+  # Kokoro 82M: offline multilingual TTS (#84). The Docker image bundles the
+  # model by default, so just set backend: kokoro. (Opt out of the bundle with
+  # --build-arg INSTALL_KOKORO=false.) Falls back to edge-tts if the model can't
+  # load. Per-persona voices: set `voice: af_bella` in a persona's frontmatter.
   kokoro:
     model_path: "models/kokoro/kokoro-v1.0.onnx"
     voices_path: "models/kokoro/voices-v1.0.bin"

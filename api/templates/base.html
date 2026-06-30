@@ -100,8 +100,10 @@
         .then(blob => {
           const url = URL.createObjectURL(blob);
           const audio = new Audio(url);
-          audio.onended = () => URL.revokeObjectURL(url);
-          audio.play();
+          const cleanup = () => URL.revokeObjectURL(url);
+          audio.onended = cleanup;
+          audio.onerror = cleanup;
+          audio.play().catch(cleanup);  // autoplay rejection etc. — don't leak the URL
         })
         .catch(e => { if (window.showToast) showToast(e.message, false); })
         .finally(() => { if (btn) { btn.disabled = false; btn.textContent = original || '▶ Preview'; } });

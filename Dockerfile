@@ -37,6 +37,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev --no-install-project
 
+# Offline on-device TTS (Kokoro, issue #84). ON by default so switching the TTS
+# backend to "kokoro" works out of the box (edge-tts stays the default backend).
+# The extra pulls onnxruntime (~200MB) plus the model later (~325MB); opt out for
+# a leaner edge-tts-only image with: docker build --build-arg INSTALL_KOKORO=false .
+ARG INSTALL_KOKORO=true
+RUN if [ "$INSTALL_KOKORO" = "true" ]; then \
+      uv sync --no-dev --no-install-project --extra kokoro; \
+    fi
+
 # Bundle full Chromium for the browser tool (Tools tab: browser, issue #16).
 # ON by default: a self-contained image avoids the runtime `playwright install`
 # fetch, which flakes on remote hosts with spotty networking. Adds ~500-700MB.
@@ -73,6 +82,18 @@ COPY api/ api/
 # default in sync with EmbeddingConfig (core/config.py).
 ARG EMBED_MODEL=BAAI/bge-small-en-v1.5
 RUN uv run python -m core.embeddings prefetch "${EMBED_MODEL}" /app/models
+
+# Prefetch Kokoro TTS model + voices when the kokoro backend is enabled (#84),
+# mirroring the Whisper/embedding prefetch so the container runs fully offline.
+# Stored in /app/models (OUTSIDE the /app/data volume) — keep paths in sync with
+# KokoroConfig (core/config.py). Gated on the same INSTALL_KOKORO arg as above.
+RUN if [ "$INSTALL_KOKORO" = "true" ]; then \
+      mkdir -p /app/models/kokoro && \
+      curl -sSL https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx \
+        -o /app/models/kokoro/kokoro-v1.0.onnx && \
+      curl -sSL https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin \
+        -o /app/models/kokoro/voices-v1.0.bin; \
+    fi
 
 # Build CSS with Tailwind CSS v4 standalone CLI
 RUN ARCH=$(dpkg --print-architecture) && \

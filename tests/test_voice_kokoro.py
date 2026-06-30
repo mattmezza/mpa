@@ -98,6 +98,23 @@ def test_synthesize_falls_back_to_edge_on_kokoro_error(monkeypatch):
     assert seen["voice"] is None  # Kokoro voice name dropped so edge-tts accepts it (#84)
 
 
+def test_synthesize_edge_backend_drops_kokoro_voice(monkeypatch):
+    """Edge backend (no Kokoro loaded) must not hand a Kokoro voice to edge-tts,
+    but must keep a real edge voice (#84)."""
+    p = _bare_pipeline()  # _kokoro is None → plain edge path
+    seen = {}
+
+    async def fake_edge(text, voice):
+        seen["voice"] = voice
+        return b"EDGE"
+
+    monkeypatch.setattr(p, "_synthesize_edge", fake_edge)
+    asyncio.run(p.synthesize("hi", voice="af_bella"))
+    assert seen["voice"] is None  # kokoro name dropped on the plain edge path
+    asyncio.run(p.synthesize("hi", voice="en-US-GuyNeural"))
+    assert seen["voice"] == "en-US-GuyNeural"  # edge voice preserved
+
+
 def test_synthesize_fallback_keeps_edge_voice(monkeypatch):
     """A persona's valid edge-tts voice must survive a Kokoro failure (#84)."""
     p = _bare_pipeline()

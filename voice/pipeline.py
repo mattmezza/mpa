@@ -39,7 +39,7 @@ def _lang_for_voice(voice: str) -> str:
 
 
 def _is_kokoro_voice(voice: str | None) -> bool:
-    """True for Kokoro-style names (``af_bella``, ``jm_kuma``) vs edge-tts
+    """True for Kokoro-style names (``af_bella``, ``jm_kumo``) vs edge-tts
     names (``en-US-GuyNeural``).  Lets the edge fallback keep a persona's
     edge voice instead of dropping every voice on Kokoro failure."""
     return bool(re.match(r"[a-z][fm]_", voice or ""))
@@ -253,13 +253,12 @@ class VoicePipeline:
             try:
                 return await self._synthesize_kokoro(text, voice)
             except Exception:
-                # A Kokoro voice name means nothing to edge-tts — drop it so the
-                # fallback uses the configured edge voice; but keep a real edge
-                # voice (e.g. a persona's) so its preference survives.
                 log.exception("Kokoro synthesis failed, falling back to edge-tts")
-                fallback = None if _is_kokoro_voice(voice) else voice
-                return await self._synthesize_edge(text, fallback)
-        return await self._synthesize_edge(text, voice)
+        # edge-tts path — primary backend, or the Kokoro fallback. edge-tts can't
+        # speak a Kokoro voice name (e.g. a persona configured with af_bella while
+        # the backend is edge-tts), so drop it to the configured default; keep a
+        # real edge voice so its preference survives.
+        return await self._synthesize_edge(text, None if _is_kokoro_voice(voice) else voice)
 
     async def _synthesize_edge(self, text: str, voice: str | None) -> bytes:
         communicate = edge_tts.Communicate(text, voice or self.tts_voice)

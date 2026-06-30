@@ -224,6 +224,14 @@ class TestVoicePreview:
         resp = client.post("/voice/preview", json={"voice": "af_bella"}, headers=AUTH)
         assert resp.status_code == 503
 
+    def test_preview_rejects_oversized_text(self):
+        # #84: bounded input so an admin can't request megabytes of synthesis.
+        client = _client(setup_complete=True)
+        resp = client.post(
+            "/voice/preview", json={"voice": "af_bella", "text": "x" * 1000}, headers=AUTH
+        )
+        assert resp.status_code == 422
+
     def test_preview_returns_audio(self):
         class _VoiceStub:
             async def preview(self, text: str, voice: str):

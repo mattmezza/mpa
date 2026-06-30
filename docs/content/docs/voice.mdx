@@ -96,12 +96,13 @@ Set `backend: "kokoro"` to use it.
 
 ### Enabling it
 
-Kokoro and its model are **not bundled by default** (edge-tts is the default
-backend and the model adds ~325 MB). Build the image with the model and the
-Python extra:
+The Docker image **bundles Kokoro and its model by default**, so switching the
+backend to `kokoro` works out of the box. edge-tts remains the default backend;
+the Kokoro extra (onnxruntime ~200 MB) and model (~325 MB) just ride along ready
+to use. For a leaner edge-tts-only image, opt out at build time:
 
 ```bash
-docker build --build-arg INSTALL_KOKORO=true -t mpa .
+docker build --build-arg INSTALL_KOKORO=false -t mpa .
 ```
 
 For a local (non-Docker) run, install the extra and download the model files to

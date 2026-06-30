@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.artifacts import ARTIFACT_CSP, NOT_FOUND_HTML, resolve, serving_base, valid_id
 from core.config_store import ConfigStore
@@ -654,8 +654,10 @@ class PromptPreviewIn(BaseModel):
 
 
 class VoicePreviewIn(BaseModel):
-    voice: str = ""
-    text: str = "Hi! This is a quick preview of how this voice sounds."
+    # Bounded so an authenticated admin can't request synthesis of megabytes of
+    # text (RAM / worker-thread exhaustion). A preview is a short sample.
+    voice: str = Field("", max_length=64)
+    text: str = Field("Hi! This is a quick preview of this voice.", max_length=600)
 
 
 # ---------------------------------------------------------------------------
