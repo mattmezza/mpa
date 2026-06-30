@@ -125,6 +125,9 @@ def test_inspect_payload_renders_captured_request(tmp_path) -> None:
     assert "claude-test" in r.text
     assert "SYSTEM_PROMPT_MARKER" in r.text  # the exact system prompt is shown
     assert "send_message" in r.text  # tool defs included
+    # Copy + download controls for the raw JSON, with a context-named file.
+    assert "inspectCopyJSON(this)" in r.text
+    assert 'data-filename="inspect-telegram-c1.json"' in r.text
     llm.clear_captured()
 
 

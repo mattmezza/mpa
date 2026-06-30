@@ -2971,6 +2971,8 @@ def create_admin_app(
                 ensure_ascii=False,
                 default=str,
             )
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{channel}-{chat_id or 'default'}").strip("_")
+        download_name = f"inspect-{safe or 'payload'}.json"
         return _render_partial(
             "partials/inspect_payload.html",
             meta=meta,
@@ -2978,6 +2980,7 @@ def create_admin_app(
             messages=messages,
             tools=tools,
             pretty=pretty,
+            download_name=download_name,
         )
 
     # ── Memory API ─────────────────────────────────────────────────────

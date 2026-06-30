@@ -103,6 +103,11 @@
 <details class="card">
   <summary class="cursor-pointer text-sm font-semibold">Raw JSON
     <span class="text-muted text-xs">(image bytes elided)</span></summary>
-  <pre class="log-viewer mt-2">{{ pretty }}</pre>
+  <div class="flex gap-2 mt-2">
+    <button type="button" class="btn-sm" onclick="inspectCopyJSON(this)">Copy JSON</button>
+    <button type="button" class="btn-sm" data-filename="{{ download_name }}"
+            onclick="inspectDownloadJSON(this)">Download</button>
+  </div>
+  <pre data-raw class="log-viewer mt-2">{{ pretty }}</pre>
 </details>
 {%- endif -%}
