@@ -20,6 +20,8 @@ class _Store:
         self._data = {
             "agent.personae_db_path": str(tmp_path / "personae.db"),
             "agent.personae_dir": str(tmp_path / "seed"),  # missing = no gallery
+            "history.db_path": str(tmp_path / "history.db"),
+            "memory.db_path": str(tmp_path / "memory.db"),
         }
 
     async def is_setup_complete(self) -> bool:
@@ -42,10 +44,20 @@ class _Store:
         return {}
 
 
+class _SchedulerSpy:
+    def __init__(self):
+        self.reloads = 0
+
+    async def load_jobs(self):
+        self.reloads += 1
+
+
 class _AgentStub:
     def __init__(self):
         self.config = Config()
         self.channels = {}
+        self.job_store = None  # rename route reaches _get_job_store(); set per-test
+        self.scheduler = _SchedulerSpy()
 
 
 def _client(tmp_path):
@@ -143,3 +155,108 @@ def test_partial_personae_renders(tmp_path) -> None:
     r = client.get("/partials/personae", headers=AUTH)
     assert r.status_code == 200
     assert "Active persona" in r.text
+
+
+def test_persona_rename_cascades(tmp_path) -> None:
+    """Renaming a slug repoints the persona row, the active selection, per-chat
+    bindings, the per-persona bot channel, private memory scope and jobs (#69)."""
+    import asyncio
+
+    import aiosqlite
+
+    from core.history import ConversationHistory
+    from core.job_store import JobStore
+    from core.memory import MemoryStore
+
+    client, agent = _client(tmp_path)
+    history_db = str(tmp_path / "history.db")
+    memory_db = str(tmp_path / "memory.db")
+    agent.job_store = JobStore(db_path=str(tmp_path / "jobs.db"))
+
+    assert (
+        client.post("/personae", json={"name": "coach", "role": "Coach"}, headers=AUTH).status_code
+        == 200
+    )
+    assert (
+        client.post("/personae/activate", json={"name": "coach"}, headers=AUTH).status_code == 200
+    )
+    assert agent.config.agent.active_persona == "coach"
+
+    async def seed() -> None:
+        h = ConversationHistory(db_path=history_db)
+        await h.set_chat_persona("telegram", "u1", "coach", "")  # default-bot binding
+        await h.add_turn("telegram:coach", "u1", "user", "hi")  # the bot's own channel
+        m = MemoryStore(db_path=memory_db)
+        await m._ensure_schema()
+        async with aiosqlite.connect(memory_db) as db:
+            await db.execute(
+                "INSERT INTO long_term (category, subject, content, scope) "
+                "VALUES ('pref','s','c','coach')"
+            )
+            await db.commit()
+        await agent.job_store.upsert_job("j1", task="t", channel="telegram:coach", persona="coach")
+
+    asyncio.run(seed())
+
+    r = client.post("/personae/rename", json={"old": "coach", "new": "trainer"}, headers=AUTH)
+    assert r.status_code == 200
+    assert client.get("/personae/coach", headers=AUTH).status_code == 404
+    assert client.get("/personae/trainer", headers=AUTH).status_code == 200
+    assert agent.config.agent.active_persona == "trainer"
+    assert agent.scheduler.reloads == 1  # live scheduler re-registered the renamed job
+
+    async def check() -> None:
+        h = ConversationHistory(db_path=history_db)
+        assert await h.get_chat_persona("telegram", "u1", "") == "trainer"
+        async with aiosqlite.connect(history_db) as db:
+            cur = await db.execute("SELECT channel FROM conversation_turns WHERE user_id='u1'")
+            assert [row[0] for row in await cur.fetchall()] == ["telegram:trainer"]
+        async with aiosqlite.connect(memory_db) as db:
+            cur = await db.execute("SELECT scope FROM long_term")
+            assert [row[0] for row in await cur.fetchall()] == ["trainer"]
+        job = await agent.job_store.get_job("j1")
+        assert job["persona"] == "trainer" and job["channel"] == "telegram:trainer"
+
+    asyncio.run(check())
+
+
+def test_persona_create_rejects_bad_slug(tmp_path) -> None:
+    # The slug guard applies to the create path too, so a malformed slug can't be
+    # introduced and then break channel/URL routing (#69).
+    client, _ = _client(tmp_path)
+    for bad in ("te:am", "my persona", "has/slash", ""):
+        r = client.post("/personae", json={"name": bad, "role": "X"}, headers=AUTH)
+        assert r.status_code == 400, bad
+
+
+def test_persona_rename_validation(tmp_path) -> None:
+    client, _ = _client(tmp_path)
+    client.post("/personae", json={"name": "coach", "role": "C"}, headers=AUTH)
+    client.post("/personae", json={"name": "writer", "role": "W"}, headers=AUTH)
+
+    # Collision with an existing slug → 409.
+    assert (
+        client.post(
+            "/personae/rename", json={"old": "coach", "new": "writer"}, headers=AUTH
+        ).status_code
+        == 409
+    )
+    # Illegal characters (the ':' would break channel routing) → 400.
+    assert (
+        client.post(
+            "/personae/rename", json={"old": "coach", "new": "te:am"}, headers=AUTH
+        ).status_code
+        == 400
+    )
+    # Unknown source slug → 404.
+    assert (
+        client.post("/personae/rename", json={"old": "ghost", "new": "x"}, headers=AUTH).status_code
+        == 404
+    )
+    # Renaming to the same slug is a harmless no-op.
+    assert (
+        client.post(
+            "/personae/rename", json={"old": "coach", "new": "coach"}, headers=AUTH
+        ).status_code
+        == 200
+    )

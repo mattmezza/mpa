@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import urllib.parse
@@ -50,6 +51,12 @@ if TYPE_CHECKING:
     from core.skills import SkillsStore
 
 log = logging.getLogger(__name__)
+
+# A persona slug becomes part of a channel name (``telegram:<slug>``) and a URL
+# path (``/admin/personae/<slug>``), so it must avoid ':' , '/' and whitespace.
+# Capped at 64 chars so it can't bloat every channel string it is embedded in.
+_VALID_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_SLUG_ERROR = "Slug must be 1-64 chars: letters, digits, '-' and '_' only (no spaces or ':')."
 
 # ---------------------------------------------------------------------------
 # Google OAuth 2.0 constants (for CalDAV calendar access)
@@ -2546,6 +2553,8 @@ def create_admin_app(
         name = body.name.strip()
         if not name:
             raise HTTPException(400, "Persona name is required")
+        if not _VALID_SLUG.match(name):
+            raise HTTPException(400, _SLUG_ERROR)
         # Raw markdown (power-user mode) wins over the structured fields.
         if body.raw.strip():
             persona = parse_markdown(body.raw, name=name)
@@ -2592,6 +2601,58 @@ def create_admin_app(
         agent = agent_state.agent
         if agent:
             agent.config.agent.active_persona = name
+
+    @app.post("/personae/rename", dependencies=[Depends(auth)])
+    async def rename_persona(request: Request) -> HTMLResponse:
+        """Change a persona's slug, cascading it to every store that keys off it.
+
+        The slug is a foreign key without a DB constraint: per-chat bindings,
+        private memory scope, scheduled jobs, the active-persona selection and the
+        ``telegram:<slug>`` bot channel all reference it by value, so each is
+        repointed here (#69). A persona with its own bot needs an agent restart for
+        the bot to re-register under the new slug.
+        """
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        old = str(body.get("old", "")).strip()
+        new = str(body.get("new", "")).strip()
+        if not old or not new:
+            raise HTTPException(400, "Missing 'old' or 'new' in request body")
+        if old == new:
+            return await _personae_partial()  # no-op
+        if not _VALID_SLUG.match(new):
+            raise HTTPException(400, _SLUG_ERROR)
+        store = await _persona_store_from_config(config_store)
+        if await store.get(old) is None:
+            raise HTTPException(404, f"Persona not found: {old}")
+        if await store.get(new) is not None:
+            raise HTTPException(409, f"A persona named '{new}' already exists")
+        # ponytail: best-effort cascade across the separate SQLite DBs — no cross-DB
+        # transaction. The references are repointed first and the personae PK row is
+        # renamed LAST, so if any step fails the old slug still fully resolves and the
+        # whole rename is safe to retry (the ref updates are idempotent no-ops once
+        # moved). A missed ref only ever falls back to the default identity, never
+        # corrupts data.
+        history = await _history_from_config(config_store)
+        await history.rename_persona(old, new)
+        from core.memory import MemoryStore
+
+        memory_db = await config_store.get("memory.db_path") or "data/memory.db"
+        await MemoryStore(db_path=memory_db).rename_scope(old, new)
+        await _get_job_store().rename_persona(old, new)
+        await store.rename(old, new)
+        if (await config_store.get("agent.active_persona") or "").strip() == old:
+            await _set_active_persona(new)
+        # Re-register live scheduler jobs so a renamed persona's cron/once jobs fire
+        # under the new slug + channel immediately, not only after a restart. Bot
+        # channels still need a restart (they are created at startup).
+        agent = agent_state.agent
+        if agent is not None:
+            await agent.scheduler.load_jobs()
+        return await _personae_partial()
 
     @app.post("/personae/activate", dependencies=[Depends(auth)])
     async def activate_persona(request: Request) -> HTMLResponse:

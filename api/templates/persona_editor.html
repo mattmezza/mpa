@@ -24,7 +24,10 @@
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div class="sm:col-span-2">
             <label class="label">Name (slug)</label>
-            <input class="input-sm" x-model="name" {% if not is_new %}readonly{% endif %} placeholder="fitness-coach">
+            <input class="input-sm" x-model="name" placeholder="fitness-coach">
+            {% if not is_new %}
+            <p class="hint" x-show="name.trim() !== originalName">Renaming moves this persona's chat bindings, private memories and scheduled jobs to the new slug. A persona with its own bot needs an agent restart afterwards.</p>
+            {% endif %}
           </div>
           <div>
             <label class="label">Emoji</label>
@@ -135,6 +138,8 @@
   function personaEditor() {
     return {
       mode: 'guided',
+      isNew: {{ is_new|tojson }},
+      originalName: {{ persona.name|tojson }},
       name: {{ persona.name|tojson }},
       agent_name: {{ persona.agent_name|tojson }},
       role: {{ persona.role|tojson }},
@@ -173,9 +178,14 @@
           '---\n';
       },
 
-      save() {
-        const name = (this.name || '').trim();
-        if (!name) { this.ok = false; this.result = 'Name is required.'; return; }
+      _headers() {
+        return {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || ''),
+        };
+      },
+
+      _upsert(name) {
         const body = this.mode === 'raw'
           ? { name: name, raw: this.raw }
           : {
@@ -186,20 +196,36 @@
               secrets: this.secretsText.split('\n').map(s => s.trim()).filter(Boolean),
               bot_token: this.bot_token, allowed_user_ids: this.allowedUserIds,
             };
-        fetch('/personae', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || ''),
-          },
-          body: JSON.stringify(body),
-        })
-        .then(r => { this.ok = r.ok; return r.text().then(t => ({ ok: r.ok, t })); })
-        .then(({ ok, t }) => {
-          this.result = ok ? 'Saved.' : ('Error: ' + t.slice(0, 200));
-          if (ok && window.showToast) window.showToast('Persona saved');
-        })
-        .catch(e => { this.ok = false; this.result = e.message; });
+        fetch('/personae', { method: 'POST', headers: this._headers(), body: JSON.stringify(body) })
+          .then(r => { this.ok = r.ok; return r.text().then(t => ({ ok: r.ok, t })); })
+          .then(({ ok, t }) => {
+            this.result = ok ? 'Saved.' : ('Error: ' + t.slice(0, 200));
+            if (ok && window.showToast) window.showToast('Persona saved');
+          })
+          .catch(e => { this.ok = false; this.result = e.message; });
+      },
+
+      save() {
+        const name = (this.name || '').trim();
+        if (!name) { this.ok = false; this.result = 'Name is required.'; return; }
+        // Existing persona whose slug changed: rename first (cascades bindings,
+        // memories, jobs), then save the rest of the fields under the new slug.
+        if (!this.isNew && this.originalName && name !== this.originalName) {
+          fetch('/personae/rename', {
+            method: 'POST',
+            headers: this._headers(),
+            body: JSON.stringify({ old: this.originalName, new: name }),
+          })
+          .then(r => r.text().then(t => ({ ok: r.ok, t })))
+          .then(({ ok, t }) => {
+            if (!ok) { this.ok = false; this.result = 'Rename failed: ' + t.slice(0, 200); return; }
+            this.originalName = name;
+            this._upsert(name);
+          })
+          .catch(e => { this.ok = false; this.result = e.message; });
+          return;
+        }
+        this._upsert(name);
       },
     };
   }

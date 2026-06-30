@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import re
+import zlib
 
 import aiosqlite
 import numpy as np
@@ -27,7 +28,11 @@ class _HashEmbedder:
     async def embed_one(self, text: str) -> list[float]:
         vec = [0.0] * self.DIM
         for tok in re.findall(r"[a-z0-9]+", text.lower()):
-            vec[hash(tok) % self.DIM] += 1.0
+            # crc32, not the builtin hash(): str hashing is salted per process
+            # (PYTHONHASHSEED), which made the bucketing — and the ranking tests
+            # below — flaky across runs. crc32 is stable, keeping this honestly
+            # deterministic.
+            vec[zlib.crc32(tok.encode()) % self.DIM] += 1.0
         return vec
 
     async def embed(self, texts: list[str]) -> list[list[float]]:

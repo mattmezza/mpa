@@ -156,3 +156,43 @@ async def test_store_crud(tmp_path) -> None:
 
     assert await store.delete("coach") is True
     assert await store.get("coach") is None
+
+
+@pytest.mark.asyncio
+async def test_store_rename(tmp_path) -> None:
+    store = PersonaStore(db_path=str(tmp_path / "p.db"), seed_dir=tmp_path / "missing")
+    await store.upsert(Persona(name="coach", role="Coach", skills=["memory"]))
+
+    # Happy path: the row moves to the new slug, fields intact.
+    assert await store.rename("coach", "trainer") is True
+    assert await store.get("coach") is None
+    moved = await store.get("trainer")
+    assert moved is not None and moved.role == "Coach" and moved.skills == ["memory"]
+
+    # Renaming a missing slug is a no-op (False), not an error.
+    assert await store.rename("ghost", "whoever") is False
+
+    # Collision with an existing slug is rejected.
+    await store.upsert(Persona(name="writer", role="Writer"))
+    with pytest.raises(ValueError):
+        await store.rename("trainer", "writer")
+    # Both survive the rejected rename.
+    assert (await store.get("trainer")).role == "Coach"
+    assert (await store.get("writer")).role == "Writer"
+
+
+@pytest.mark.asyncio
+async def test_rename_seeded_persona_reseeds_old_slug(tmp_path) -> None:
+    """Characterise (not endorse) the gallery seam: seeding keys off the file
+    stem, so renaming a *seeded* persona leaves the old slug to be re-seeded on
+    the next list. User-created personae have no seed file, so they rename clean.
+    """
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "fitness-coach.md").write_text("---\nrole: Fitness coach\n---\n")
+    store = PersonaStore(db_path=str(tmp_path / "p.db"), seed_dir=seed)
+    assert [p.name for p in await store.list_personae()] == ["fitness-coach"]
+
+    await store.rename("fitness-coach", "my-coach")
+    # list_personae re-seeds the now-missing gallery stem alongside the renamed row.
+    assert {p.name for p in await store.list_personae()} == {"fitness-coach", "my-coach"}

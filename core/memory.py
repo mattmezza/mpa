@@ -565,6 +565,15 @@ class MemoryStore:
         await db.execute("CREATE INDEX IF NOT EXISTS idx_st_scope ON short_term(scope)")
         await db.commit()
 
+    async def rename_scope(self, old: str, new: str) -> None:
+        """Move a persona's private memories to a new scope key after the persona
+        slug is renamed (#69). A persona's scope key is its slug (see #42)."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE long_term SET scope = ? WHERE scope = ?", (new, old))
+            await db.execute("UPDATE short_term SET scope = ? WHERE scope = ?", (new, old))
+            await db.commit()
+
     async def get_long_term(self, scope: str | None = None) -> list[dict]:
         """Retrieve recent (non-archived) long-term memories for injection.
 
