@@ -116,9 +116,10 @@ _REPEAT_FAILURE_NOTICE = (
     "kept failing. Stop retrying it — change the arguments, take a different "
     "approach, or report the problem to the user."
 )
-# Hard backstop on tool-call rounds in a single user turn, so even a model that
-# ignores every error signal can't loop forever. ponytail: generous ceiling —
-# normal turns use a handful; raise it if a legitimate workflow needs more.
+# Hard backstop on LLM round-trips in a single user turn (each round may hold
+# several tool calls), so even a model that ignores every error signal can't loop
+# forever. ponytail: generous ceiling — normal turns use a handful; raise it if a
+# legitimate workflow needs more.
 _MAX_TOOL_ROUNDS = 50
 _LOOP_ABORT_MESSAGE = (
     "I had to stop — I made too many tool calls without reaching an answer. "
@@ -1728,11 +1729,14 @@ class AgentCore:
             log.exception("Tool %r raised", tool_call.name)
             result = {
                 "error": (
-                    f"The '{tool_call.name}' tool failed with an unexpected error: {exc}. "
-                    "This usually means the arguments were malformed or incomplete. Do not "
-                    "retry the same call — fix the arguments or try a different approach."
+                    f"The '{tool_call.name}' tool failed unexpectedly: {exc}. "
+                    "Don't repeat the same call — check the arguments, try a different "
+                    "approach, or tell the user if it can't be done."
                 )
             }
+        # Count every error toward the breaker, transient ones (e.g. a command
+        # timeout) included: the failure mode we stop is a model retrying the
+        # *identical* call many times — varying the args resets the count.
         if isinstance(result, dict) and result.get("error"):
             failures[sig] = failures.get(sig, 0) + 1
         return result
