@@ -283,9 +283,11 @@ TOOLS = [
             "Use it for lightweight acks where a sentence would just be clutter: "
             "thumbsup for 'got it'/done, heart for thanks, eyes for 'I see your "
             "photo/file', party for good news, cry or pray for bad news, laugh for "
-            "something funny, check/cross for approving/denying. When you actually "
-            "have information to convey, reply with text instead (and you may still "
-            "react in addition). Reactions on messages older than 24h silently no-op."
+            "something funny, check/cross for approving/denying. To acknowledge with "
+            "ONLY a reaction, call this tool and then end your turn with no text at all "
+            "— an empty reply sends nothing, so the reaction stands on its own. When you "
+            "actually have information to convey, reply with text (you may still react in "
+            "addition). Reactions on messages older than 24h silently no-op."
         ),
         "input_schema": {
             "type": "object",
@@ -1755,10 +1757,14 @@ class AgentCore:
         # even when synthesis was skipped or failed (voice_bytes is None).
         final_text = strip_voice_marker(final_text)
 
-        # Persist the turn (user message + final assistant text only)
+        # Persist the turn (user message + final assistant text only). A react-only
+        # turn (or any reply that sends nothing) leaves final_text empty — don't
+        # store an empty assistant turn: some providers reject empty content on the
+        # next replay, and the coalescer folds the resulting adjacent user turns (#70).
         history_message = self._history_message_text(message, attachments)
         await self.history.add_turn(channel, user_id, "user", history_message, chat_id)
-        await self.history.add_turn(channel, user_id, "assistant", final_text, chat_id)
+        if final_text:
+            await self.history.add_turn(channel, user_id, "assistant", final_text, chat_id)
 
         # Automatic memory extraction
         if channel != "system":
@@ -1894,9 +1900,15 @@ class AgentCore:
         elif response.tool_calls and not final_text:
             final_text = _LOOP_ABORT_MESSAGE
 
-        # Append the final assistant response to the session
-        final_assistant_msg = {"role": "assistant", "content": final_text}
-        await self.history.append_session_message(channel, user_id, final_assistant_msg, chat_id)
+        # Append the final assistant response to the session. Skip an empty final
+        # (a react-only turn sends nothing): the reaction is already recorded as the
+        # assistant tool_use turn above, and an empty assistant message is dead weight
+        # that some providers reject on the next call (#70).
+        if final_text:
+            final_assistant_msg = {"role": "assistant", "content": final_text}
+            await self.history.append_session_message(
+                channel, user_id, final_assistant_msg, chat_id
+            )
 
         log.info("Response: %s", final_text[:200])
 

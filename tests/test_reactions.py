@@ -11,7 +11,7 @@ from telegram.error import BadRequest
 from channels.telegram import REACTION_EMOJI, TelegramChannel
 from core.agent import TOOLS
 from core.config import Config
-from core.llm import LLMToolCall
+from core.llm import LLMResponse, LLMToolCall
 
 
 def _channel_with_mock_bot() -> TelegramChannel:
@@ -111,3 +111,53 @@ def test_set_reaction_is_preapproved(tmp_path) -> None:
 
     eng = PermissionEngine(db_path=str(tmp_path / "perms.db"))
     assert eng.check("set_reaction", {"emoji": "heart"}) == PermissionLevel.ALWAYS
+
+
+# --- react-only turn: send nothing, persist nothing --------------------------
+
+
+class _ReactThenSilentLLM:
+    """First turn calls set_reaction; the final turn returns no text at all."""
+
+    provider = "deepseek"
+
+    def __init__(self) -> None:
+        self._responses = [
+            LLMResponse(
+                text="",
+                tool_calls=[
+                    LLMToolCall(id="r1", name="set_reaction", arguments={"emoji": "heart"})
+                ],
+            ),
+            LLMResponse(text="", tool_calls=[]),
+        ]
+
+    async def generate(self, **_kw) -> LLMResponse:
+        if self._responses:
+            return self._responses.pop(0)
+        return LLMResponse(text="", tool_calls=[])
+
+    def assistant_message(self, response: LLMResponse) -> dict:
+        return {"role": "assistant", "content": response.text}
+
+    def tool_result_messages(self, results: list[dict]) -> list[dict]:
+        return [{"role": "user", "content": results}]
+
+
+@pytest.mark.asyncio
+async def test_react_only_turn_sends_and_persists_nothing(agent) -> None:
+    # The model reacts to the triggering message and then says nothing: the turn
+    # must send no text AND leave no empty assistant turn in history (which some
+    # providers reject on replay) — only the user turn is recorded (#70).
+    agent.config.task_reflection.enabled = False
+    agent.channels["telegram"] = SimpleNamespace(react=AsyncMock())
+    agent.llm = _ReactThenSilentLLM()
+
+    resp = await agent.process(
+        message="thanks", channel="telegram", user_id="5", chat_id="5", message_id=99
+    )
+
+    agent.channels["telegram"].react.assert_awaited_once_with("5", 99, "heart")
+    assert resp.text == ""
+    msgs = await agent.history.get_messages("telegram", "5", "5")
+    assert [m["role"] for m in msgs] == ["user"]
