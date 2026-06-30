@@ -171,3 +171,14 @@ def test_format_approval_message_run_command_includes_purpose() -> None:
     )
     assert "jq --version" in text
     assert "check jq install" in text
+
+
+def test_format_approval_message_truncates_huge_command() -> None:
+    # A run_command carrying a large heredoc must not produce a multi-KB prompt
+    # that Telegram rejects as too long (#80).
+    engine = PermissionEngine()
+    text = engine.format_approval_message(
+        "run_command", {"command": "cat <<EOF\n" + "x" * 5000 + "\nEOF"}
+    )
+    assert len(text) < 400
+    assert "…" in text
