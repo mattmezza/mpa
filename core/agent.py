@@ -28,6 +28,7 @@ from core.history import ConversationHistory
 from core.imagegen import ImageBudget
 from core.job_store import JobStore
 from core.llm import LLMClient, LLMToolCall, model_supports_vision
+from core.log_streams import set_stream, subagent_stream
 from core.memory import MemoryStore
 from core.models import IMAGE_MIME_TYPES, AgentResponse, Attachment
 from core.permissions import PermissionEngine, PermissionLevel, format_approval_message
@@ -806,6 +807,11 @@ class AgentCore:
             persona = await self._load_persona(persona_name)
         else:
             persona = await self._resolve_persona(channel, user_id, chat_id)
+
+        # Tag this turn's log records with the persona's stream (#75) so the admin
+        # Logs tab can filter per agent. Subagents spawned below inherit it (the
+        # ContextVar is copied into their task) and add their own label.
+        set_stream(persona.name if persona else "default")
 
         # Reply decision (#36): in a shared/group chat, stay quiet for messages
         # aimed at someone else or caught in a bot-to-bot reaction loop. Off by
@@ -2414,6 +2420,18 @@ class AgentCore:
         )
 
     async def _run_subagent_loop(
+        self, task: str, child_persona: Persona | None, child_state: dict, run: SubagentRun
+    ) -> str:
+        """Route this subagent's log records into its spawner's stream (#75).
+
+        The label (persona slug, else run id) prefixes each line as
+        ``[subagent:<label>]`` so it filters out of the shared stream; ``fallback``
+        names the stream for a top-level scheduled run that inherited none.
+        """
+        with subagent_stream(run.persona or run.run_id, fallback=run.persona):
+            return await self._run_subagent_loop_inner(task, child_persona, child_state, run)
+
+    async def _run_subagent_loop_inner(
         self, task: str, child_persona: Persona | None, child_state: dict, run: SubagentRun
     ) -> str:
         """The subagent's agentic loop — system semantics, budgeted and depth-capped.
