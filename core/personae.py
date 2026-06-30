@@ -3,7 +3,7 @@
 A **persona** is a first-class identity the agent can take on (fitness coach,
 finance assistant, …). It is exactly four things (issue #13):
 
-- its own system-prompt identity (``personalia`` + ``character``),
+- its own system-prompt identity (``character`` — who it is + its tone),
 - a **skill allowlist** (which skills it may load — empty means *all*),
 - a **tool scope** (which function-tools are advertised — empty means *all*),
 - a **secret scope** (vault namespaces it may use — stored now, enforced by #19),
@@ -12,8 +12,9 @@ finance assistant, …). It is exactly four things (issue #13):
 
 The store mirrors :mod:`core.skills`: markdown files with YAML frontmatter,
 seeded into SQLite at startup, editable in the admin UI. When no persona is
-active the agent falls back to the configured ``character``/``personalia`` so
-first-run behaviour is unchanged.
+active the agent falls back to the configured ``character`` so first-run
+behaviour is unchanged. (A legacy ``personalia`` field was merged into
+``character`` in #98; old frontmatter/rows are folded in on load.)
 """
 
 from __future__ import annotations
@@ -32,7 +33,6 @@ CREATE TABLE IF NOT EXISTS personae (
     role TEXT DEFAULT '',
     emoji TEXT DEFAULT '',
     voice TEXT DEFAULT '',
-    personalia TEXT DEFAULT '',
     character TEXT DEFAULT '',
     skills TEXT DEFAULT '',
     tools TEXT DEFAULT '',
@@ -57,6 +57,13 @@ _MIGRATIONS = (
     "ALTER TABLE personae ADD COLUMN bot_token TEXT DEFAULT ''",  # #29
     "ALTER TABLE personae ADD COLUMN allowed_user_ids TEXT DEFAULT ''",  # #29
     "ALTER TABLE personae ADD COLUMN tool_config TEXT DEFAULT ''",  # #93
+    # #98: personalia merged into character. Prepend any existing personalia to
+    # character (idempotent — the WHERE guard empties it, so a re-run is a no-op),
+    # then drop the now-unused column. On a fresh DB (no such column) both raise
+    # OperationalError and are skipped, like the ADD COLUMNs above.
+    "UPDATE personae SET character = TRIM(personalia || char(10) || char(10) || character), "
+    "personalia = '' WHERE TRIM(COALESCE(personalia, '')) != ''",
+    "ALTER TABLE personae DROP COLUMN personalia",
 )
 
 
@@ -69,8 +76,7 @@ class Persona:
     role: str = ""
     emoji: str = ""
     voice: str = ""  # TTS voice override; empty = configured default
-    personalia: str = ""
-    character: str = ""
+    character: str = ""  # identity + tone (a legacy `personalia` field folded in here — #98)
     skills: list[str] = field(default_factory=list)  # allowlist; [] = all
     tools: list[str] = field(default_factory=list)  # allowlist; [] = all
     secrets: list[str] = field(default_factory=list)  # vault scope; stored only (#19)
@@ -137,9 +143,10 @@ def _as_int_list(value: object) -> list[int]:
 def parse_markdown(text: str, *, name: str) -> Persona:
     """Parse a persona markdown doc (YAML frontmatter + optional body).
 
-    Identity lives in the frontmatter (``personalia``/``character`` block
-    scalars); any markdown body after the frontmatter is appended to
-    ``character`` so authors can write free-form prose too.
+    Identity lives in the frontmatter (``character`` block scalar); any markdown
+    body after the frontmatter is appended to ``character`` so authors can write
+    free-form prose too. A legacy ``personalia`` key is folded into ``character``
+    (prepended, so nothing is lost — #98).
     """
     fm: dict = {}
     body = text
@@ -165,6 +172,9 @@ def parse_markdown(text: str, *, name: str) -> Persona:
     body = body.strip()
     if body:
         character = f"{character}\n\n{body}".strip()
+    legacy_personalia = str(fm.get("personalia", "") or "").strip()
+    if legacy_personalia:  # #98: fold old personalia in, prepended so nothing is lost
+        character = f"{legacy_personalia}\n\n{character}".strip()
 
     return Persona(
         name=name,
@@ -172,7 +182,6 @@ def parse_markdown(text: str, *, name: str) -> Persona:
         role=str(fm.get("role", "") or ""),
         emoji=str(fm.get("emoji", "") or ""),
         voice=str(fm.get("voice", "") or ""),
-        personalia=str(fm.get("personalia", "") or ""),
         character=character,
         skills=_as_list(fm.get("skills")),
         tools=_as_list(fm.get("tools")),
@@ -196,7 +205,6 @@ def to_markdown(p: Persona) -> str:
         "tools": p.tools,
         "secrets": p.secrets,
         "tool_config": p.tool_config,
-        "personalia": p.personalia,
         "character": p.character,
     }
     dumped = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True, default_flow_style=False)
@@ -249,12 +257,12 @@ class PersonaStore:
     async def _upsert(db: aiosqlite.Connection, p: Persona) -> None:
         await db.execute(
             "INSERT INTO personae "
-            "(name, agent_name, role, emoji, voice, personalia, character, skills, tools, "
+            "(name, agent_name, role, emoji, voice, character, skills, tools, "
             "secrets, bot_token, allowed_user_ids, tool_config) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(name) DO UPDATE SET "
             "agent_name=excluded.agent_name, role=excluded.role, emoji=excluded.emoji, "
-            "voice=excluded.voice, personalia=excluded.personalia, character=excluded.character, "
+            "voice=excluded.voice, character=excluded.character, "
             "skills=excluded.skills, tools=excluded.tools, secrets=excluded.secrets, "
             "bot_token=excluded.bot_token, allowed_user_ids=excluded.allowed_user_ids, "
             "tool_config=excluded.tool_config, updated_at=datetime('now')",
@@ -264,7 +272,6 @@ class PersonaStore:
                 p.role,
                 p.emoji,
                 p.voice,
-                p.personalia,
                 p.character,
                 "\n".join(p.skills),
                 "\n".join(p.tools),
@@ -283,7 +290,6 @@ class PersonaStore:
             role=row["role"] or "",
             emoji=row["emoji"] or "",
             voice=row["voice"] or "",
-            personalia=row["personalia"] or "",
             character=row["character"] or "",
             skills=_as_list(row["skills"]),
             tools=_as_list(row["tools"]),
@@ -393,8 +399,9 @@ Extra prose in the body.
     assert p.tools == ["run_command", "send_message"], p.tools
     assert p.bot_token == "123:ABC", p.bot_token
     assert p.allowed_user_ids == [111, 222], p.allowed_user_ids
-    assert "Forge" in p.personalia
-    assert "motivating" in p.character and "Extra prose" in p.character  # body appended
+    # #98: legacy personalia folded into character (prepended), body still appended.
+    assert "Forge" in p.character and "motivating" in p.character and "Extra prose" in p.character
+    assert p.character.index("Forge") < p.character.index("motivating")  # personalia first
     assert p.allows_skill("scheduling") and not p.allows_skill("email")
     assert p.allows_tool("run_command") and not p.allows_tool("send_email")
     assert p.tool_setting("gh") == {"enabled": True}, p.tool_setting("gh")
@@ -409,7 +416,7 @@ Extra prose in the body.
     # Round-trip through markdown preserves the structured fields.
     p2 = parse_markdown(to_markdown(p), name="fitness-coach")
     assert p2.agent_name == p.agent_name and p2.skills == p.skills and p2.tools == p.tools
-    assert p2.personalia.strip() == p.personalia.strip()
+    assert p2.character.strip() == p.character.strip()
     assert p2.bot_token == p.bot_token and p2.allowed_user_ids == p.allowed_user_ids
     assert p2.tool_config == p.tool_config, p2.tool_config
     print("personae.py self-check OK")
