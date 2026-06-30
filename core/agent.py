@@ -65,6 +65,37 @@ _VISION_CACHE_MAX = 256
 # un-addressed run legitimately needs more context than this.
 _SILENT_FOLD_MAX_CHARS = 16000
 
+# When the model's response is cut off at the output-token limit (issue #77),
+# any tool call in it has truncated/empty arguments. Instead of running the
+# half-built call (which returns a misleading "missing parameter" error and
+# sends the model into a retry loop), feed back this notice so it produces a
+# smaller output. ponytail: cap consecutive truncations so a model that keeps
+# overflowing can't loop forever — the repeat-failure breaker (#78) generalises this.
+_TRUNCATION_NOTICE = (
+    "Your previous response was cut off at the output token limit before this "
+    "tool call's arguments were complete, so the call was NOT run. Produce a "
+    "smaller output: write large content (HTML, files) to disk incrementally — "
+    "e.g. in chunks via run_command — or split the work across turns, rather "
+    "than passing it all in one tool argument."
+)
+_MAX_TRUNCATION_RETRIES = 3
+
+
+def _truncation_tool_results(response) -> list[dict]:
+    """Error tool_results for a truncated response's pending calls (issue #77).
+
+    The half-built calls are not executed; each tool_use still needs a paired
+    tool_result for the next turn, so emit the truncation notice for each.
+    """
+    return [
+        {
+            "type": "tool_result",
+            "tool_use_id": call.id,
+            "content": json.dumps({"error": _TRUNCATION_NOTICE}),
+        }
+        for call in response.tool_calls
+    ]
+
 
 def _shell_quote(s: str) -> str:
     """Quote a string for safe shell interpolation."""
@@ -1369,7 +1400,7 @@ class AgentCore:
         # Initial LLM call
         response = await self.llm.generate(
             model=self.config.agent.model,
-            max_tokens=4096,
+            max_tokens=self.config.agent.max_tokens,
             system=system,
             messages=messages,
             tools=cast(Any, tools),
@@ -1383,26 +1414,37 @@ class AgentCore:
         # but not in _execute_tool); every tool call this turn reads the cached flag.
         request_state["yolo"] = self.permissions.is_yolo(self._yolo_scope(channel, chat_id))
         tool_log: list[dict] = []
+        truncations = 0
         while response.tool_calls:
-            await self._batch_approve_writes(response.tool_calls, channel, user_id, request_state)
-            tool_results = []
-            for call in response.tool_calls:
-                result = await self._execute_tool(call, channel, user_id, request_state)
-                tool_log.append({"name": call.name, "args": call.arguments, "result": result})
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": call.id,
-                        "content": json.dumps(result),
-                    }
+            if response.truncated:
+                truncations += 1
+                if truncations > _MAX_TRUNCATION_RETRIES:
+                    log.warning("Giving up after %d truncated responses in a row", truncations)
+                    break
+                tool_results = _truncation_tool_results(response)
+            else:
+                truncations = 0
+                await self._batch_approve_writes(
+                    response.tool_calls, channel, user_id, request_state
                 )
+                tool_results = []
+                for call in response.tool_calls:
+                    result = await self._execute_tool(call, channel, user_id, request_state)
+                    tool_log.append({"name": call.name, "args": call.arguments, "result": result})
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": call.id,
+                            "content": json.dumps(result),
+                        }
+                    )
 
             # Feed tool results back to the LLM
             messages.append(self.llm.assistant_message(response))
             messages.extend(self.llm.tool_result_messages(tool_results))
             response = await self.llm.generate(
                 model=self.config.agent.model,
-                max_tokens=4096,
+                max_tokens=self.config.agent.max_tokens,
                 system=system,
                 messages=messages,
                 tools=cast(Any, tools),
@@ -1481,7 +1523,7 @@ class AgentCore:
         # Initial LLM call with the full session
         response = await self.llm.generate(
             model=self.config.agent.model,
-            max_tokens=4096,
+            max_tokens=self.config.agent.max_tokens,
             system=system,
             messages=session,
             tools=cast(Any, tools),
@@ -1496,19 +1538,30 @@ class AgentCore:
         # but not in _execute_tool); every tool call this turn reads the cached flag.
         request_state["yolo"] = self.permissions.is_yolo(self._yolo_scope(channel, chat_id))
         tool_log: list[dict] = []
+        truncations = 0
         while response.tool_calls:
-            await self._batch_approve_writes(response.tool_calls, channel, user_id, request_state)
-            tool_results = []
-            for call in response.tool_calls:
-                result = await self._execute_tool(call, channel, user_id, request_state)
-                tool_log.append({"name": call.name, "args": call.arguments, "result": result})
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": call.id,
-                        "content": json.dumps(result),
-                    }
+            if response.truncated:
+                truncations += 1
+                if truncations > _MAX_TRUNCATION_RETRIES:
+                    log.warning("Giving up after %d truncated responses in a row", truncations)
+                    break
+                tool_results = _truncation_tool_results(response)
+            else:
+                truncations = 0
+                await self._batch_approve_writes(
+                    response.tool_calls, channel, user_id, request_state
                 )
+                tool_results = []
+                for call in response.tool_calls:
+                    result = await self._execute_tool(call, channel, user_id, request_state)
+                    tool_log.append({"name": call.name, "args": call.arguments, "result": result})
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": call.id,
+                            "content": json.dumps(result),
+                        }
+                    )
 
             # Append tool exchange to session
             assistant_msg = self.llm.assistant_message(response)
@@ -1525,7 +1578,7 @@ class AgentCore:
 
             response = await self.llm.generate(
                 model=self.config.agent.model,
-                max_tokens=4096,
+                max_tokens=self.config.agent.max_tokens,
                 system=system,
                 messages=session,
                 tools=cast(Any, tools),
@@ -2448,7 +2501,7 @@ class AgentCore:
             llm = self._background_llm(self.llm.provider, run.effort)
         response = await llm.generate(
             model=self.config.agent.model,
-            max_tokens=4096,
+            max_tokens=self.config.agent.max_tokens,
             system=system,
             messages=messages,
             tools=cast(Any, tools),
@@ -2458,23 +2511,28 @@ class AgentCore:
         while response.tool_calls and steps < run.max_steps and tokens < run.token_budget:
             steps += 1
             run.progress = f"step {steps}: {', '.join(c.name for c in response.tool_calls)}"[:120]
-            tool_results = []
-            for call in response.tool_calls:
-                result = await self._execute_tool(
-                    call, "system", run.origin_user_id or "subagent", child_state
-                )
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": call.id,
-                        "content": json.dumps(result),
-                    }
-                )
+            # A truncated round (issue #77) has half-built call args; skip
+            # execution and feed back the notice. steps caps the retries here.
+            if response.truncated:
+                tool_results = _truncation_tool_results(response)
+            else:
+                tool_results = []
+                for call in response.tool_calls:
+                    result = await self._execute_tool(
+                        call, "system", run.origin_user_id or "subagent", child_state
+                    )
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": call.id,
+                            "content": json.dumps(result),
+                        }
+                    )
             messages.append(llm.assistant_message(response))
             messages.extend(llm.tool_result_messages(tool_results))
             response = await llm.generate(
                 model=self.config.agent.model,
-                max_tokens=4096,
+                max_tokens=self.config.agent.max_tokens,
                 system=system,
                 messages=messages,
                 tools=cast(Any, tools),

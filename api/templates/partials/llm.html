@@ -70,7 +70,8 @@
   {{ rd_thinking_level|default('', true)|tojson|forceescape }},
   {{ rd_group_only|default('true', true)|tojson|forceescape }},
   {{ rd_max_replies|default('6', true)|tojson|forceescape }},
-  {{ rd_window_seconds|default('120', true)|tojson|forceescape }}
+  {{ rd_window_seconds|default('120', true)|tojson|forceescape }},
+  {{ max_tokens|default('8192', true)|tojson|forceescape }}
 )">
   <div class="card">
     <h2 class="text-base mb-1">System Prompt Controls</h2>
@@ -235,6 +236,12 @@
         </div>
       </div>
 
+      <div>
+        <label class="label">Max output tokens</label>
+        <input type="number" min="256" class="input-sm" style="max-width:200px" x-model="maxTokens">
+        <p class="text-muted text-xs mt-1">Hard ceiling on tokens the model may emit per response. Too low truncates large outputs (e.g. web artifacts) mid-generation. Default 8192; raise for capable models (Claude allows up to 128000).</p>
+      </div>
+
 {{ think('thinkingLevel', 'provider', 'model', 'dl-think-main') }}
     </form>
 
@@ -259,7 +266,8 @@
                     'agent.deepseek_api_key': deepseekKey,
                     'agent.deepseek_base_url': deepseekBaseUrl,
                     'agent.model': model,
-                    'agent.thinking_level': thinkingLevel
+                    'agent.thinking_level': thinkingLevel,
+                    'agent.max_tokens': String(maxTokens)
                   }})
                 })
                 .then(r => { resultOk = r.ok; return r.json(); })

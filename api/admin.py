@@ -1069,6 +1069,7 @@ def create_admin_app(
         grok_vaulted = _is_vault_ref(grok_api_key)
         deepseek_vaulted = _is_vault_ref(deepseek_api_key)
         model = await config_store.get("agent.model") or "claude-4-6-sonnet"
+        max_tokens = await config_store.get("agent.max_tokens") or "8192"
         thinking_level = await config_store.get("agent.thinking_level") or ""
         extraction_provider = await config_store.get("memory.extraction_provider") or "deepseek"
         extraction_model = await config_store.get("memory.extraction_model") or "deepseek-v4-flash"
@@ -1132,6 +1133,7 @@ def create_admin_app(
             deepseek_vaulted=deepseek_vaulted,
             deepseek_base_url=deepseek_base_url,
             model=model,
+            max_tokens=max_tokens,
             thinking_level=thinking_level,
             extraction_provider=extraction_provider,
             extraction_model=extraction_model,
