@@ -186,6 +186,14 @@ DEFAULT_RULES: dict[str, str] = {
     "run_command:git*commit*": "ASK",
     "web_search": "ALWAYS",
     "recall_memory": "ALWAYS",
+    # Coding harness (#76) — reads pre-approved, writes/exec ask (confined to the
+    # configured workspace root regardless; see core/coding.py).
+    "read_file": "ALWAYS",
+    "list_dir": "ALWAYS",
+    "grep": "ALWAYS",
+    "write_file": "ASK",
+    "edit_file": "ASK",
+    "run_command_in_dir": "ASK",
     # Write operations — ask first
     "send_email": "ASK",
     "reply_email": "ASK",
@@ -366,6 +374,9 @@ class PermissionEngine:
             "schedule_task",
             "manage_jobs",
             "spawn_subagent",
+            "write_file",
+            "edit_file",
+            "run_command_in_dir",
         }:
             return True
 
@@ -549,6 +560,14 @@ def format_approval_message(tool_name: str, params: dict) -> str:
         cmd = params.get("command", "?")
         purpose = params.get("purpose", "")
         return f"Run command: {cmd}" + (f"\n({purpose})" if purpose else "")
+    if tool_name == "write_file":
+        return f"Write file: {params.get('path', '?')}"
+    if tool_name == "edit_file":
+        return f"Edit file: {params.get('path', '?')}"
+    if tool_name == "run_command_in_dir":
+        cmd = params.get("command", "?")
+        workdir = params.get("workdir", "?")
+        return f"Run in {workdir}: {cmd}"
     if tool_name == "write_artifact":
         return f"Publish a file as a public web artifact:\n{params.get('source_path', '?')}"
     return f"{tool_name}: {params}"

@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from tavily import TavilyClient
 
-from core import imagegen
+from core import coding, imagegen
 from core.compaction import compact_messages, should_compact
 from core.config import Config
 from core.embeddings import LOCAL_PROVIDERS, EmbeddingClient, LocalEmbeddingClient
@@ -107,6 +107,14 @@ def _truncation_tool_results(response) -> list[dict]:
 def _shell_quote(s: str) -> str:
     """Quote a string for safe shell interpolation."""
     return shlex.quote(s)
+
+
+def _as_int(value: object, default: int) -> int:
+    """Coerce an LLM-supplied value to int, falling back to ``default``."""
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except TypeError, ValueError:
+        return default
 
 
 # Control marker the LLM appends to request a spoken reply (see the <voice> prompt
@@ -605,6 +613,133 @@ TOOLS = [
             },
         },
     },
+    # Coding harness (#76) — direct file ops confined to the configured workspace.
+    # Offered only when workspace.enabled and a directory is set. All paths are
+    # relative to the workspace root (or absolute inside it); escaping it is blocked.
+    {
+        "name": "read_file",
+        "description": (
+            "Read a file (or a slice of it) from the workspace and return its "
+            "content with line numbers. Large files are paginated — use 'offset' "
+            "and 'limit' to page through. Paths are relative to the workspace root."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path within the workspace"},
+                "offset": {
+                    "type": "integer",
+                    "description": "Starting line, 0-indexed (default 0)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max lines to return (default 100)",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": (
+            "Write content to a file in the workspace, creating intermediate "
+            "directories as needed. Overwrites the file if it exists. Asks the "
+            "owner for approval first. Prefer edit_file for small changes to an "
+            "existing file."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path within the workspace"},
+                "content": {"type": "string", "description": "Full file content to write"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "edit_file",
+        "description": (
+            "Find-and-replace within a workspace file — the diff-like way to make "
+            "a targeted change. 'old_string' must match exactly (including "
+            "whitespace) and, unless 'multiple' is true, must be unique in the "
+            "file: include enough surrounding context to pin down one spot. Asks "
+            "the owner for approval first."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path within the workspace"},
+                "old_string": {"type": "string", "description": "Exact text to replace"},
+                "new_string": {"type": "string", "description": "Replacement text"},
+                "multiple": {
+                    "type": "boolean",
+                    "description": (
+                        "Replace all occurrences (default false = require one unique match)"
+                    ),
+                },
+            },
+            "required": ["path", "old_string", "new_string"],
+        },
+    },
+    {
+        "name": "list_dir",
+        "description": (
+            "List files and directories one level under a workspace path. Returns "
+            "name, type (file|dir), and size."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory path within the workspace (default '.')",
+                },
+            },
+        },
+    },
+    {
+        "name": "grep",
+        "description": (
+            "Search workspace files for a regular-expression pattern (recursive). "
+            "Optionally restrict to files matching a glob via 'include' (e.g. "
+            "'*.py'). Returns file, line number, and the matching line."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Regular expression to search for"},
+                "path": {
+                    "type": "string",
+                    "description": "File or directory to search under (default '.')",
+                },
+                "include": {
+                    "type": "string",
+                    "description": "Optional filename glob filter, e.g. '*.py'",
+                },
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "run_command_in_dir",
+        "description": (
+            "Run a shell command in a workspace directory — for linters, tests, "
+            "builds, formatters. The working directory must be inside the "
+            "workspace. Returns stdout, stderr, and exit_code. Asks the owner for "
+            "approval first."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The full shell command to run"},
+                "workdir": {
+                    "type": "string",
+                    "description": "Directory within the workspace to run in (default '.')",
+                },
+            },
+            "required": ["command"],
+        },
+    },
 ]
 
 
@@ -651,6 +786,7 @@ def apply_feature_gates(
     skills_on_demand: bool = False,
     subagents_enabled: bool = True,
     imagegen_enabled: bool = False,
+    workspace_enabled: bool = False,
 ) -> list[dict]:
     """Drop tools whose backing feature is unavailable/disabled, so the model is
     never offered a capability it can't use (defence in depth — the tool handlers
@@ -668,6 +804,20 @@ def apply_feature_gates(
         out = [t for t in out if t["name"] != "spawn_subagent"]
     if not imagegen_enabled:
         out = [t for t in out if t["name"] != "generate_image"]
+    if not workspace_enabled:
+        out = [
+            t
+            for t in out
+            if t["name"]
+            not in (
+                "read_file",
+                "write_file",
+                "edit_file",
+                "list_dir",
+                "grep",
+                "run_command_in_dir",
+            )
+        ]
     return out
 
 
@@ -1026,6 +1176,8 @@ class AgentCore:
             skills_on_demand=self.config.agent.skills_index_mode == "on_demand",
             subagents_enabled=self.config.subagents.enabled,
             imagegen_enabled=self.config.tools.imagegen.enabled,
+            workspace_enabled=self.config.workspace.enabled
+            and bool(self.config.workspace.directory.strip()),
         )
 
     async def _turn_preamble(
@@ -1692,7 +1844,7 @@ class AgentCore:
         # legitimately fan out the same task more than once in a turn (#15).
         if (
             is_write_action
-            and name not in ("manage_jobs", "spawn_subagent")
+            and name not in ("manage_jobs", "spawn_subagent", "run_command_in_dir")
             and write_sig in executed_writes
         ):
             return {
@@ -1882,6 +2034,28 @@ class AgentCore:
                 executed_writes.add(write_sig)
             return result
 
+        # Coding harness (#76)
+        if name == "read_file":
+            return self._tool_read_file(params)
+        if name == "list_dir":
+            return self._tool_list_dir(params)
+        if name == "grep":
+            return self._tool_grep(params)
+        if name == "write_file":
+            result = self._tool_write_file(params)
+            if is_write_action and self._is_tool_success(result):
+                executed_writes.add(write_sig)
+            return result
+        if name == "edit_file":
+            result = self._tool_edit_file(params)
+            if is_write_action and self._is_tool_success(result):
+                executed_writes.add(write_sig)
+            return result
+        if name == "run_command_in_dir":
+            # Exempt from executed_writes dedup (see below): re-running tests/builds
+            # in a turn is legitimate, so it is not added to executed_writes.
+            return await self._tool_run_command_in_dir(params)
+
         return {"error": f"Unknown tool: {name}"}
 
     @staticmethod
@@ -2064,6 +2238,121 @@ class AgentCore:
         url = f"{self._base_url()}/artifacts/{art_id}/"
         log.info("Tool call: write_artifact — %s (%s)", url, title or "untitled")
         return {"ok": True, "url": url, "title": title}
+
+    # -- Coding harness (issue #76) ------------------------------------------
+
+    def _workspace_dir(self) -> str | None:
+        """The configured workspace root, or None if the harness is off/unset.
+
+        Defence in depth: the tools are already feature-gated out of the
+        advertised set when disabled, but the handlers refuse too — a stale
+        tool-call or a persona allowlist can't reach the filesystem.
+        """
+        ws = self.config.workspace
+        if not ws.enabled or not ws.directory.strip():
+            return None
+        return ws.directory
+
+    def _tool_read_file(self, params: dict) -> dict:
+        workspace = self._workspace_dir()
+        if workspace is None:
+            return {"error": "The coding workspace is not enabled (workspace.enabled)."}
+        path = str(params.get("path", "")).strip()
+        if not path:
+            return {"error": "Missing 'path'."}
+        log.info("Tool call: read_file — %s", path)
+        try:
+            return coding.read_file(
+                workspace, path, _as_int(params.get("offset"), 0), _as_int(params.get("limit"), 100)
+            )
+        except coding.WorkspaceError as exc:
+            return {"error": str(exc)}
+        except OSError as exc:
+            return {"error": f"Could not read file: {exc}"}
+
+    def _tool_list_dir(self, params: dict) -> dict:
+        workspace = self._workspace_dir()
+        if workspace is None:
+            return {"error": "The coding workspace is not enabled (workspace.enabled)."}
+        path = str(params.get("path", ".")).strip() or "."
+        log.info("Tool call: list_dir — %s", path)
+        try:
+            return coding.list_dir(workspace, path)
+        except coding.WorkspaceError as exc:
+            return {"error": str(exc)}
+        except OSError as exc:
+            return {"error": f"Could not list directory: {exc}"}
+
+    def _tool_grep(self, params: dict) -> dict:
+        workspace = self._workspace_dir()
+        if workspace is None:
+            return {"error": "The coding workspace is not enabled (workspace.enabled)."}
+        pattern = str(params.get("pattern", ""))
+        if not pattern:
+            return {"error": "Missing 'pattern'."}
+        path = str(params.get("path", ".")).strip() or "."
+        include = str(params.get("include", "") or "")
+        log.info("Tool call: grep — %r in %s (%s)", pattern, path, include or "*")
+        try:
+            return coding.grep(workspace, pattern, path, include)
+        except coding.WorkspaceError as exc:
+            return {"error": str(exc)}
+        except OSError as exc:
+            return {"error": f"Search failed: {exc}"}
+
+    def _tool_write_file(self, params: dict) -> dict:
+        workspace = self._workspace_dir()
+        if workspace is None:
+            return {"error": "The coding workspace is not enabled (workspace.enabled)."}
+        path = str(params.get("path", "")).strip()
+        if not path:
+            return {"error": "Missing 'path'."}
+        log.info("Tool call: write_file — %s", path)
+        try:
+            return coding.write_file(workspace, path, str(params.get("content", "")))
+        except coding.WorkspaceError as exc:
+            return {"error": str(exc)}
+        except OSError as exc:
+            return {"error": f"Could not write file: {exc}"}
+
+    def _tool_edit_file(self, params: dict) -> dict:
+        workspace = self._workspace_dir()
+        if workspace is None:
+            return {"error": "The coding workspace is not enabled (workspace.enabled)."}
+        path = str(params.get("path", "")).strip()
+        if not path:
+            return {"error": "Missing 'path'."}
+        log.info("Tool call: edit_file — %s", path)
+        try:
+            return coding.edit_file(
+                workspace,
+                path,
+                str(params.get("old_string", "")),
+                str(params.get("new_string", "")),
+                bool(params.get("multiple", False)),
+            )
+        except coding.WorkspaceError as exc:
+            return {"error": str(exc)}
+        except OSError as exc:
+            return {"error": f"Could not edit file: {exc}"}
+
+    async def _tool_run_command_in_dir(self, params: dict) -> dict:
+        workspace = self._workspace_dir()
+        if workspace is None:
+            return {"error": "The coding workspace is not enabled (workspace.enabled)."}
+        command = str(params.get("command", "")).strip()
+        if not command:
+            return {"error": "Missing 'command'."}
+        workdir = str(params.get("workdir", ".")).strip() or "."
+        # Confine the working directory to the workspace before executing.
+        try:
+            resolved = coding.resolve_in_workspace(workspace, workdir)
+        except coding.WorkspaceError as exc:
+            return {"error": str(exc)}
+        if not resolved.is_dir():
+            return {"error": f"Not a directory: {workdir}"}
+        log.info("Tool call: run_command_in_dir — %s (in %s)", command, workdir)
+        return await self.executor.run_in_dir(command, str(resolved))
 
     async def _notify_secret_request(
         self, channel: str, user_id: str, name: str, reason: str, link: str
