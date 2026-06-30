@@ -392,7 +392,7 @@
     const bridgeUrl = 'local-wacli';
     result.textContent = 'Checking wacli...';
     result.className = 'alert-info';
-    fetch('/channels/whatsapp/test', {
+    fetch('/tools/whatsapp/test', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -418,7 +418,7 @@
     result.textContent = 'Starting WhatsApp auth...';
     result.className = 'alert-info';
     try {
-      const r = await fetch('/channels/whatsapp/auth/start', {
+      const r = await fetch('/tools/whatsapp/auth/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -445,7 +445,7 @@
     result.textContent = 'Stopping WhatsApp auth...';
     result.className = 'alert-info';
     try {
-      const r = await fetch('/channels/whatsapp/auth/stop', {
+      const r = await fetch('/tools/whatsapp/auth/stop', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -473,7 +473,7 @@
     result.textContent = 'Logging out WhatsApp...';
     result.className = 'alert-info';
     try {
-      const r = await fetch('/channels/whatsapp/auth/logout', {
+      const r = await fetch('/tools/whatsapp/auth/logout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -511,7 +511,7 @@
       }
       let qrDelay = 2000;
       try {
-        const r = await fetch('/channels/whatsapp/auth/status', {
+        const r = await fetch('/tools/whatsapp/auth/status', {
           headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
         });
         const status = await r.json();
@@ -531,7 +531,7 @@
           return;
         }
         panel.style.display = 'block';
-        const qrResp = await fetch('/channels/whatsapp/auth/qr?ts=' + Date.now(), {
+        const qrResp = await fetch('/tools/whatsapp/auth/qr?ts=' + Date.now(), {
           headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
         });
         if (qrResp.ok) {
@@ -574,7 +574,7 @@
     result.textContent = 'Syncing messages...';
     result.className = 'alert-info';
     try {
-      const r = await fetch('/channels/whatsapp/sync', {
+      const r = await fetch('/tools/whatsapp/sync', {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
@@ -599,7 +599,7 @@
     const panel = document.getElementById('wa-auth-panel');
     const qrBox = document.getElementById('wa-auth-qr');
     try {
-      const r = await fetch('/channels/whatsapp/auth/status', {
+      const r = await fetch('/tools/whatsapp/auth/status', {
         headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
       });
       const status = await r.json();
@@ -611,7 +611,7 @@
       }
       if (status.running) {
         panel.style.display = 'block';
-        const qrResp = await fetch('/channels/whatsapp/auth/qr?ts=' + Date.now(), {
+        const qrResp = await fetch('/tools/whatsapp/auth/qr?ts=' + Date.now(), {
           headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '') }
         });
         if (qrResp.ok) {

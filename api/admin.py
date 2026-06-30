@@ -2507,9 +2507,8 @@ def create_admin_app(
 
     # WhatsApp wacli linking (#97): the tool's enable flag is `tools.whatsapp.enabled`
     # (saved via /config like the other tools); the routes below drive device auth and
-    # sync from the Tools tab. Paths keep the /channels/whatsapp prefix for client
-    # stability — WhatsApp is a tool now, not a channel.
-    @app.post("/channels/whatsapp/test", dependencies=[Depends(auth)])
+    # sync from the Tools tab. WhatsApp is a tool now, not a channel.
+    @app.post("/tools/whatsapp/test", dependencies=[Depends(auth)])
     async def test_channel_whatsapp(body: WhatsAppTestIn) -> dict:
         status = await wacli.auth_status()
         available = status.get("available") is True
@@ -2521,12 +2520,12 @@ def create_admin_app(
             )
         return result
 
-    @app.get("/channels/whatsapp/auth/status", dependencies=[Depends(auth)])
+    @app.get("/tools/whatsapp/auth/status", dependencies=[Depends(auth)])
     async def whatsapp_auth_status() -> dict:
         status = await wacli.auth_status()
         return {"ok": True, **status}
 
-    @app.post("/channels/whatsapp/auth/start", dependencies=[Depends(auth)])
+    @app.post("/tools/whatsapp/auth/start", dependencies=[Depends(auth)])
     async def whatsapp_auth_start() -> dict:
         if not wacli.available():
             return {
@@ -2538,12 +2537,12 @@ def create_admin_app(
         await wacli.start_auth()
         return {"ok": True, "available": True}
 
-    @app.post("/channels/whatsapp/auth/stop", dependencies=[Depends(auth)])
+    @app.post("/tools/whatsapp/auth/stop", dependencies=[Depends(auth)])
     async def whatsapp_auth_stop() -> dict:
         await wacli.stop_auth()
         return {"ok": True}
 
-    @app.get("/channels/whatsapp/auth/qr", dependencies=[Depends(auth)])
+    @app.get("/tools/whatsapp/auth/qr", dependencies=[Depends(auth)])
     async def whatsapp_auth_qr() -> dict:
         if not wacli.latest_qr:
             await wacli.fetch_latest_qr()
@@ -2551,12 +2550,12 @@ def create_admin_app(
             raise HTTPException(404, "No QR available")
         return {"ok": True, "qr": wacli.latest_qr, "latest_qr_at": wacli.latest_qr_at}
 
-    @app.post("/channels/whatsapp/auth/logout", dependencies=[Depends(auth)])
+    @app.post("/tools/whatsapp/auth/logout", dependencies=[Depends(auth)])
     async def whatsapp_auth_logout() -> dict:
         await wacli.logout()
         return {"ok": True}
 
-    @app.post("/channels/whatsapp/sync", dependencies=[Depends(auth)])
+    @app.post("/tools/whatsapp/sync", dependencies=[Depends(auth)])
     async def whatsapp_sync() -> dict:
         res = await wacli.sync_once()
         return {"ok": res.get("success") is True, "response": res}
