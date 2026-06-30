@@ -47,6 +47,40 @@ _HTML_TAG_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Telegram rejects messages over 4096 chars with "Message is too long" (#80).
+TELEGRAM_LIMIT = 4096
+
+
+def _chunk(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
+    """Split ``text`` into pieces no longer than ``limit``, breaking on newlines.
+
+    Splitting the Markdown *source* (before HTML conversion) is safe: the
+    fence/bold/italic regexes in markdown_tg require matching delimiters, so a
+    chunk boundary inside one leaves the markers as literal text rather than an
+    unbalanced tag. A single line longer than ``limit`` is hard-split.
+    """
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if not current:
+            current = line
+        elif len(current) + 1 + len(line) <= limit:
+            current += "\n" + line
+        else:
+            chunks.append(current)
+            current = line
+    if current:
+        chunks.append(current)
+    return chunks
+
 
 class TelegramChannel:
     def __init__(
@@ -579,21 +613,24 @@ class TelegramChannel:
     # -- Outgoing ------------------------------------------------------------
 
     async def send(self, chat_id: int | str, text: str) -> None:
-        """Send a message to a specific chat (used by scheduler, send_message tool, etc.)."""
+        """Send a message to a specific chat (used by scheduler, send_message tool, etc.).
+
+        Long output is chunked to Telegram's 4096-char limit (#80); each chunk
+        is a separate message rather than crashing the turn.
+        """
         # Agent output is Markdown; render to Telegram HTML unless it already carries HTML tags.
-        if _HTML_TAG_RE.search(text):
-            html = text
-        else:
-            html = to_telegram_html(text)
+        html_input = bool(_HTML_TAG_RE.search(text))
         cid, kw = self._route(chat_id)
-        try:
-            await self.app.bot.send_message(cid, html, parse_mode="HTML", **kw)
-        except BadRequest as exc:
-            if "parse entities" in str(exc).lower():
-                log.warning("Telegram HTML parse failed; sending as plain text: %s", exc)
-                await self.app.bot.send_message(cid, text, **kw)
-                return
-            raise
+        for chunk in _chunk(text):
+            payload = chunk if html_input else to_telegram_html(chunk)
+            try:
+                await self.app.bot.send_message(cid, payload, parse_mode="HTML", **kw)
+            except BadRequest as exc:
+                if "parse entities" in str(exc).lower():
+                    log.warning("Telegram HTML parse failed; sending as plain text: %s", exc)
+                    await self.app.bot.send_message(cid, chunk, **kw)
+                    continue
+                raise
 
     async def send_approval_request(
         self, user_id: str, request_id: str, description: str, image_path: str | None = None
@@ -628,7 +665,11 @@ class TelegramChannel:
                 return
             except Exception:
                 log.exception("Failed to send approval screenshot; falling back to text")
-        await self.app.bot.send_message(cid, text, reply_markup=keyboard, **kw)
+        # Chunk so a long prompt sends (#80); the keyboard rides the final piece.
+        *head, last = _chunk(text)
+        for piece in head:
+            await self.app.bot.send_message(cid, piece, **kw)
+        await self.app.bot.send_message(cid, last, reply_markup=keyboard, **kw)
 
     # -- Helpers -------------------------------------------------------------
 

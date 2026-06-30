@@ -566,6 +566,16 @@ class PendingApproval(TypedDict):
     match_key: str
 
 
+def _preview(text: str, limit: int = 200) -> str:
+    """Truncate a free-form field so it can't blow past Telegram's message cap.
+
+    Approval prompts interpolate user/agent-supplied strings (a command, a
+    message body). A `run_command` carrying a large heredoc would otherwise
+    produce a multi-kilobyte prompt that fails to send (#80).
+    """
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
 def format_approval_message(tool_name: str, params: dict) -> str:
     """Format a human-readable approval prompt for a tool call."""
     if tool_name == "send_email":
@@ -580,8 +590,7 @@ def format_approval_message(tool_name: str, params: dict) -> str:
         channel = params.get("channel", "?")
         to = params.get("to", "?")
         text = params.get("text", "")
-        preview = text[:100] + ("…" if len(text) > 100 else "")
-        return f"Send {channel} message to {to}\n{preview}"
+        return f"Send {channel} message to {to}\n{_preview(text, 100)}"
     if tool_name == "create_calendar_event":
         summary = params.get("summary", "?")
         start = params.get("start", "?")
@@ -605,7 +614,7 @@ def format_approval_message(tool_name: str, params: dict) -> str:
             return "List all scheduled jobs"
         return f"Manage jobs: {action}"
     if tool_name == "run_command":
-        cmd = params.get("command", "?")
+        cmd = _preview(params.get("command", "?"))
         purpose = params.get("purpose", "")
         return f"Run command: {cmd}" + (f"\n({purpose})" if purpose else "")
     if tool_name == "write_file":
@@ -613,7 +622,7 @@ def format_approval_message(tool_name: str, params: dict) -> str:
     if tool_name == "edit_file":
         return f"Edit file: {params.get('path', '?')}"
     if tool_name == "run_command_in_dir":
-        cmd = params.get("command", "?")
+        cmd = _preview(params.get("command", "?"))
         workdir = params.get("workdir", "?")
         return f"Run in {workdir}: {cmd}"
     if tool_name == "write_artifact":
