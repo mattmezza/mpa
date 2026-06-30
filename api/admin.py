@@ -948,10 +948,16 @@ def create_admin_app(
         sub_enabled = await config_store.get("subagents.enabled")
         sub_on = sub_enabled is None or sub_enabled == "true"
         ig_on = (await config_store.get("tools.imagegen.enabled")) == "true"
+        ws_on = (await config_store.get("workspace.enabled")) == "true" and bool(
+            (await config_store.get("workspace.directory") or "").strip()
+        )
         return {
             "all_skills": all_skills,
             "all_tools": gateable_tools_for(
-                artifacts.enabled, subagents_enabled=sub_on, imagegen_enabled=ig_on
+                artifacts.enabled,
+                subagents_enabled=sub_on,
+                imagegen_enabled=ig_on,
+                workspace_enabled=ws_on,
             ),
         }
 
@@ -3743,11 +3749,29 @@ GATEABLE_TOOLS = [
     "write_artifact",
     "spawn_subagent",
     "generate_image",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "list_dir",
+    "grep",
+    "run_command_in_dir",
 ]
+
+_WORKSPACE_TOOLS = (
+    "read_file",
+    "write_file",
+    "edit_file",
+    "list_dir",
+    "grep",
+    "run_command_in_dir",
+)
 
 
 def gateable_tools_for(
-    artifacts_enabled: bool, subagents_enabled: bool = True, imagegen_enabled: bool = True
+    artifacts_enabled: bool,
+    subagents_enabled: bool = True,
+    imagegen_enabled: bool = True,
+    workspace_enabled: bool = True,
 ) -> list[str]:
     """GATEABLE_TOOLS minus tools whose feature is globally disabled."""
     out = list(GATEABLE_TOOLS)
@@ -3757,6 +3781,8 @@ def gateable_tools_for(
         out = [t for t in out if t != "spawn_subagent"]
     if not imagegen_enabled:
         out = [t for t in out if t != "generate_image"]
+    if not workspace_enabled:
+        out = [t for t in out if t not in _WORKSPACE_TOOLS]
     return out
 
 
