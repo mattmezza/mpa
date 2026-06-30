@@ -143,6 +143,88 @@ def test_persona_bot_fields_persist(tmp_path) -> None:
     assert got["allowed_user_ids"] == [111, 222]
 
 
+def test_persona_tool_config_persists(tmp_path) -> None:
+    # Per-persona tool identity config (#93) survives the round-trip.
+    client, _ = _client(tmp_path)
+    tc = {"gh": {"enabled": True}, "browser": {"enabled": True, "profile": "hop"}}
+    r = client.post(
+        "/personae", json={"name": "hopper", "role": "Coder", "tool_config": tc}, headers=AUTH
+    )
+    assert r.status_code == 200
+    got = client.get("/personae/hopper", headers=AUTH).json()
+    assert got["tool_config"] == tc
+
+
+def test_persona_gh_token_without_vault_errors(tmp_path) -> None:
+    # No infra vault configured → setting a per-persona token is refused, not
+    # silently dropped (so the user knows to configure a master key first).
+    client, _ = _client(tmp_path)
+    r = client.post("/personae", json={"name": "x", "gh_token": "ghp_abc"}, headers=AUTH)
+    assert r.status_code == 400
+    assert "master key" in r.text.lower()
+
+
+def test_persona_gh_token_written_to_infra_vault(tmp_path) -> None:
+    # With an infra vault wired, a per-persona token lands in it under the
+    # namespaced name and never appears in the persona record (#93).
+    import asyncio
+
+    from core.secret_store import SecretStore
+    from core.tools import gh_token_secret_name
+    from core.vault import InfraVault
+
+    store = SecretStore(db_path=str(tmp_path / "config.db"), infra_vault=InfraVault("machine-key"))
+    agent = _AgentStub()
+    app, _ = create_admin_app(
+        AgentState(agent=cast(Any, agent)),
+        cast(ConfigStore, _Store(tmp_path)),
+        secret_store=store,
+    )
+    client = TestClient(app)
+    r = client.post(
+        "/personae",
+        json={"name": "hopper", "tool_config": {"gh": {"enabled": True}}, "gh_token": "ghp_xyz"},
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    stored = asyncio.run(store.get_infra_secret(gh_token_secret_name("hopper")))
+    assert stored == "ghp_xyz"
+    got = client.get("/personae/hopper", headers=AUTH).json()
+    assert "ghp_xyz" not in got["markdown"]  # token never in the persona doc
+
+
+def test_persona_editor_renders_tool_identities(tmp_path) -> None:
+    # The editor page renders the Tool identities card when a tool is enabled.
+    client, _ = _client(tmp_path)
+    client.post("/personae", json={"name": "hopper"}, headers=AUTH)
+    r = client.get("/admin/personae/hopper", headers=AUTH)
+    assert r.status_code == 200
+    assert "Tool identities" in r.text
+
+
+def test_persona_editor_offers_vault_token_source(tmp_path) -> None:
+    # With gh enabled + an infra vault, the gh card offers reusing a vault secret
+    # as the persona's token (#93), seeded with existing infra secret names.
+    from core.secret_store import SecretStore
+    from core.vault import InfraVault
+
+    store = SecretStore(db_path=str(tmp_path / "config.db"), infra_vault=InfraVault("machine-key"))
+    asyncio_run = __import__("asyncio").run
+    asyncio_run(store.set_infra_secret("SHARED_PAT", "ghp_shared"))
+    backing = _Store(tmp_path)
+    backing._data["tools.gh.enabled"] = "true"
+    agent = _AgentStub()
+    app, _ = create_admin_app(
+        AgentState(agent=cast(Any, agent)), cast(ConfigStore, backing), secret_store=store
+    )
+    client = TestClient(app)
+    client.post("/personae", json={"name": "hopper"}, headers=AUTH)
+    r = client.get("/admin/personae/hopper", headers=AUTH)
+    assert r.status_code == 200
+    assert "Token source" in r.text
+    assert "SHARED_PAT" in r.text  # existing infra secret offered in the dropdown
+
+
 def test_activate_unknown_persona_404(tmp_path) -> None:
     client, _ = _client(tmp_path)
     assert (

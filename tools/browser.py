@@ -782,6 +782,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Headless browser automation (Playwright).")
     # Default headless from the env injected by core/tools.py (config.tools.browser).
     headless_default = os.environ.get("BROWSER_HEADLESS", "1") != "0"
+    # Default profile from the env injected per active persona (#93): when an agent
+    # omits --profile, it still gets its OWN isolated session dir, not a shared one.
+    profile_default = os.environ.get("BROWSER_PROFILE", "default") or "default"
     parser.add_argument(
         "--headless", dest="headless", action="store_true", default=headless_default
     )
@@ -791,24 +794,24 @@ def main() -> None:
 
     p_read = sub.add_parser("read", help="Load a page, return readable text")
     p_read.add_argument("--url", required=True)
-    p_read.add_argument("--profile", default="default")
+    p_read.add_argument("--profile", default=profile_default)
 
     p_shot = sub.add_parser("screenshot", help="Load a page, save a PNG")
     p_shot.add_argument("--url", required=True)
-    p_shot.add_argument("--profile", default="default")
+    p_shot.add_argument("--profile", default=profile_default)
     p_shot.add_argument("-o", "--output", help="output PNG path")
     p_shot.add_argument("--full-page", action="store_true", default=True)
     p_shot.add_argument("--viewport-only", dest="full_page", action="store_false")
 
     p_act = sub.add_parser("act", help="Load a page and run ordered steps")
     p_act.add_argument("--url", required=True)
-    p_act.add_argument("--profile", default="default")
+    p_act.add_argument("--profile", default=profile_default)
     p_act.add_argument("--steps", required=True, help="JSON array of single-key step objects")
 
     p_exp = sub.add_parser("explore", help="LLM-driven loop: one live browser, act until done")
     p_exp.add_argument("--url", required=True)
     p_exp.add_argument("--task", required=True, help="what to accomplish on the site")
-    p_exp.add_argument("--profile", default="default")
+    p_exp.add_argument("--profile", default=profile_default)
     p_exp.add_argument("--max-steps", type=int, default=35, dest="max_steps")
 
     sub.add_parser("profiles", help="List saved profiles + auth hint")

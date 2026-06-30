@@ -6,7 +6,9 @@ finance assistant, …). It is exactly four things (issue #13):
 - its own system-prompt identity (``personalia`` + ``character``),
 - a **skill allowlist** (which skills it may load — empty means *all*),
 - a **tool scope** (which function-tools are advertised — empty means *all*),
-- a **secret scope** (vault namespaces it may use — stored now, enforced by #19).
+- a **secret scope** (vault namespaces it may use — stored now, enforced by #19),
+- **tool identities** (``tool_config``: own ``gh`` token / browser profile per
+  external CLI tool — #93; empty means *inherit the system-wide config*).
 
 The store mirrors :mod:`core.skills`: markdown files with YAML frontmatter,
 seeded into SQLite at startup, editable in the admin UI. When no persona is
@@ -16,6 +18,7 @@ first-run behaviour is unchanged.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +39,7 @@ CREATE TABLE IF NOT EXISTS personae (
     secrets TEXT DEFAULT '',
     bot_token TEXT DEFAULT '',
     allowed_user_ids TEXT DEFAULT '',
+    tool_config TEXT DEFAULT '',
     created_at DATETIME DEFAULT (datetime('now')),
     updated_at DATETIME DEFAULT (datetime('now'))
 );
@@ -45,6 +49,7 @@ CREATE TABLE IF NOT EXISTS personae (
 _MIGRATIONS = (
     "ALTER TABLE personae ADD COLUMN bot_token TEXT DEFAULT ''",  # #29
     "ALTER TABLE personae ADD COLUMN allowed_user_ids TEXT DEFAULT ''",  # #29
+    "ALTER TABLE personae ADD COLUMN tool_config TEXT DEFAULT ''",  # #93
 )
 
 
@@ -64,12 +69,22 @@ class Persona:
     secrets: list[str] = field(default_factory=list)  # vault scope; stored only (#19)
     bot_token: str = ""  # own Telegram bot; empty = reachable only via the default bot (#29)
     allowed_user_ids: list[int] = field(default_factory=list)  # bot ACL; [] = inherit global
+    # Per-persona config for the optional external CLI tools (gh, browser) — #93.
+    # Shape: {tool_key: {"enabled": bool, **tool-specific cfg}}. Empty = inherit
+    # the system-wide tool config (own credentials/profile fall back to shared).
+    tool_config: dict = field(default_factory=dict)
 
     def allows_skill(self, name: str) -> bool:
         return not self.skills or name in self.skills
 
     def allows_tool(self, name: str) -> bool:
         return not self.tools or name in self.tools
+
+    def tool_setting(self, key: str) -> dict | None:
+        """This persona's config for external tool ``key`` (gh/browser), or None
+        if it has none — in which case the system-wide config applies (#93)."""
+        cfg = self.tool_config.get(key) if isinstance(self.tool_config, dict) else None
+        return cfg if isinstance(cfg, dict) else None
 
 
 def _as_list(value: object) -> list[str]:
@@ -82,6 +97,23 @@ def _as_list(value: object) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(p).strip() for p in value if str(p).strip()]
     return []
+
+
+def _as_tool_config(value: object) -> dict:
+    """Coerce a frontmatter / DB-column value into a per-tool config dict (#93).
+
+    Accepts an already-parsed dict (frontmatter) or a JSON string (DB column).
+    Anything malformed degrades to ``{}`` so a broken value never breaks load.
+    """
+    if isinstance(value, dict):
+        return {k: v for k, v in value.items() if isinstance(v, dict)}
+    if isinstance(value, str) and value.strip():
+        try:
+            loaded = json.loads(value)
+        except json.JSONDecodeError, ValueError:
+            return {}
+        return _as_tool_config(loaded)
+    return {}
 
 
 def _as_int_list(value: object) -> list[int]:
@@ -140,6 +172,7 @@ def parse_markdown(text: str, *, name: str) -> Persona:
         secrets=_as_list(fm.get("secrets")),
         bot_token=str(fm.get("bot_token", "") or ""),
         allowed_user_ids=_as_int_list(fm.get("allowed_user_ids")),
+        tool_config=_as_tool_config(fm.get("tool_config")),
     )
 
 
@@ -155,6 +188,7 @@ def to_markdown(p: Persona) -> str:
         "skills": p.skills,
         "tools": p.tools,
         "secrets": p.secrets,
+        "tool_config": p.tool_config,
         "personalia": p.personalia,
         "character": p.character,
     }
@@ -207,14 +241,14 @@ class PersonaStore:
         await db.execute(
             "INSERT INTO personae "
             "(name, agent_name, role, emoji, voice, personalia, character, skills, tools, "
-            "secrets, bot_token, allowed_user_ids) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "secrets, bot_token, allowed_user_ids, tool_config) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(name) DO UPDATE SET "
             "agent_name=excluded.agent_name, role=excluded.role, emoji=excluded.emoji, "
             "voice=excluded.voice, personalia=excluded.personalia, character=excluded.character, "
             "skills=excluded.skills, tools=excluded.tools, secrets=excluded.secrets, "
             "bot_token=excluded.bot_token, allowed_user_ids=excluded.allowed_user_ids, "
-            "updated_at=datetime('now')",
+            "tool_config=excluded.tool_config, updated_at=datetime('now')",
             (
                 p.name,
                 p.agent_name,
@@ -228,6 +262,7 @@ class PersonaStore:
                 "\n".join(p.secrets),
                 p.bot_token,
                 "\n".join(str(i) for i in p.allowed_user_ids),
+                json.dumps(p.tool_config) if p.tool_config else "",
             ),
         )
 
@@ -248,6 +283,7 @@ class PersonaStore:
             allowed_user_ids=_as_int_list(
                 row["allowed_user_ids"] if "allowed_user_ids" in row.keys() else ""
             ),
+            tool_config=_as_tool_config(row["tool_config"] if "tool_config" in row.keys() else ""),
         )
 
     async def list_personae(self) -> list[Persona]:
@@ -313,6 +349,12 @@ tools:
 secrets: []
 bot_token: "123:ABC"
 allowed_user_ids: [111, 222]
+tool_config:
+  gh:
+    enabled: true
+  browser:
+    enabled: true
+    profile: forge
 personalia: |
   You are Forge, a strength coach.
 character: |
@@ -332,14 +374,19 @@ Extra prose in the body.
     assert "motivating" in p.character and "Extra prose" in p.character  # body appended
     assert p.allows_skill("scheduling") and not p.allows_skill("email")
     assert p.allows_tool("run_command") and not p.allows_tool("send_email")
+    assert p.tool_setting("gh") == {"enabled": True}, p.tool_setting("gh")
+    assert p.tool_setting("browser") == {"enabled": True, "profile": "forge"}
+    assert p.tool_setting("weather") is None  # no entry = inherit system config
 
     # Empty allowlists = allow everything (default persona semantics).
     blank = Persona(name="default")
     assert blank.allows_skill("anything") and blank.allows_tool("anything")
+    assert blank.tool_setting("gh") is None  # no per-tool config by default
 
     # Round-trip through markdown preserves the structured fields.
     p2 = parse_markdown(to_markdown(p), name="fitness-coach")
     assert p2.agent_name == p.agent_name and p2.skills == p.skills and p2.tools == p.tools
     assert p2.personalia.strip() == p.personalia.strip()
     assert p2.bot_token == p.bot_token and p2.allowed_user_ids == p.allowed_user_ids
+    assert p2.tool_config == p.tool_config, p2.tool_config
     print("personae.py self-check OK")

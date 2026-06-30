@@ -42,8 +42,8 @@ from core.prompt_builder import (
     DEFAULT_TOOL_USAGE_BLOCK,
     build_prompt_sections,
 )
+from core.tools import gh_token_secret_name, tool_env
 from core.tools import registry as tool_registry
-from core.tools import tool_env
 from core.wacli import WacliManager
 
 if TYPE_CHECKING:
@@ -618,6 +618,8 @@ class PersonaUpsertIn(BaseModel):
     secrets: list[str] = []
     bot_token: str = ""  # per-persona Telegram bot (#29); empty = no own bot
     allowed_user_ids: str = ""  # comma/newline-separated; empty = inherit global
+    tool_config: dict = {}  # per-persona external-tool config (gh/browser) — #93
+    gh_token: str = ""  # this persona's GitHub PAT → infra vault; empty = leave unchanged
     raw: str = ""  # when set, the markdown doc is parsed instead of the fields above
 
 
@@ -971,7 +973,33 @@ def create_admin_app(
             ),
             "kokoro_voices": KOKORO_VOICES,
             "kokoro_languages": KOKORO_LANGUAGES,
+            # External CLI tools that support a per-persona identity (#93). Only the
+            # system-wide enabled ones are offered, so the registry stays the
+            # source of truth for what exists.
+            "tool_specs": [
+                {"key": s.key, "label": s.label, "summary": s.summary}
+                for s in tool_registry()
+                if (await config_store.get(f"tools.{s.key}.enabled")) == "true"
+            ],
+            "infra_available": bool(secret_store and secret_store.infra.available),
+            # Existing infra-vault secret names a persona can reuse as its gh token
+            # instead of storing its own copy (#93). Infra vault only (boot-unsealed,
+            # so it resolves headless like the per-persona token does).
+            "infra_names": (
+                [r["name"] for r in await secret_store.list_infra_names()]
+                if secret_store and secret_store.infra.available
+                else []
+            ),
         }
+
+    async def _persona_gh_token_set(name: str) -> bool:
+        """Whether this persona already has a GitHub token in the infra vault (#93)."""
+        if not name or secret_store is None or not secret_store.infra.available:
+            return False
+        try:
+            return await secret_store.get_infra_secret(gh_token_secret_name(name)) is not None
+        except Exception:
+            return False
 
     @app.get("/admin/personae/new", response_model=None)
     async def admin_persona_new() -> Response:
@@ -986,6 +1014,7 @@ def create_admin_app(
             is_new=True,
             persona=Persona(name=""),
             raw=to_markdown(Persona(name="")),
+            gh_token_set=False,
             **ctx,
         )
 
@@ -1006,6 +1035,7 @@ def create_admin_app(
             is_new=False,
             persona=persona,
             raw=to_markdown(persona),
+            gh_token_set=await _persona_gh_token_set(name),
             **ctx,
         )
 
@@ -2735,7 +2765,7 @@ def create_admin_app(
 
     @app.post("/personae", dependencies=[Depends(auth)])
     async def upsert_persona(body: PersonaUpsertIn) -> HTMLResponse:
-        from core.personae import Persona, _as_int_list, parse_markdown
+        from core.personae import Persona, _as_int_list, _as_tool_config, parse_markdown
 
         name = body.name.strip()
         if not name:
@@ -2759,6 +2789,21 @@ def create_admin_app(
                 secrets=[s.strip() for s in body.secrets if s.strip()],
                 bot_token=body.bot_token.strip(),
                 allowed_user_ids=_as_int_list(body.allowed_user_ids),
+                tool_config=_as_tool_config(body.tool_config),
+            )
+        # A per-persona GitHub token goes into the infra vault (machine-key,
+        # boot-unsealed so it works headless), namespaced per persona (#93). Empty
+        # = leave any existing token untouched.
+        if body.gh_token.strip():
+            if secret_store is None or not secret_store.infra.available:
+                raise HTTPException(
+                    400,
+                    "Set a master key in the Secrets tab before storing per-persona tokens.",
+                )
+            await secret_store.set_infra_secret(
+                gh_token_secret_name(name),
+                body.gh_token.strip(),
+                f"GitHub token for persona {name}",
             )
         store = await _persona_store_from_config(config_store)
         await store.upsert(persona)

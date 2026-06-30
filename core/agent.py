@@ -52,7 +52,7 @@ from core.subagents import (
     summarize_batch,
 )
 from core.task_reflection import ReflectionStore
-from core.tools import tool_env
+from core.tools import effective_tool_env, tool_env
 from voice.pipeline import VoicePipeline
 
 log = logging.getLogger(__name__)
@@ -2086,7 +2086,16 @@ class AgentCore:
                 command, serr = await self.secret_store.resolve_command_secrets(command, allowed)
                 if serr:
                     return {"error": serr}
-            return await self.executor.run_command(command)
+            # Per-persona tool identity (#93): a persona runs `gh`/`browser` with its
+            # own credentials/profile, never the owner's. No persona → the shared
+            # default env (unchanged path).
+            persona = request_state.get("persona_obj")
+            persona_env = None
+            if persona is not None:
+                store = self.secret_store
+                resolve = store.infra_resolve if store else (lambda _n: None)
+                persona_env = effective_tool_env(self.config, persona, resolve)
+            return await self.executor.run_command(command, tool_env=persona_env)
 
         if name == "send_email":
             result = await self._tool_send_email(params)
@@ -2909,6 +2918,11 @@ class AgentCore:
             skills=narrow_scope(p_skills, requested.skills),
             tools=narrow_scope(p_tools, requested.tools),
             secrets=narrow_scope(p_secrets, requested.secrets),
+            # Tool identity travels verbatim with the persona (#93) — it is who the
+            # child IS (its own gh token / browser profile), not a caller-subset
+            # scope. Dropping it would silently fall back to the owner's token and
+            # re-open the very identity bleed this feature prevents.
+            tool_config=requested.tool_config,
         )
 
     async def _run_subagent_loop(
