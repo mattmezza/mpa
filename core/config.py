@@ -90,9 +90,8 @@ class AgentConfig(BaseModel):
     skills_index_mode: str = "inject"
     personae_dir: str = "personae/"
     personae_db_path: str = "data/personae.db"
-    active_persona: str = ""  # empty = default identity (character/personalia below)
-    character: str = ""
-    personalia: str = ""
+    active_persona: str = ""  # empty = default identity (character below)
+    character: str = ""  # identity + tone (legacy `personalia` was merged in — #98)
 
 
 class GroupChatConfig(BaseModel):

@@ -2914,7 +2914,6 @@ class AgentCore:
             role=requested.role,
             emoji=requested.emoji,
             voice=requested.voice,
-            personalia=requested.personalia,
             character=requested.character,
             skills=narrow_scope(p_skills, requested.skills),
             tools=narrow_scope(p_tools, requested.tools),

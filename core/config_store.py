@@ -334,8 +334,8 @@ class ConfigStore:
     async def seed_if_empty(self, yaml_path: str = "config.yml") -> bool:
         """If the store is empty, import from config.yml + .env.
 
-        Also seeds character/personalia content from their .md files
-        if those files exist and the config keys are not already set.
+        Also seeds character content from character.md if it exists and the
+        config key is not already set.
 
         Returns True if seeding was performed.
         """
@@ -364,20 +364,27 @@ class ConfigStore:
 
             seeded = True
 
-        # Seed character/personalia from .md files if not already in the store
-        for key, filename in [
-            ("agent.character", "character.md"),
-            ("agent.personalia", "personalia.md"),
-        ]:
-            existing = await self.get(key)
-            if not existing:
-                path = Path(filename)
-                if path.exists():
-                    content = path.read_text().strip()
-                    if content:
-                        await self.set(key, content)
-                        log.info("Seeded %s from %s", key, filename)
-                        seeded = True
+        # Seed character from its .md file if not already in the store
+        existing = await self.get("agent.character")
+        if not existing:
+            path = Path("character.md")
+            if path.exists():
+                content = path.read_text().strip()
+                if content:
+                    await self.set("agent.character", content)
+                    log.info("Seeded agent.character from character.md")
+                    seeded = True
+
+        # #98: personalia merged into character. Fold any legacy agent.personalia
+        # into agent.character (prepended, nothing lost), then drop the key so this
+        # runs only once.
+        legacy = await self.get("agent.personalia")
+        if legacy and legacy.strip():
+            character = await self.get("agent.character") or ""
+            await self.set("agent.character", f"{legacy.strip()}\n\n{character}".strip())
+            await self.delete("agent.personalia")
+            log.info("Folded legacy agent.personalia into agent.character (#98)")
+            seeded = True
 
         return seeded
 
