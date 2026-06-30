@@ -104,6 +104,37 @@ def _truncation_tool_results(response) -> list[dict]:
     ]
 
 
+# A malformed tool call (e.g. run_command with no `command`) used to raise out of
+# the loop and kill the turn/subagent (#78). The agentic loop is also unbounded —
+# a model can repeat the same failing call until the token budget is gone. Both
+# are handled at the one point every tool call routes through (_execute_tool):
+# convert any exception into a recoverable error, and refuse a call whose exact
+# signature has already failed this many times.
+_MAX_REPEAT_FAILURES = 3
+_REPEAT_FAILURE_NOTICE = (
+    "You have already called this exact tool with these exact arguments and it "
+    "kept failing. Stop retrying it — change the arguments, take a different "
+    "approach, or report the problem to the user."
+)
+# Hard backstop on LLM round-trips in a single user turn (each round may hold
+# several tool calls), so even a model that ignores every error signal can't loop
+# forever. ponytail: generous ceiling — normal turns use a handful; raise it if a
+# legitimate workflow needs more.
+_MAX_TOOL_ROUNDS = 50
+_LOOP_ABORT_MESSAGE = (
+    "I had to stop — I made too many tool calls without reaching an answer. "
+    "Could you rephrase, or break the request into smaller steps?"
+)
+
+
+def _failure_signature(name: str, params: object) -> str:
+    """Stable key identifying a tool call, for the repeat-failure breaker (#78)."""
+    try:
+        return f"{name}:{json.dumps(params, sort_keys=True, default=str)}"
+    except TypeError, ValueError:
+        return f"{name}:{params!r}"
+
+
 def _shell_quote(s: str) -> str:
     """Quote a string for safe shell interpolation."""
     return shlex.quote(s)
@@ -1579,7 +1610,9 @@ class AgentCore:
         request_state["yolo"] = self.permissions.is_yolo(self._yolo_scope(channel, chat_id))
         tool_log: list[dict] = []
         truncations = 0
-        while response.tool_calls:
+        rounds = 0
+        while response.tool_calls and rounds < _MAX_TOOL_ROUNDS:
+            rounds += 1
             if response.truncated:
                 truncations += 1
                 if truncations > _MAX_TRUNCATION_RETRIES:
@@ -1616,6 +1649,8 @@ class AgentCore:
         final_text = response.text
         if response.truncated and not final_text:
             final_text = _TRUNCATION_GIVEUP_MESSAGE
+        elif response.tool_calls and not final_text:
+            final_text = _LOOP_ABORT_MESSAGE
         log.info("Response: %s", final_text[:200])
 
         # Check if the LLM wants to respond with voice
@@ -1705,7 +1740,9 @@ class AgentCore:
         request_state["yolo"] = self.permissions.is_yolo(self._yolo_scope(channel, chat_id))
         tool_log: list[dict] = []
         truncations = 0
-        while response.tool_calls:
+        rounds = 0
+        while response.tool_calls and rounds < _MAX_TOOL_ROUNDS:
+            rounds += 1
             if response.truncated:
                 truncations += 1
                 if truncations > _MAX_TRUNCATION_RETRIES:
@@ -1753,6 +1790,8 @@ class AgentCore:
         final_text = response.text
         if response.truncated and not final_text:
             final_text = _TRUNCATION_GIVEUP_MESSAGE
+        elif response.tool_calls and not final_text:
+            final_text = _LOOP_ABORT_MESSAGE
 
         # Append the final assistant response to the session
         final_assistant_msg = {"role": "assistant", "content": final_text}
@@ -1817,6 +1856,44 @@ class AgentCore:
         return None
 
     async def _execute_tool(
+        self,
+        tool_call: LLMToolCall,
+        channel: str,
+        user_id: str,
+        request_state: dict | None = None,
+    ) -> dict:
+        """Run a tool call, never letting a malformed call crash the turn (#78).
+
+        Single choke point for every tool call: convert any unexpected exception
+        into a recoverable error result, and refuse a call whose identical
+        signature has already failed ``_MAX_REPEAT_FAILURES`` times this turn so
+        the model can't burn the budget looping on the same broken call.
+        """
+        if request_state is None:
+            request_state = self._new_request_state()
+        sig = _failure_signature(tool_call.name, tool_call.arguments)
+        failures = request_state.setdefault("failure_counts", {})
+        if failures.get(sig, 0) >= _MAX_REPEAT_FAILURES:
+            return {"error": _REPEAT_FAILURE_NOTICE}
+        try:
+            result = await self._execute_tool_inner(tool_call, channel, user_id, request_state)
+        except Exception as exc:
+            log.exception("Tool %r raised", tool_call.name)
+            result = {
+                "error": (
+                    f"The '{tool_call.name}' tool failed unexpectedly: {exc}. "
+                    "Don't repeat the same call — check the arguments, try a different "
+                    "approach, or tell the user if it can't be done."
+                )
+            }
+        # Count every error toward the breaker, transient ones (e.g. a command
+        # timeout) included: the failure mode we stop is a model retrying the
+        # *identical* call many times — varying the args resets the count.
+        if isinstance(result, dict) and result.get("error"):
+            failures[sig] = failures.get(sig, 0) + 1
+        return result
+
+    async def _execute_tool_inner(
         self,
         tool_call: LLMToolCall,
         channel: str,
@@ -1917,7 +1994,9 @@ class AgentCore:
         # --- Dispatch ---
         if name == "run_command":
             log.info("Tool call: run_command — %s", params.get("purpose", ""))
-            command = params["command"]
+            command = params.get("command")
+            if not command:
+                return {"error": "run_command requires a non-empty 'command' argument."}
             # Secret substitution boundary (issue #19): {{secret:NAME}} is resolved
             # ONLY here, for the model's generic command tool, after an ACL check.
             # Structured tools (send_email/send_message/…) build their commands

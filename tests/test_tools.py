@@ -846,3 +846,63 @@ async def test_recall_memory_requires_query(agent) -> None:
     """A blank query is rejected before hitting the store."""
     result = await agent._execute_tool(_recall_call("1", query="   "), "telegram", "u1")
     assert "error" in result
+
+
+# --- Tool-exec resilience (#78) -------------------------------------------------
+
+
+def test_failure_signature_is_order_stable() -> None:
+    from core.agent import _failure_signature
+
+    assert _failure_signature("t", {"a": 1, "b": 2}) == _failure_signature("t", {"b": 2, "a": 1})
+    assert _failure_signature("t", {"a": 1}) != _failure_signature("t", {"a": 2})
+
+
+@pytest.mark.asyncio
+async def test_run_command_missing_command_is_recoverable(agent) -> None:
+    """A run_command call with no 'command' returns an error, not a KeyError (#78)."""
+    from core.llm import LLMToolCall
+
+    res = await agent._execute_tool(
+        LLMToolCall(id="x", name="run_command", arguments={"purpose": "p"}),
+        "system",
+        "u",
+        agent._new_request_state(),
+    )
+    assert "error" in res and "command" in res["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_catches_inner_exception(agent, monkeypatch) -> None:
+    """An unexpected exception in dispatch becomes a recoverable error, not a crash (#78)."""
+    from core.llm import LLMToolCall
+
+    async def boom(*_a, **_k):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(agent, "_execute_tool_inner", boom)
+    res = await agent._execute_tool(
+        LLMToolCall(id="x", name="run_command", arguments={"command": "ls"}),
+        "system",
+        "u",
+        agent._new_request_state(),
+    )
+    assert "error" in res and "kaboom" in res["error"]
+
+
+@pytest.mark.asyncio
+async def test_repeat_failure_breaker_stops_after_n(agent) -> None:
+    """The same failing call is refused after _MAX_REPEAT_FAILURES, not run forever (#78)."""
+    from core.agent import _MAX_REPEAT_FAILURES, _REPEAT_FAILURE_NOTICE
+    from core.llm import LLMToolCall
+
+    state = agent._new_request_state()
+    call = LLMToolCall(id="x", name="run_command", arguments={"purpose": "p"})  # no command
+    errors = [
+        (await agent._execute_tool(call, "system", "u", state))["error"]
+        for _ in range(_MAX_REPEAT_FAILURES + 2)
+    ]
+    # First N reach the real guard; subsequent identical calls are refused.
+    assert all("command" in e for e in errors[:_MAX_REPEAT_FAILURES])
+    assert errors[_MAX_REPEAT_FAILURES] == _REPEAT_FAILURE_NOTICE
+    assert errors[-1] == _REPEAT_FAILURE_NOTICE
