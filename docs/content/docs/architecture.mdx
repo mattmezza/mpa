@@ -88,6 +88,7 @@ Abstraction layer supporting multiple LLM backends:
 - **Grok** — xAI models (via OpenAI-compatible API)
 - **Google** — Gemini models
 - **DeepSeek** — DeepSeek models (via OpenAI-compatible API)
+- **OpenRouter** — provider-agnostic gateway to many models across labs (via OpenAI-compatible API)
 
 ### Tool Executor (`core/executor.py`)
 
@@ -182,7 +183,7 @@ mpa/
 | Component | Technology |
 |-----------|-----------|
 | Language | Python 3.14 with uv |
-| LLM | Anthropic Claude, OpenAI, Grok, Google, DeepSeek |
+| LLM | Anthropic Claude, OpenAI, Grok, Google, DeepSeek, OpenRouter |
 | Messaging | python-telegram-bot, wacli (Go) |
 | Email | Himalaya CLI (Rust) |
 | Calendar | python-caldav |

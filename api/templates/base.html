@@ -112,7 +112,7 @@
     }
     window.previewVoice = previewVoice;
 
-    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel, rdEnabled, rdProvider, rdModel, rdThinkingLevel, rdGroupOnly, rdMaxReplies, rdWindowSeconds, maxTokens, temperature, trMaxReflections) {
+    function llmTab(provider, apiKey, model, openaiKey, openaiBaseUrl, googleKey, googleBaseUrl, grokKey, grokBaseUrl, deepseekKey, deepseekBaseUrl, openrouterKey, openrouterBaseUrl, extractionProvider, extractionModel, consolidationProvider, consolidationModel, gdEnabled, gdProvider, gdModel, trEnabled, trProvider, trModel, promptToolUsageOverride, promptHistoryOverride, defaultToolUsage, defaultHistoryHandling, promptCaptureEnabled, compactionProvider, compactionModel, thinkingLevel, extractionThinkingLevel, consolidationThinkingLevel, gdThinkingLevel, trThinkingLevel, compactionThinkingLevel, visionEnabled, visionProvider, visionModel, rdEnabled, rdProvider, rdModel, rdThinkingLevel, rdGroupOnly, rdMaxReplies, rdWindowSeconds, maxTokens, temperature, trMaxReflections) {
       const currentProvider = provider || 'anthropic';
       return {
         // Sub-tab within the LLM tab (issue #114): sysprompt | inference | providers.
@@ -143,7 +143,8 @@
           {value: 'openai', label: 'OpenAI'},
           {value: 'google', label: 'Google Gemini'},
           {value: 'grok', label: 'Grok (xAI)'},
-          {value: 'deepseek', label: 'DeepSeek'}
+          {value: 'deepseek', label: 'DeepSeek'},
+          {value: 'openrouter', label: 'OpenRouter'}
         ],
         provider: currentProvider,
         apiKey: apiKey || '',
@@ -156,9 +157,9 @@
         gdThinkingLevel: gdThinkingLevel || '',
         trThinkingLevel: trThinkingLevel || '',
         compactionThinkingLevel: compactionThinkingLevel || '',
-        fetchedLevels: {anthropic: [], openai: [], google: [], grok: [], deepseek: []},
-        fetchingLevels: {anthropic: false, openai: false, google: false, grok: false, deepseek: false},
-        fetchLevelsResult: {anthropic: '', openai: '', google: '', grok: '', deepseek: ''},
+        fetchedLevels: {anthropic: [], openai: [], google: [], grok: [], deepseek: [], openrouter: []},
+        fetchingLevels: {anthropic: false, openai: false, google: false, grok: false, deepseek: false, openrouter: false},
+        fetchLevelsResult: {anthropic: '', openai: '', google: '', grok: '', deepseek: '', openrouter: ''},
         openaiKey: openaiKey || '',
         openaiBaseUrl: openaiBaseUrl || '',
         googleKey: googleKey || '',
@@ -167,6 +168,8 @@
         grokBaseUrl: grokBaseUrl || '',
         deepseekKey: deepseekKey || '',
         deepseekBaseUrl: deepseekBaseUrl || '',
+        openrouterKey: openrouterKey || '',
+        openrouterBaseUrl: openrouterBaseUrl || '',
         extractionProvider: extractionProvider || 'anthropic',
         extractionModel: extractionModel || 'claude-haiku-4-5',
         consolidationProvider: consolidationProvider || 'anthropic',
@@ -227,21 +230,24 @@
           openai: currentProvider === 'openai',
           google: currentProvider === 'google',
           grok: currentProvider === 'grok',
-          deepseek: currentProvider === 'deepseek'
+          deepseek: currentProvider === 'deepseek',
+          openrouter: currentProvider === 'openrouter'
         },
         testing: {
           anthropic: false,
           openai: false,
           google: false,
           grok: false,
-          deepseek: false
+          deepseek: false,
+          openrouter: false
         },
         testResults: {
           anthropic: '',
           openai: '',
           google: '',
           grok: '',
-          deepseek: ''
+          deepseek: '',
+          openrouter: ''
         },
         models: {
           anthropic: [
@@ -268,11 +274,17 @@
           deepseek: [
             {value: 'deepseek-chat', label: 'deepseek-chat'},
             {value: 'deepseek-reasoner', label: 'deepseek-reasoner'}
+          ],
+          openrouter: [
+            {value: 'anthropic/claude-sonnet-4.5', label: 'anthropic/claude-sonnet-4.5'},
+            {value: 'openai/gpt-5', label: 'openai/gpt-5'},
+            {value: 'google/gemini-2.5-flash', label: 'google/gemini-2.5-flash'},
+            {value: 'deepseek/deepseek-chat', label: 'deepseek/deepseek-chat'}
           ]
         },
-        fetchedModels: {anthropic: [], openai: [], google: [], grok: [], deepseek: []},
-        fetchingModels: {anthropic: false, openai: false, google: false, grok: false, deepseek: false},
-        fetchModelsResult: {anthropic: '', openai: '', google: '', grok: '', deepseek: ''},
+        fetchedModels: {anthropic: [], openai: [], google: [], grok: [], deepseek: [], openrouter: []},
+        fetchingModels: {anthropic: false, openai: false, google: false, grok: false, deepseek: false, openrouter: false},
+        fetchModelsResult: {anthropic: '', openai: '', google: '', grok: '', deepseek: '', openrouter: ''},
         modelOptions(prov) {
           const fetched = this.fetchedModels[prov];
           if (fetched && fetched.length) {
@@ -368,7 +380,8 @@
             openai: 'https://platform.openai.com/docs/guides/reasoning',
             google: 'https://ai.google.dev/gemini-api/docs/thinking',
             grok: 'https://docs.x.ai/docs/guides/reasoning',
-            deepseek: 'https://api-docs.deepseek.com/guides/reasoning_model'
+            deepseek: 'https://api-docs.deepseek.com/guides/reasoning_model',
+            openrouter: 'https://openrouter.ai/docs/use-cases/reasoning-tokens'
           })[prov] || '';
         },
         // True when a background kind points at the exact same provider+model as
@@ -492,6 +505,7 @@
           if (service === 'google') return this.googleKey;
           if (service === 'grok') return this.grokKey;
           if (service === 'deepseek') return this.deepseekKey;
+          if (service === 'openrouter') return this.openrouterKey;
           return this.apiKey;
         },
         baseUrlFor(service) {
@@ -499,6 +513,7 @@
           if (service === 'google') return this.googleBaseUrl;
           if (service === 'grok') return this.grokBaseUrl;
           if (service === 'deepseek') return this.deepseekBaseUrl;
+          if (service === 'openrouter') return this.openrouterBaseUrl;
           return '';
         },
         resolvedBaseUrl(service) {
@@ -506,6 +521,7 @@
           if (service === 'google') return base || 'https://generativelanguage.googleapis.com/v1beta/openai';
           if (service === 'grok') return base || 'https://api.x.ai/v1';
           if (service === 'deepseek') return base || 'https://api.deepseek.com';
+          if (service === 'openrouter') return base || 'https://openrouter.ai/api/v1';
           return base;
         },
         canSelect(service) {

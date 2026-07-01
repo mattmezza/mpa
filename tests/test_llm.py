@@ -21,6 +21,25 @@ def test_from_agent_config_carries_thinking_level() -> None:
     assert LLMClient.from_agent_config(cfg).thinking_level == "low"
 
 
+def test_from_agent_config_openrouter_defaults_base_url() -> None:
+    """OpenRouter (#128) routes through the OpenAI-compatible client with the
+    gateway base URL when none is configured."""
+    cfg = AgentConfig(llm_provider="openrouter", openrouter_api_key="k")
+    client = LLMClient.from_agent_config(cfg)
+    assert client.provider == "openrouter"
+    assert "openrouter.ai/api/v1" in str(client._client.base_url)
+
+
+def test_from_agent_config_openrouter_base_url_override() -> None:
+    cfg = AgentConfig(
+        llm_provider="openrouter",
+        openrouter_api_key="k",
+        openrouter_base_url="https://example.test/v1",
+    )
+    client = LLMClient.from_agent_config(cfg)
+    assert "example.test" in str(client._client.base_url)
+
+
 @pytest.mark.asyncio
 async def test_anthropic_generate_sends_effort_when_set() -> None:
     client = LLMClient("anthropic", "x", thinking_level="medium")

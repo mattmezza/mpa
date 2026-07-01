@@ -91,6 +91,15 @@ def test_openrouter_reuse_requires_openrouter_base_url():
     assert imagegen.resolve_api_key(cfg) == "sk-or"
 
 
+def test_openrouter_reuses_dedicated_llm_key():
+    """The dedicated OpenRouter LLM key (#128) is reused without the legacy
+    openai_base_url trick, and wins over it."""
+    cfg = Config()
+    cfg.tools.imagegen.provider = "openrouter"
+    cfg.agent.openrouter_api_key = "sk-or-dedicated"
+    assert imagegen.resolve_api_key(cfg) == "sk-or-dedicated"
+
+
 def test_fal_never_reuses_llm_key():
     cfg = Config()
     cfg.tools.imagegen.provider = "fal"

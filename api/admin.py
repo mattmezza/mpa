@@ -181,6 +181,8 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
             ("agent.grok_base_url", "grok_base_url"),
             ("agent.deepseek_api_key", "deepseek_api_key"),
             ("agent.deepseek_base_url", "deepseek_base_url"),
+            ("agent.openrouter_api_key", "openrouter_api_key"),
+            ("agent.openrouter_base_url", "openrouter_base_url"),
             ("agent.model", "model"),
         ):
             val = await config_store.get(key)
@@ -836,6 +838,7 @@ def create_admin_app(
         "agent.google_api_key",
         "agent.grok_api_key",
         "agent.deepseek_api_key",
+        "agent.openrouter_api_key",
     }
 
     async def _preserve_vault_refs(values: dict) -> dict:
@@ -892,6 +895,8 @@ def create_admin_app(
         "agent.grok_base_url",
         "agent.deepseek_api_key",
         "agent.deepseek_base_url",
+        "agent.openrouter_api_key",
+        "agent.openrouter_base_url",
         "agent.model",
     }
     _SEARCH_PREFIX = "search."
@@ -1307,6 +1312,8 @@ def create_admin_app(
         grok_base_url = await config_store.get("agent.grok_base_url") or ""
         deepseek_api_key = await config_store.get("agent.deepseek_api_key") or ""
         deepseek_base_url = await config_store.get("agent.deepseek_base_url") or ""
+        openrouter_api_key = await config_store.get("agent.openrouter_api_key") or ""
+        openrouter_base_url = await config_store.get("agent.openrouter_base_url") or ""
         # Vault-managed keys (issue #35): show a read-only "in vault" note instead
         # of the input, and don't ship the ref to the browser.
         anthropic_vaulted = _is_vault_ref(anthropic_api_key)
@@ -1314,6 +1321,7 @@ def create_admin_app(
         google_vaulted = _is_vault_ref(google_api_key)
         grok_vaulted = _is_vault_ref(grok_api_key)
         deepseek_vaulted = _is_vault_ref(deepseek_api_key)
+        openrouter_vaulted = _is_vault_ref(openrouter_api_key)
         model = await config_store.get("agent.model") or "claude-4-6-sonnet"
         max_tokens = await config_store.get("agent.max_tokens") or "8192"
         thinking_level = await config_store.get("agent.thinking_level") or ""
@@ -1380,6 +1388,9 @@ def create_admin_app(
             deepseek_api_key="" if deepseek_vaulted else deepseek_api_key,
             deepseek_vaulted=deepseek_vaulted,
             deepseek_base_url=deepseek_base_url,
+            openrouter_api_key="" if openrouter_vaulted else openrouter_api_key,
+            openrouter_vaulted=openrouter_vaulted,
+            openrouter_base_url=openrouter_base_url,
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -3693,6 +3704,12 @@ def create_admin_app(
                 payload.get("base_url"),
                 model="deepseek-chat",
             )
+        if service == "openrouter":
+            return await _test_openai(
+                payload.get("api_key", ""),
+                payload.get("base_url") or "https://openrouter.ai/api/v1",
+                model="openai/gpt-4o-mini",
+            )
         if service == "telegram":
             return await _test_telegram(payload.get("bot_token", ""))
         if service == "tavily":
@@ -3714,6 +3731,8 @@ def create_admin_app(
             return await _list_models_openai(api_key, base_url, strip_prefix="models/")
         if service in ("grok", "deepseek"):
             return await _list_models_openai(api_key, base_url)
+        if service == "openrouter":
+            return await _list_models_openai(api_key, base_url or "https://openrouter.ai/api/v1")
         return {"ok": False, "error": f"Unknown service: {service}"}
 
     @app.post("/setup/thinking-levels")

@@ -1,8 +1,8 @@
 <div class="card" x-data="{
   provider: {{ step_ctx.provider|default('anthropic')|tojson|forceescape }},
   model: {{ step_ctx.model|default('', true)|tojson|forceescape }},
-  tests: { anthropic: false, openai: false, google: false, grok: false, deepseek: false },
-  testResults: { anthropic: '', openai: '', google: '', grok: '', deepseek: '' },
+  tests: { anthropic: false, openai: false, google: false, grok: false, deepseek: false, openrouter: false },
+  testResults: { anthropic: '', openai: '', google: '', grok: '', deepseek: '', openrouter: '' },
   testing: false,
   models: {
     anthropic: [
@@ -29,11 +29,17 @@
     deepseek: [
       {value: 'deepseek-chat', label: 'deepseek-chat'},
       {value: 'deepseek-reasoner', label: 'deepseek-reasoner'}
+    ],
+    openrouter: [
+      {value: 'anthropic/claude-sonnet-4.5', label: 'anthropic/claude-sonnet-4.5'},
+      {value: 'openai/gpt-5', label: 'openai/gpt-5'},
+      {value: 'google/gemini-2.5-flash', label: 'google/gemini-2.5-flash'},
+      {value: 'deepseek/deepseek-chat', label: 'deepseek/deepseek-chat'}
     ]
   },
-  fetchedModels: {anthropic: [], openai: [], google: [], grok: [], deepseek: []},
-  fetchingModels: {anthropic: false, openai: false, google: false, grok: false, deepseek: false},
-  fetchModelsResult: {anthropic: '', openai: '', google: '', grok: '', deepseek: ''},
+  fetchedModels: {anthropic: [], openai: [], google: [], grok: [], deepseek: [], openrouter: []},
+  fetchingModels: {anthropic: false, openai: false, google: false, grok: false, deepseek: false, openrouter: false},
+  fetchModelsResult: {anthropic: '', openai: '', google: '', grok: '', deepseek: '', openrouter: ''},
   visionFallback: true,
   init() {
     const savedModel = this.model;
@@ -101,6 +107,7 @@
       <option value="google" {{ 'selected' if step_ctx.provider|default('') == 'google' }}>Google Gemini</option>
       <option value="grok" {{ 'selected' if step_ctx.provider|default('') == 'grok' }}>Grok (xAI)</option>
       <option value="deepseek" {{ 'selected' if step_ctx.provider|default('') == 'deepseek' }}>DeepSeek</option>
+      <option value="openrouter" {{ 'selected' if step_ctx.provider|default('') == 'openrouter' }}>OpenRouter</option>
     </select>
 
   <label class="label mt-3" for="w-model">Model</label>
@@ -375,6 +382,58 @@
     </template>
   </div>
 
+  <div class="card" style="padding: 0; box-shadow: none; border: 0; margin-top: 16px;">
+    <h3 class="text-sm mb-2">OpenRouter</h3>
+    <p class="text-muted text-xs mb-2">One API key for models from many labs (Anthropic, OpenAI, Google, Meta, DeepSeek, …) through a single OpenAI-compatible endpoint. Model ids are namespaced <code>provider/model</code> — use “Fetch models” for the live catalog. OpenRouter routes around outages, supports fallbacks, and publishes transparent per-token pricing.</p>
+    <label class="label" for="w-openrouter-key">OpenRouter API Key</label>
+    <input type="password" class="input" id="w-openrouter-key" placeholder="sk-or-..."
+           value="{{ step_ctx.openrouter_api_key|default('') }}">
+    <p class="hint">Create a key in <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai/settings/keys</a> · <a href="https://openrouter.ai/docs" target="_blank" rel="noopener">docs</a> · <a href="https://openrouter.ai/models" target="_blank" rel="noopener">models &amp; pricing</a></p>
+    <label class="label mt-2" for="w-openrouter-base-url">OpenRouter Base URL (optional)</label>
+    <input type="text" class="input" id="w-openrouter-base-url" placeholder="https://openrouter.ai/api/v1"
+           value="{{ step_ctx.openrouter_base_url|default('') }}">
+
+    <div class="mt-3">
+      <button class="btn" :disabled="testing"
+              @click="
+                testing = true;
+                const provider = 'openrouter';
+                const apiKey = document.getElementById('w-openrouter-key').value;
+                const baseUrl = document.getElementById('w-openrouter-base-url').value || 'https://openrouter.ai/api/v1';
+                fetch('/setup/test-connection', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({service: provider, api_key: apiKey, base_url: baseUrl})
+                })
+                .then(r => r.json())
+                .then(d => {
+                  tests[provider] = !!d.ok;
+                  testResults[provider] = d.ok ? 'Connection successful' + (d.response ? ': ' + d.response : '') : d.error;
+                })
+                .catch(e => {
+                  tests[provider] = false;
+                  testResults[provider] = e.message;
+                })
+                .finally(() => { testing = false; })
+              ">
+        <span x-show="testing" class="spinner mr-1"></span>
+        Test connection
+      </button>
+      <button class="btn ml-2" type="button" :disabled="fetchingModels.openrouter"
+              @click="fetchModels('openrouter', document.getElementById('w-openrouter-key').value, document.getElementById('w-openrouter-base-url').value || 'https://openrouter.ai/api/v1')">
+        <span x-show="!fetchingModels.openrouter">Fetch models</span>
+        <span x-show="fetchingModels.openrouter">Fetching...</span>
+      </button>
+      <button class="btn ml-2" type="button" @click="copyModels('openrouter')">Copy list</button>
+    </div>
+    <template x-if="testResults.openrouter">
+      <div :class="tests.openrouter ? 'alert-success' : 'alert-error'" class="mt-2" x-text="testResults.openrouter"></div>
+    </template>
+    <template x-if="fetchModelsResult.openrouter">
+      <div class="hint mt-1" x-text="fetchModelsResult.openrouter"></div>
+    </template>
+  </div>
+
   <div class="flex justify-between mt-4">
     <button class="btn"
             hx-post="/setup/step" hx-target="#wizard-step" hx-swap="innerHTML"
@@ -393,9 +452,12 @@
               const grokBaseUrl = document.getElementById('w-grok-base-url')?.value || '';
               const deepseekKey = document.getElementById('w-deepseek-key')?.value || '';
               const deepseekBaseUrl = document.getElementById('w-deepseek-base-url')?.value || '';
+              const openrouterKey = document.getElementById('w-openrouter-key')?.value || '';
+              const openrouterBaseUrl = document.getElementById('w-openrouter-base-url')?.value || '';
               const googleBaseUrlValue = googleBaseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai';
               const grokBaseUrlValue = grokBaseUrl || 'https://api.x.ai/v1';
               const deepseekBaseUrlValue = deepseekBaseUrl || 'https://api.deepseek.com';
+              const openrouterBaseUrlValue = openrouterBaseUrl || 'https://openrouter.ai/api/v1';
               const modelValue = document.getElementById('w-model').value;
               const vals = {
                 step: 'identity',
@@ -409,6 +471,8 @@
                 'values[agent.grok_base_url]': grokBaseUrlValue,
                 'values[agent.deepseek_api_key]': deepseekKey,
                 'values[agent.deepseek_base_url]': deepseekBaseUrlValue,
+                'values[agent.openrouter_api_key]': openrouterKey,
+                'values[agent.openrouter_base_url]': openrouterBaseUrlValue,
                 'values[agent.model]': modelValue
               };
               // One-tap inline: enable the vision fallback when the picked model

@@ -307,6 +307,16 @@ class TestVoicePreview:
         assert "reply_decision.enabled" in resp.text
         assert "reply_decision.max_replies_per_window" in resp.text
 
+    def test_llm_partial_has_openrouter(self):
+        # OpenRouter provider card (#128): renders (exercises the positional
+        # llmTab() call), saves the dedicated key, and carries the info text.
+        client = _client(setup_complete=True)
+        resp = client.get("/partials/llm", headers=AUTH)
+        assert resp.status_code == 200
+        assert "OpenRouter" in resp.text
+        assert "agent.openrouter_api_key" in resp.text  # save button wiring
+        assert "openrouter.ai/docs" in resp.text  # info text / docs link
+
     def test_telegram_wizard_has_group_chat(self):
         client = _client(setup_complete=True)
         resp = client.get("/channels/wizard?channel=telegram", headers=AUTH)
@@ -944,6 +954,20 @@ class TestWizardPrePopulation:
         assert resp.status_code == 200
         assert "sk-ant-test123" in resp.text
         assert "claude-haiku-4-5" in resp.text
+
+    def test_llm_step_offers_openrouter(self):
+        """The wizard LLM step lists OpenRouter and pre-fills its saved key (#128)."""
+        client = _client_with_config(
+            {
+                "agent.llm_provider": "openrouter",
+                "agent.openrouter_api_key": "sk-or-test123",
+            },
+            step="identity",
+        )
+        resp = client.post("/setup/step", json={"step": "llm", "values": {}})
+        assert resp.status_code == 200
+        assert 'value="openrouter"' in resp.text  # provider dropdown option
+        assert "sk-or-test123" in resp.text  # pre-filled saved key
 
     def test_identity_step_shows_saved_values(self):
         """Navigating back to identity step should show saved name, owner, tz."""

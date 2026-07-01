@@ -89,6 +89,7 @@ INFRA_VAULT_KEYS: dict[str, str] = {
     "agent.google_api_key": "GOOGLE_API_KEY",
     "agent.grok_api_key": "GROK_API_KEY",
     "agent.deepseek_api_key": "DEEPSEEK_API_KEY",
+    "agent.openrouter_api_key": "OPENROUTER_API_KEY",
     "channels.telegram.bot_token": "TELEGRAM_BOT_TOKEN",
     "search.api_key": "TAVILY_API_KEY",
     "tools.gh.token": "GH_TOKEN",
