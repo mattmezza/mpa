@@ -118,8 +118,25 @@
         // Sub-tab within the LLM tab (issue #114): sysprompt | inference | providers.
         // Persisted so switching away and back, or a partial reload after a
         // provider save, lands on the same sub-tab.
-        section: (() => { try { return localStorage.getItem('llm_section') || 'sysprompt'; } catch (e) { return 'sysprompt'; } })(),
-        setSection(s) { this.section = s; try { localStorage.setItem('llm_section', s); } catch (e) {} },
+        section: (() => {
+          const allowed = ['sysprompt', 'inference', 'providers'];
+          try {
+            const q = new URLSearchParams(window.location.search).get('llmsub');
+            if (allowed.includes(q)) return q;
+            const ls = localStorage.getItem('llm_section');
+            if (allowed.includes(ls)) return ls;
+          } catch (e) {}
+          return 'sysprompt';
+        })(),
+        setSection(s) {
+          this.section = s;
+          try { localStorage.setItem('llm_section', s); } catch (e) {}
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('llmsub', s);
+            history.replaceState(history.state, '', url);
+          } catch (e) {}
+        },
         reloadLlmPartial() { if (window.htmx) { htmx.ajax('GET', '/partials/llm', {target: '#tab-content', swap: 'innerHTML'}); } },
         providerOptions: [
           {value: 'anthropic', label: 'Anthropic'},
@@ -403,6 +420,15 @@
           this.copyText(list.join('\n'));
         },
         init() {
+          // Reflect the current sub-tab in the URL so the link is copy-pasteable,
+          // even before any sub-tab click (mirrors the top-level ?tab= param).
+          try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.get('llmsub') !== this.section) {
+              url.searchParams.set('llmsub', this.section);
+              history.replaceState(history.state, '', url);
+            }
+          } catch (e) {}
           const savedProvider = this.provider;
           // Preserve the server-provided values after Alpine's x-for has
           // rendered the <option> elements — without this the browser
