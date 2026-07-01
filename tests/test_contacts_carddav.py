@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import vobject
 
-from tools.contacts import _build_vcard, _flatten_vcard, _parse_propfind_hrefs
+from tools.contacts import (
+    _build_vcard,
+    _flatten_vcard,
+    _parse_propfind_hrefs,
+    _same_origin_url,
+)
 
 
 def test_build_vcard_roundtrips() -> None:
@@ -38,3 +43,18 @@ def test_parse_propfind_hrefs() -> None:
 def test_parse_propfind_hrefs_bad_xml() -> None:
     assert _parse_propfind_hrefs("not xml") == []
     assert _parse_propfind_hrefs("") == []
+
+
+def test_same_origin_url_blocks_credential_leaks() -> None:
+    base = "https://carddav.example.com/dav/book/"
+    # Same-origin relative + absolute-path hrefs are followed.
+    assert _same_origin_url(base, "uid-1.vcf") == "https://carddav.example.com/dav/book/uid-1.vcf"
+    assert (
+        _same_origin_url(base, "/dav/book/uid-2.vcf")
+        == "https://carddav.example.com/dav/book/uid-2.vcf"
+    )
+    # Cross-origin, protocol-relative, and https→http downgrades are rejected —
+    # otherwise the session's basic-auth would be sent to the attacker's host.
+    assert _same_origin_url(base, "https://evil.com/x.vcf") is None
+    assert _same_origin_url(base, "//evil.com/x.vcf") is None
+    assert _same_origin_url(base, "http://carddav.example.com/x.vcf") is None

@@ -105,6 +105,24 @@ def _carddav_base(provider: dict) -> str:
     return provider.get("url", "").rstrip("/") + "/"
 
 
+def _same_origin_url(base: str, href: str) -> str | None:
+    """Resolve ``href`` against ``base`` only if it stays on the same origin.
+
+    A CardDAV server response controls the hrefs we then GET. Because the request
+    session carries the account's basic-auth on *every* request, an absolute href
+    to another host (or an https→http downgrade) would leak those credentials to
+    an attacker-controlled endpoint. So we reject anything whose scheme+host does
+    not match the configured base, and only follow same-origin resources.
+    """
+    from urllib.parse import urljoin, urlsplit
+
+    full = urljoin(base, href)
+    b, f = urlsplit(base), urlsplit(full)
+    if (f.scheme, f.netloc) != (b.scheme, b.netloc):
+        return None
+    return full
+
+
 def _parse_propfind_hrefs(xml_text: str) -> list[str]:
     """Pull member hrefs out of a PROPFIND multistatus response."""
     import xml.etree.ElementTree as ET
@@ -122,8 +140,6 @@ def _parse_propfind_hrefs(xml_text: str) -> list[str]:
 
 
 def _carddav_list(provider: dict) -> list[dict[str, object]]:
-    from urllib.parse import urljoin
-
     base = _carddav_base(provider)
     s = _carddav_session(provider)
     body = (
@@ -142,7 +158,9 @@ def _carddav_list(provider: dict) -> list[dict[str, object]]:
     for href in _parse_propfind_hrefs(resp.text):
         if not href.lower().endswith(".vcf"):
             continue
-        full = urljoin(base, href)
+        full = _same_origin_url(base, href)  # never follow a cross-origin href (leaks creds)
+        if not full:
+            continue
         got = s.get(full, timeout=30)
         if got.status_code != 200:
             continue
@@ -169,10 +187,10 @@ def _carddav_search(provider: dict, query: str) -> list[dict[str, object]]:
 
 
 def _carddav_get(provider: dict, contact_id: str) -> dict[str, object] | None:
-    from urllib.parse import urljoin
-
+    full = _same_origin_url(_carddav_base(provider), contact_id)
+    if not full:
+        return None
     s = _carddav_session(provider)
-    full = urljoin(_carddav_base(provider), contact_id)
     got = s.get(full, timeout=30)
     if got.status_code != 200:
         return None
