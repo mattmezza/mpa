@@ -102,6 +102,10 @@
             @click="select('tools')">
       Tools
     </button>
+    <button class="tab-link" :class="tab === 'accounts' && 'tab-link-active'"
+            @click="select('accounts')">
+      Accounts
+    </button>
     <button class="tab-link" :class="tab === 'workspace' && 'tab-link-active'"
             @click="select('workspace')">
       Workspace
@@ -118,13 +122,9 @@
             @click="select('jobs')">
       Jobs
     </button>
-    <button class="tab-link" :class="tab === 'accounts' && 'tab-link-active'"
-            @click="select('accounts')">
-      Accounts
-    </button>
     <button class="tab-link" :class="tab === 'secrets' && 'tab-link-active'"
             @click="select('secrets')">
-      Secrets
+      Vaults
     </button>
     <button class="tab-link" :class="tab === 'inspect' && 'tab-link-active'"
             @click="select('inspect')">

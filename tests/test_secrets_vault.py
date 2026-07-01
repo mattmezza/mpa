@@ -348,6 +348,15 @@ async def test_secrets_partial_requires_auth(admin_client) -> None:
     assert client.get("/partials/secrets", headers=_auth()).status_code == 200
 
 
+async def test_vaults_tab_has_three_subtabs(admin_client) -> None:
+    # Vaults tab (renamed from Secrets) splits into Agents / Infra / Import.
+    client, _s, _cs = admin_client
+    body = client.get("/partials/secrets", headers=_auth()).text
+    assert "vaultTabs()" in body
+    for s in ("agents", "infra", "import"):
+        assert f"select('{s}')" in body
+
+
 async def test_add_and_list_secret_via_admin(admin_client) -> None:
     client, s, _cs = admin_client
     resp = client.post(

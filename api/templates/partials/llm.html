@@ -696,7 +696,7 @@
 
   <div class="space-y-6" x-show="section === 'providers'" style="display:none">
   <div class="mb-2 rounded border border-border bg-muted/10 px-3 py-2 text-muted text-xs">
-    🔒 Provider API keys are stored in the <strong>Secrets</strong> vault on save — only a <code>${vault:NAME}</code> reference is kept in config, never the raw key. Manage or reuse them from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Secrets</button> tab.
+    🔒 Provider API keys are stored in the vault on save — only a <code>${vault:NAME}</code> reference is kept in config, never the raw key. Manage or reuse them from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Vaults</button> tab.
   </div>
   <div class="card">
     <h2 class="text-base mb-1">Anthropic</h2>
@@ -707,7 +707,7 @@
         <input type="text" class="input-sm" style="max-width:500px; display:none"
                autocomplete="username" aria-hidden="true" tabindex="-1">
         {% if anthropic_vaulted %}
-        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the <strong>Secrets</strong> vault as <code>${vault:ANTHROPIC_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Secrets</button> tab.</div>
+        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the vault as <code>${vault:ANTHROPIC_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Vaults</button> tab.</div>
         {% else %}
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
@@ -768,7 +768,7 @@
       <div>
         <label class="label">OpenAI API Key</label>
         {% if openai_vaulted %}
-        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the <strong>Secrets</strong> vault as <code>${vault:OPENAI_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Secrets</button> tab.</div>
+        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the vault as <code>${vault:OPENAI_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Vaults</button> tab.</div>
         {% else %}
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
@@ -835,7 +835,7 @@
       <div>
         <label class="label">Google API Key</label>
         {% if google_vaulted %}
-        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the <strong>Secrets</strong> vault as <code>${vault:GOOGLE_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Secrets</button> tab.</div>
+        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the vault as <code>${vault:GOOGLE_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Vaults</button> tab.</div>
         {% else %}
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
@@ -902,7 +902,7 @@
       <div>
         <label class="label">Grok API Key</label>
         {% if grok_vaulted %}
-        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the <strong>Secrets</strong> vault as <code>${vault:GROK_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Secrets</button> tab.</div>
+        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the vault as <code>${vault:GROK_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Vaults</button> tab.</div>
         {% else %}
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
@@ -969,7 +969,7 @@
       <div>
         <label class="label">DeepSeek API Key</label>
         {% if deepseek_vaulted %}
-        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the <strong>Secrets</strong> vault as <code>${vault:DEEPSEEK_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Secrets</button> tab.</div>
+        <div class="text-xs text-muted py-1" style="max-width:500px">🔒 Stored in the vault as <code>${vault:DEEPSEEK_API_KEY}</code> for easy reuse — manage it from the <button type="button" class="text-accent hover:underline" @click="$dispatch('switch-tab', 'secrets')">Vaults</button> tab.</div>
         {% else %}
         <input type="password" class="input-sm" style="max-width:500px"
                autocomplete="new-password"
