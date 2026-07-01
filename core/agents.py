@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS agents (
     calendar_accounts TEXT DEFAULT '',
     contacts_accounts TEXT DEFAULT '',
     chat_settings TEXT DEFAULT '',
+    is_default INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT (datetime('now')),
     updated_at DATETIME DEFAULT (datetime('now'))
 );
@@ -75,6 +77,8 @@ _MIGRATIONS = (
     "ALTER TABLE agents ADD COLUMN calendar_accounts TEXT DEFAULT ''",  # #110
     "ALTER TABLE agents ADD COLUMN contacts_accounts TEXT DEFAULT ''",  # #110 (contacts)
     "ALTER TABLE agents ADD COLUMN chat_settings TEXT DEFAULT ''",  # #129
+    "ALTER TABLE agents ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0",  # #115 flw
+    "ALTER TABLE agents ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",  # #115 flw kill-switch
     # #98: personalia merged into character. Prepend any existing personalia to
     # character (idempotent — the WHERE guard empties it, so a re-run is a no-op),
     # then drop the now-unused column. On a fresh DB (no such column) both raise
@@ -83,6 +87,14 @@ _MIGRATIONS = (
     "personalia = '' WHERE TRIM(COALESCE(personalia, '')) != ''",
     "ALTER TABLE agents DROP COLUMN personalia",
 )
+
+
+# Which agent is the fallback ("default") is a per-row ``is_default`` flag, NOT a
+# reserved slug — so the default is a fully normal agent (its own scope, tools and
+# accounts) that renames, reassigns and deletes like any other. Exactly one agent
+# carries the flag at a time; ``set_default`` moves it. The slug below is only the
+# initial name of the seeded default and is freely renamable (#115 follow-up).
+SEED_DEFAULT_SLUG = "assistant"
 
 
 @dataclass(slots=True)
@@ -119,6 +131,15 @@ class Agent:
     # {"mode": "everyone"|"nobody"|"users", "users": [int]}. A chat with no entry
     # (or mode "everyone") is unrestricted — so the default is unchanged.
     chat_settings: dict = field(default_factory=dict)
+    # The fallback agent flag (#115 flw): exactly one agent is the default the
+    # resolution ladder lands on when nothing else is selected. Store-managed via
+    # ``set_default`` — NOT written by ``upsert`` (editing an agent keeps its flag).
+    is_default: bool = False
+    # Kill-switch (#115 flw): a disabled agent processes nothing — its turns are
+    # dropped in ``AgentCore.process`` (its Telegram bot goes silent), it can't be
+    # spawned as a subagent, and it's hidden from the roster. Store-managed via
+    # ``set_enabled`` — NOT written by ``upsert`` (editing keeps the on/off state).
+    enabled: bool = True
 
     def chat_permits(self, chat_id: str, sender_id: int) -> bool:
         """Whether ``sender_id`` may trigger this agent (or DM it) in ``chat_id``.
@@ -380,12 +401,47 @@ def to_markdown(a: Agent) -> str:
     return f"---\n{dumped}---\n"
 
 
+def default_agent_from_values(
+    *,
+    character: str = "",
+    agent_name: str = "",
+    voice: str = "",
+    email_accounts: object = "",
+    calendar_accounts: object = "",
+    contacts_accounts: object = "",
+) -> Agent:
+    """Build the seed for the default agent from config values (#115 follow-up:
+    the default identity is a real, normal agent row flagged ``is_default``).
+
+    Account fields accept the config's JSON strings. The result is a normal agent
+    — its scope, tools and #110 account gating are its own; being the default is
+    only a routing flag applied by ``_seed_default``/``set_default``.
+    """
+    return Agent(
+        name=SEED_DEFAULT_SLUG,
+        agent_name=agent_name or "",
+        character=character or "",
+        voice=voice or "",
+        email_accounts=_as_account_list(email_accounts, sender=True),
+        calendar_accounts=_as_account_list(calendar_accounts),
+        contacts_accounts=_as_account_list(contacts_accounts),
+    )
+
+
 class AgentStore:
     """SQLite-backed store for agents, seeded from a markdown directory."""
 
-    def __init__(self, db_path: str = "data/agents.db", seed_dir: str | Path = "agents/"):
+    def __init__(
+        self,
+        db_path: str = "data/agents.db",
+        seed_dir: str | Path = "agents/",
+        default_identity: Agent | None = None,
+    ):
         self.db_path = db_path
         self.seed_dir = Path(seed_dir) if seed_dir else None
+        # The base ``default`` agent to create if absent (seeded from config). None
+        # in bare/test construction — then there is simply no default row.
+        self.default_identity = default_identity
         self._ready = False
 
     def _migrate_legacy_db_file(self) -> None:
@@ -423,12 +479,81 @@ class AgentStore:
             await db.commit()
         self._ready = True
 
-    async def ensure_seeded(self) -> bool:
-        """Seed missing agents from the seed directory (idempotent)."""
-        await self._ensure_schema()
-        if not self.seed_dir or not self.seed_dir.exists():
+    async def _seed_default(self) -> bool:
+        """Seed the base default agent (flagged) if none is flagged yet (idempotent).
+
+        Runs regardless of the seed directory so every install has a fallback
+        identity. Uses ``SEED_DEFAULT_SLUG`` as the initial (freely renamable) name;
+        skips if that slug is already taken by another agent (leaving the resolver
+        to fall back to None = the config base). Once an agent is flagged default,
+        this is a no-op — reassigning the flag is a deliberate ``set_default`` call.
+        """
+        if self.default_identity is None:
             return False
-        inserted = 0
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT 1 FROM agents WHERE is_default = 1")
+            if await cursor.fetchone():
+                return False  # a default is already designated
+            cursor = await db.execute("SELECT 1 FROM agents WHERE name = ?", (SEED_DEFAULT_SLUG,))
+            if await cursor.fetchone():
+                return False  # slug taken by a custom agent — don't clobber it
+            cursor = await db.execute(
+                "SELECT 1 FROM agent_tombstones WHERE name = ?", (SEED_DEFAULT_SLUG,)
+            )
+            if await cursor.fetchone():
+                return False  # deliberately deleted (#102) — don't resurrect the default
+            self.default_identity.name = SEED_DEFAULT_SLUG
+            await self._upsert(db, self.default_identity)
+            await db.execute(
+                "UPDATE agents SET is_default = 1 WHERE name = ?", (SEED_DEFAULT_SLUG,)
+            )
+            await db.execute("DELETE FROM agent_tombstones WHERE name = ?", (SEED_DEFAULT_SLUG,))
+            await db.commit()
+        return True
+
+    async def get_default(self) -> Agent | None:
+        """The agent currently flagged as the fallback default, or None."""
+        await self.ensure_seeded()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM agents WHERE is_default = 1 LIMIT 1")
+            row = await cursor.fetchone()
+            return self._row_to_agent(row) if row else None
+
+    async def set_default(self, name: str) -> bool:
+        """Make ``name`` the sole default (clears the flag on all others). Returns
+        False if ``name`` is empty or names no agent. There is always exactly one
+        default — you reassign it, never clear it."""
+        if not name:
+            return False
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT 1 FROM agents WHERE name = ?", (name,))
+            if not await cursor.fetchone():
+                return False
+            await db.execute("UPDATE agents SET is_default = 0 WHERE is_default = 1")
+            await db.execute("UPDATE agents SET is_default = 1 WHERE name = ?", (name,))
+            await db.commit()
+            return True
+
+    async def set_enabled(self, name: str, enabled: bool) -> bool:
+        """Turn an agent on/off (the kill-switch). Returns False if ``name`` names
+        no agent. A disabled agent processes nothing (gated in ``process``)."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "UPDATE agents SET enabled = ? WHERE name = ?", (1 if enabled else 0, name)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def ensure_seeded(self) -> bool:
+        """Seed the default agent + any missing gallery agents (idempotent)."""
+        await self._ensure_schema()
+        inserted_default = await self._seed_default()
+        if not self.seed_dir or not self.seed_dir.exists():
+            return inserted_default
+        inserted = 1 if inserted_default else 0
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("SELECT name FROM agents")
             existing = {row[0] for row in await cursor.fetchall()}
@@ -509,6 +634,8 @@ class AgentStore:
             chat_settings=_as_chat_settings(
                 row["chat_settings"] if "chat_settings" in row.keys() else ""
             ),
+            is_default=bool(row["is_default"]) if "is_default" in row.keys() else False,
+            enabled=bool(row["enabled"]) if "enabled" in row.keys() else True,
         )
 
     async def list_agents(self) -> list[Agent]:
@@ -591,6 +718,11 @@ async def bind_existing_accounts(
     contacts_names = contacts_names or []
     updated = 0
     for a in await store.list_agents():
+        # The default is newly seeded (from config), not a pre-#110 agent whose
+        # any-account access needs preserving — skip it so it stays #110-gated
+        # (its bindings come only from config/its editor, never this grant) (#115 flw).
+        if a.is_default:
+            continue
         # An agent that already carries any binding was configured deliberately —
         # leave it alone (so a re-run, or a post-migration agent, is a no-op).
         if a.email_accounts or a.calendar_accounts or a.contacts_accounts:

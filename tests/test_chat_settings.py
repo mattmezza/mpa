@@ -66,11 +66,11 @@ async def test_chat_settings_survive_upsert(tmp_path) -> None:
 # ---- may_act_in_chat: resolve-then-gate integration -------------------------
 
 
-def _fake_core(history: ConversationHistory, agents: AgentStore, active: str = ""):
+def _fake_core(history: ConversationHistory, agents: AgentStore):
     fa: Any = types.SimpleNamespace(
         history=history,
         agents=agents,
-        config=types.SimpleNamespace(agent=types.SimpleNamespace(active_agent=active)),
+        config=types.SimpleNamespace(agent=types.SimpleNamespace()),
     )
     for name in ("_load_agent", "_resolve_agent", "may_act_in_chat"):
         setattr(fa, name, types.MethodType(getattr(AgentCore, name), fa))

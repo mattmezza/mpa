@@ -98,7 +98,6 @@ class AgentConfig(BaseModel):
     skills_index_mode: str = "inject"
     agents_dir: str = "agents/"
     agents_db_path: str = "data/agents.db"
-    active_agent: str = ""  # empty = default identity (character below)
     character: str = ""  # identity + tone (legacy `personalia` was merged in — #98)
     # Account bindings for the DEFAULT identity — used when no agent is active
     # (#110). Same shape as the per-agent facets: email entries carry

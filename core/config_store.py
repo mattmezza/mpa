@@ -394,7 +394,6 @@ class ConfigStore:
         # to its new name (only if the new one isn't already set), then drop the
         # old key so this runs once.
         for old_key, new_key in (
-            ("agent.active_persona", "agent.active_agent"),
             ("agent.personae_dir", "agent.agents_dir"),
             ("agent.personae_db_path", "agent.agents_db_path"),
             ("accounts.persona_binding_migrated", "accounts.agent_binding_migrated"),

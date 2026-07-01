@@ -1,4 +1,4 @@
-"""Admin route tests for agents: CRUD, activate, and the tab partial."""
+"""Admin route tests for agents: CRUD, default/enable toggles, and the tab partial."""
 
 from __future__ import annotations
 
@@ -37,6 +37,9 @@ class _Store:
     async def set(self, key: str, value: str) -> None:
         self._data[key] = value
 
+    async def set_many(self, values: dict) -> None:
+        self._data.update({k: str(v) for k, v in values.items()})
+
     async def verify_admin_password(self, password: str) -> bool:
         return password == "secret"
 
@@ -58,6 +61,10 @@ class _AgentStub:
         self.channels = {}
         self.job_store = None  # rename route reaches _get_job_store(); set per-test
         self.scheduler = _SchedulerSpy()
+        self._default_accounts = None  # rebuilt when the default agent is edited
+
+    def _build_default_accounts(self, config):
+        return None
 
 
 def _client(tmp_path):
@@ -94,16 +101,14 @@ def test_agent_crud_and_activation(tmp_path) -> None:
     assert got["voice"] == "en-US-GuyNeural"
     assert got["skills"] == ["memory"] and got["tools"] == ["run_command"]
 
-    # Activate → persisted and hot-applied to the running agent.
-    r = client.post("/agents/activate", json={"name": "coach"}, headers=AUTH)
+    # Make it the default → the flag moves off "assistant" onto coach.
+    r = client.post("/agents/default", json={"name": "coach"}, headers=AUTH)
     assert r.status_code == 200
-    assert "✓ Active" in r.text
-    assert agent.config.agent.active_agent == "coach"
+    assert client.get("/agents/coach", headers=AUTH).json()["is_default"] is True
 
-    # Deleting the active agent reverts to the default identity.
+    # Delete works like any agent.
     r = client.post("/agents/delete", json={"name": "coach"}, headers=AUTH)
     assert r.status_code == 200
-    assert agent.config.agent.active_agent == ""
     assert client.get("/agents/coach", headers=AUTH).status_code == 404
 
 
@@ -279,22 +284,17 @@ def test_agent_editor_offers_vault_token_source(tmp_path) -> None:
     assert "Installation ID" in r.text
 
 
-def test_activate_unknown_agent_404(tmp_path) -> None:
-    client, _ = _client(tmp_path)
-    assert client.post("/agents/activate", json={"name": "ghost"}, headers=AUTH).status_code == 404
-
-
 def test_partial_agents_renders(tmp_path) -> None:
     client, _ = _client(tmp_path)
     r = client.get("/partials/agents", headers=AUTH)
     assert r.status_code == 200
-    # Merged tab (#115): the default agent renders above the agent list.
-    assert "Default agent" in r.text
+    # The seeded default renders with its badge in the agent list (#115 flw).
+    assert "Default" in r.text and "assistant" in r.text
 
 
 def test_agent_rename_cascades(tmp_path) -> None:
-    """Renaming a slug repoints the agent row, the active selection, per-chat
-    bindings, the per-agent bot channel, private memory scope and jobs (#69)."""
+    """Renaming a slug repoints the agent row, per-chat bindings, the per-agent
+    bot channel, private memory scope and jobs (#69)."""
     import asyncio
 
     import aiosqlite
@@ -312,8 +312,6 @@ def test_agent_rename_cascades(tmp_path) -> None:
         client.post("/agents", json={"name": "coach", "role": "Coach"}, headers=AUTH).status_code
         == 200
     )
-    assert client.post("/agents/activate", json={"name": "coach"}, headers=AUTH).status_code == 200
-    assert agent.config.agent.active_agent == "coach"
 
     async def seed() -> None:
         h = ConversationHistory(db_path=history_db)
@@ -335,7 +333,6 @@ def test_agent_rename_cascades(tmp_path) -> None:
     assert r.status_code == 200
     assert client.get("/agents/coach", headers=AUTH).status_code == 404
     assert client.get("/agents/trainer", headers=AUTH).status_code == 200
-    assert agent.config.agent.active_agent == "trainer"
     assert agent.scheduler.reloads == 1  # live scheduler re-registered the renamed job
 
     async def check() -> None:
@@ -393,3 +390,65 @@ def test_agent_rename_validation(tmp_path) -> None:
         ).status_code
         == 200
     )
+
+
+# --- #115 follow-up: the fallback default is a normal agent flagged is_default ---
+
+
+def test_default_seeded_and_flagged(tmp_path) -> None:
+    client, _ = _client(tmp_path)
+    agents = {a["name"]: a for a in client.get("/agents", headers=AUTH).json()["agents"]}
+    assert "assistant" in agents and agents["assistant"]["is_default"] is True
+    # The tab badges the default and offers "Make default" on others.
+    tab = client.get("/partials/agents", headers=AUTH).text
+    assert "Default" in tab and "Make default" not in tab  # only agent so far is the default
+
+
+def test_make_default_moves_the_flag(tmp_path) -> None:
+    client, _ = _client(tmp_path)
+    client.post("/agents", json={"name": "coach"}, headers=AUTH)
+    assert client.post("/agents/default", json={"name": "coach"}, headers=AUTH).status_code == 200
+    flagged = [
+        a["name"] for a in client.get("/agents", headers=AUTH).json()["agents"] if a["is_default"]
+    ]
+    assert flagged == ["coach"]  # exactly one, reassigned off "assistant"
+
+
+def test_make_default_rejects_empty_and_unknown(tmp_path) -> None:
+    client, _ = _client(tmp_path)
+    assert client.post("/agents/default", json={"name": ""}, headers=AUTH).status_code == 400
+    assert client.post("/agents/default", json={"name": "ghost"}, headers=AUTH).status_code == 404
+
+
+def test_default_is_deletable_and_renamable(tmp_path) -> None:
+    # No magic slug: the default renames and deletes like any agent, flag included.
+    client, _ = _client(tmp_path)
+    assert (
+        client.post(
+            "/agents/rename", json={"old": "assistant", "new": "aria"}, headers=AUTH
+        ).status_code
+        == 200
+    )
+    assert client.get("/agents/aria", headers=AUTH).json()["is_default"] is True  # flag traveled
+    assert client.post("/agents/delete", json={"name": "aria"}, headers=AUTH).status_code == 200
+
+
+def test_kill_switch_enable_disable(tmp_path) -> None:
+    client, _ = _client(tmp_path)
+    client.post("/agents", json={"name": "coach"}, headers=AUTH)
+    # Disable via hx-vals (form-encoded): the string "false" must DISABLE, not
+    # re-enable (bool("false") is truthy — the route parses the string).
+    r = client.post("/agents/enabled", data={"name": "coach", "enabled": "false"}, headers=AUTH)
+    assert r.status_code == 200
+    assert client.get("/agents/coach", headers=AUTH).json()["enabled"] is False
+    assert "Off" in r.text and "Enable" in r.text  # badge + re-enable action shown
+    # Re-enable.
+    client.post("/agents/enabled", data={"name": "coach", "enabled": "true"}, headers=AUTH)
+    assert client.get("/agents/coach", headers=AUTH).json()["enabled"] is True
+
+    # Unknown agent → 404; empty name → 400.
+    def _toggle(nm):
+        return client.post("/agents/enabled", json={"name": nm, "enabled": False}, headers=AUTH)
+
+    assert _toggle("ghost").status_code == 404
+    assert _toggle("").status_code == 400

@@ -65,7 +65,6 @@ agent:
   skills_dir: "skills/"
   skills_index_mode: "inject"   # "inject" (full index each turn) | "on_demand" (search_skills/list_skills)
   agents_dir: "agents/"
-  active_agent: ""
 
 channels:
   telegram:
@@ -141,7 +140,7 @@ reply_decision:
 
 #### `agent`
 
-Core agent settings including name, owner, LLM provider, model, and timezone. The `skills_dir` points to the directory containing markdown skill files. `skills_index_mode` chooses how the skills index reaches the model: `"inject"` (default) puts the full index in every turn's preamble, while `"on_demand"` replaces it with a short pointer and lets the model fetch entries lazily via the `search_skills`/`list_skills` tools (see [Skills](/docs/skills#serving-the-index-on-demand)). `agents_dir` is an optional seed directory for [agents](/docs/agents) — empty by default (no agents ship), but any `.md` files dropped there are auto-seeded — and `active_agent` is the slug of the active agent (`""` = the default identity).
+Core agent settings including name, owner, LLM provider, model, and timezone. The `skills_dir` points to the directory containing markdown skill files. `skills_index_mode` chooses how the skills index reaches the model: `"inject"` (default) puts the full index in every turn's preamble, while `"on_demand"` replaces it with a short pointer and lets the model fetch entries lazily via the `search_skills`/`list_skills` tools (see [Skills](/docs/skills#serving-the-index-on-demand)). `agents_dir` is an optional seed directory for [agents](/docs/agents) — empty by default (no agents ship), but any `.md` files dropped there are auto-seeded. Which agent is the default (the one that answers when nothing else routes) is a per-row flag, not a config key — set it on the Agents tab.
 
 #### `channels`
 

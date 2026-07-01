@@ -244,7 +244,7 @@ def _print_debug_config(config, agent=None) -> None:
     )
 
 
-async def _run_turn(agent: AgentCore, spinner: Spinner, text: str, attachments=None):
+async def _run_turn(agent: AgentCore, spinner: Spinner, text: str, attachments=None, agent_name=""):
     """Run one turn, cancellable by pressing ESC. Returns None if interrupted."""
     proc = asyncio.create_task(
         agent.process(
@@ -253,6 +253,7 @@ async def _run_turn(agent: AgentCore, spinner: Spinner, text: str, attachments=N
             user_id=USER_ID,
             chat_id=USER_ID,
             attachments=attachments,
+            agent_name=agent_name or None,
         )
     )
     fd = sys.stdin.fileno()
@@ -305,7 +306,7 @@ async def main() -> None:
         "--agent",
         metavar="NAME",
         default=None,
-        help="Test with a specific agent active (overrides agent.active_agent).",
+        help="Force a specific agent for this session (by slug).",
     )
     parser.add_argument(
         "--yolo",
@@ -345,8 +346,8 @@ async def main() -> None:
             names = [p.name for p in await ps.list_agents()]
             print(f"Unknown agent: {args.agent!r}. Available: {', '.join(names) or '(none)'}")
             return
-        config.agent.active_agent = args.agent
 
+    forced_agent = args.agent or ""  # per-turn identity override for this session
     agent = AgentCore(config, secret_store=secret_store)
     agent.channels["repl"] = ReplChannel(agent, spinner, yolo=args.yolo)
     if args.yolo:
@@ -361,9 +362,10 @@ async def main() -> None:
         else:
             await agent.history.clear("repl", USER_ID, USER_ID)
 
-    active = config.agent.active_agent
-    active_agent = await agent.agents.get(active) if active else None
-    _print_debug_config(config, active_agent)
+    session_agent = (
+        await agent.agents.get(forced_agent) if forced_agent else await agent.agents.get_default()
+    )
+    _print_debug_config(config, session_agent)
 
     while True:
         spinner.awaiting_input = True
@@ -401,7 +403,7 @@ async def main() -> None:
                 continue
             attachments = [Attachment(data=data, mime_type=mime, filename="clipboard")]
             text = text[len("/paste") :].strip() or "What's in this image?"
-        response = await _run_turn(agent, spinner, text, attachments)
+        response = await _run_turn(agent, spinner, text, attachments, agent_name=forced_agent)
         if response is None:
             print("\n[interrupted]\n")
             continue
