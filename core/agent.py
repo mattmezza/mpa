@@ -59,10 +59,31 @@ from core.subagents import (
     summarize_batch,
 )
 from core.task_reflection import ReflectionStore
-from core.tools import effective_tool_env, tool_env
+from core.tools import _gh_app_configured, effective_tool_env, github_repo_violation, tool_env
 from voice.pipeline import VoicePipeline
 
 log = logging.getLogger(__name__)
+
+
+def _narrow_gh_repos(parent: Persona | None, requested_tc: dict) -> dict:
+    """Copy a child's tool identity verbatim but intersect its GitHub repo
+    allowlist with the parent's — inherit-never-widen for repos (#111).
+
+    ``repos`` empty/absent = unrestricted, so this only tightens: a child can
+    never gain a repo the parent lacked. Every other tool-identity field
+    (tokens, profiles) travels unchanged.
+    """
+    tc = dict(requested_tc or {})
+    child_gh = tc.get("gh")
+    if not isinstance(child_gh, dict):
+        return tc
+    parent_gh = (parent.tool_setting("gh") if parent else None) or {}
+    if not (child_gh.get("repos") or parent_gh.get("repos")):
+        return tc  # neither restricts repos → nothing to narrow
+    merged = dict(child_gh)
+    merged["repos"] = narrow_scope(parent_gh.get("repos"), child_gh.get("repos"))
+    return {**tc, "gh": merged}
+
 
 # Vision fallback caption cache cap (per process). Captions are keyed by image
 # hash so repeated identical images don't re-hit the vision model.
@@ -2160,8 +2181,23 @@ class AgentCore:
             # own credentials/profile, never the owner's. No persona → the shared
             # default env (unchanged path).
             persona = request_state.get("persona_obj")
+            # Per-persona GitHub repo allowlist (#111) — block before running.
+            bad_repo = github_repo_violation(persona, command)
+            if bad_repo:
+                return {
+                    "error": (
+                        f"Persona '{persona.name}' is not allowed to use the GitHub "
+                        f"repo '{bad_repo}'. Allowed repos are set on the persona's "
+                        "GitHub tool identity."
+                    )
+                }
             persona_env = None
-            if persona is not None:
+            # Build the per-turn tool env when a persona is active OR a GitHub App
+            # is configured — the latter so its rotating installation token (#111)
+            # is minted fresh per command instead of the stale one cached at
+            # construction. A static PAT doesn't rotate, so the no-persona/PAT case
+            # keeps using the executor's shared default (unchanged).
+            if persona is not None or _gh_app_configured(self.config):
                 store = self.secret_store
                 resolve = store.infra_resolve if store else (lambda _n: None)
                 persona_env = effective_tool_env(self.config, persona, resolve)
@@ -3128,8 +3164,10 @@ class AgentCore:
             # Tool identity travels verbatim with the persona (#93) — it is who the
             # child IS (its own gh token / browser profile), not a caller-subset
             # scope. Dropping it would silently fall back to the owner's token and
-            # re-open the very identity bleed this feature prevents.
-            tool_config=requested.tool_config,
+            # re-open the very identity bleed this feature prevents. The one scope
+            # that IS narrowed is the GitHub repo allowlist (#111): a subagent can
+            # never widen the repos its parent may touch.
+            tool_config=_narrow_gh_repos(parent, requested.tool_config),
             # Account access is a grant, narrowed to the parent's — a subagent can
             # never reach an account (or a higher access level) its parent lacks (#110).
             email_accounts=narrow_accounts(p_email, requested.email_accounts),

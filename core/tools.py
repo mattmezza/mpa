@@ -116,10 +116,26 @@ class ToolSpec:
 
 def _gh_env(config: Config) -> dict[str, str]:
     gh = config.tools.gh
-    if gh.enabled and gh.token:
+    if not gh.enabled:
+        return {}
+    # GitHub App takes precedence over the PAT (#111): mint a short-lived
+    # installation token so `gh` acts as the bot identity with its own rate limit.
+    if gh.app_id and gh.installation_id and gh.private_key:
+        from core import github_app
+
+        token = github_app.installation_token(gh.app_id, gh.installation_id, gh.private_key)
+        if token:
+            return {"GH_TOKEN": token}
+        # App configured but the mint failed → fall back to the PAT if present.
+    if gh.token:
         # `gh` reads GH_TOKEN (preferred) / GITHUB_TOKEN for non-interactive auth.
         return {"GH_TOKEN": gh.token}
     return {}
+
+
+def _gh_app_configured(config: Config) -> bool:
+    gh = config.tools.gh
+    return bool(gh.enabled and gh.app_id and gh.installation_id and gh.private_key)
 
 
 def _whatsapp_env(config: Config) -> dict[str, str]:
@@ -253,21 +269,65 @@ def gh_token_secret_name(persona_name: str) -> str:
     return f"GH_TOKEN_{slug}"
 
 
+# `gh` invoked as a word (so `grep -R foo/bar` etc. aren't repo-gated).
+_GH_INVOKED_RE = re.compile(r"\bgh\b")
+# The `--repo`/`--repository`/`-R` target flag, tolerant of `=`, quotes, and the
+# glued short form (`-Rowner/name`) — all forms `gh` itself accepts.
+_GH_REPO_FLAG_RE = re.compile(
+    r"""(?:--repo(?:sitory)?[=\s]+|-R\s*)["']?([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)"""
+)
+
+
+def github_repo_violation(persona: Persona | None, command: str) -> str | None:
+    """First GitHub repo the persona is NOT allowed to touch, or ``None`` (#111).
+
+    Best-effort per-persona repo allowlist from ``tool_config["gh"]["repos"]``.
+    Absent ``repos`` key = unrestricted; a *present* list restricts to it, and a
+    present-but-empty list (e.g. a subagent whose scope was narrowed to a set
+    disjoint from its parent's) allows **nothing** — it blocks every ``--repo``
+    target. Only ``gh`` invocations are gated, and only the explicit
+    ``--repo``/``-R`` flag is inspected (its various quoted/glued forms).
+    ponytail: the HARD boundary is the GitHub App installation's own repo
+    selection (server-enforced); this is defense-in-depth, so it deliberately
+    does NOT parse cwd checkouts, `gh api` paths, or git remotes — a parser for
+    those is a bug farm and would give false confidence. Tighten the App
+    installation to narrow access for real.
+    """
+    if persona is None or not command:
+        return None
+    gh = persona.tool_setting("gh") or {}
+    repos = gh.get("repos")
+    if repos is None:
+        return None  # no allowlist → unrestricted
+    allowed = {str(r).strip().lower() for r in repos if r and str(r).strip()}
+    if not _GH_INVOKED_RE.search(command):
+        return None  # not a gh command → nothing to gate here
+    for repo in _GH_REPO_FLAG_RE.findall(command):
+        if repo.lower() not in allowed:
+            return repo
+    return None
+
+
 def _persona_tool_note(key: str, setting: dict | None, persona: Persona | None) -> str:
     """A one-line identity note injected into a tool's prompt block for a persona."""
     if persona is None or setting is None:
         return ""
     if key == "gh":
+        repos = [r for r in (setting.get("repos") or []) if str(r).strip()]
+        repo_note = (
+            f" You may only target these repos with `--repo`: {', '.join(repos)}." if repos else ""
+        )
         if (setting.get("token_secret") or "").strip():
             return (
                 f'Running as persona "{persona.name}": `gh` is authenticated with the '
                 "GitHub token configured for this persona. Every gh/git action appears "
-                "as that token's GitHub user."
+                "as that token's GitHub user." + repo_note
             )
         return (
             f'Running as persona "{persona.name}": `gh` is authenticated with this '
-            "persona's OWN GitHub token (a distinct identity from the owner). Every "
-            "gh/git action appears as this persona's GitHub user."
+            "persona's OWN GitHub identity (a distinct identity from the owner). Every "
+            "gh/git action appears as this persona's GitHub user or the configured "
+            "GitHub App bot." + repo_note
         )
     if key == "browser":
         profile = (setting.get("profile") or persona.name).strip()
@@ -314,6 +374,17 @@ def effective_tool_env(
             # copy; otherwise its own namespaced token is used (#93).
             name = (gh.get("token_secret") or "").strip() or gh_token_secret_name(persona.name)
             token = resolve_secret(name)
+            if not token and _gh_app_configured(config):
+                # No own PAT, but a GitHub App is configured → use the shared bot
+                # identity (#111). Mint it directly (App-or-nothing) rather than via
+                # _gh_env: a persona must NEVER fall back to the owner's PAT, which
+                # is exactly what #93's no-borrow rule prevents.
+                from core import github_app
+
+                gh_cfg = config.tools.gh
+                token = github_app.installation_token(
+                    gh_cfg.app_id, gh_cfg.installation_id, gh_cfg.private_key
+                )
             if token:
                 env["GH_TOKEN"] = token
 
@@ -370,9 +441,39 @@ if __name__ == "__main__":
     lingua = Persona(name="lingua", tool_config={"gh": {"enabled": False}})
     assert "GH_TOKEN" not in effective_tool_env(cfg, lingua, resolve)
 
+    # GitHub App configured + persona has no own PAT → uses the shared bot token (#111).
+    app_cfg = Config()
+    app_cfg.tools.gh.enabled = True
+    app_cfg.tools.gh.app_id = "42"
+    app_cfg.tools.gh.installation_id = "7"
+    app_cfg.tools.gh.private_key = "PEM"
+    import core.github_app as _ga
+
+    _real_it, _ga.installation_token = _ga.installation_token, lambda *_a: "bot-token"
+    try:
+        assert effective_tool_env(app_cfg, atlas, resolve)["GH_TOKEN"] == "bot-token"
+    finally:
+        _ga.installation_token = _real_it
+
+    # Per-persona repo allowlist (#111): only --repo targets outside the list are blocked.
+    scoped = Persona(name="coder", tool_config={"gh": {"enabled": True, "repos": ["me/mpa"]}})
+    assert github_repo_violation(scoped, "gh issue list --repo me/mpa") is None
+    assert github_repo_violation(scoped, "gh pr view 1 -R me/other") == "me/other"
+    assert github_repo_violation(scoped, "gh api user") is None  # no --repo → can't tell → allow
+    assert github_repo_violation(plain, "gh pr view 1 --repo any/thing") is None  # no allowlist
+    # Quote/glue-tolerant + gh-scoped (no false-block on grep -R).
+    assert github_repo_violation(scoped, 'gh pr view 1 --repo "me/evil"') == "me/evil"
+    assert github_repo_violation(scoped, "gh pr view 1 -Rme/evil") == "me/evil"
+    assert github_repo_violation(scoped, "gh pr view 1 --repo=me/mpa") is None
+    assert github_repo_violation(scoped, "grep -R foo/bar .") is None  # not a gh command
+    # Present-but-empty allowlist = block every --repo (disjoint-narrow result).
+    blocked = Persona(name="sub", tool_config={"gh": {"enabled": True, "repos": []}})
+    assert github_repo_violation(blocked, "gh pr view 1 --repo me/mpa") == "me/mpa"
+    assert github_repo_violation(blocked, "gh api user") is None  # no --repo target
+
     # Prompts: hopper sees gh + browser, with identity notes; lingua's gh is hidden.
     hp = "\n".join(active_tool_prompts(cfg, hopper))
-    assert 'persona "hopper"' in hp and "OWN GitHub token" in hp and "hop" in hp
+    assert 'persona "hopper"' in hp and "OWN GitHub identity" in hp and "hop" in hp
     lp = "\n".join(active_tool_prompts(cfg, lingua))
     assert 'name="gh"' not in lp and 'name="browser"' in lp
     # No persona → plain blocks, no identity notes.
