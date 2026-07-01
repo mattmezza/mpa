@@ -101,7 +101,7 @@ class AgentConfig(BaseModel):
     # {account, access_level, is_sender_identity}, calendar/contacts drop the
     # sender flag. Empty = the default agent is unscoped (legacy behaviour: it may
     # use any configured account); non-empty = it is scoped to these accounts,
-    # enforced exactly like a agent's.
+    # enforced exactly like an agent's.
     email_accounts: list[dict] = Field(default_factory=list)
     calendar_accounts: list[dict] = Field(default_factory=list)
     contacts_accounts: list[dict] = Field(default_factory=list)

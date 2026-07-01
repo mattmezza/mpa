@@ -321,7 +321,7 @@ class PermissionEngine:
     def _effective_rules(self, scope: str = "") -> dict[str, str]:
         """The rules seen by ``scope``: agent overrides layered over the default.
 
-        No scope (or a agent with no own rules) → the default set unchanged, so
+        No scope (or an agent with no own rules) → the default set unchanged, so
         the hot ``check()`` path allocates nothing for the common case.
         """
         own = self.scoped.get(scope)
@@ -493,7 +493,7 @@ class PermissionEngine:
         specific (longer) patterns tried first.
 
         ``scope`` selects the agent/agent ruleset (#100): its own rules layer
-        over the global default, so a agent can tighten or loosen an action
+        over the global default, so an agent can tighten or loosen an action
         without affecting others. Empty scope = the global default set.
         """
         match_key = self._build_match_key(tool_name, params)

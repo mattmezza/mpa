@@ -90,7 +90,7 @@ async def test_agent_browser_profile_injected(agent: AgentCore, monkeypatch) -> 
 
 async def test_agent_without_tool_config_inherits(agent: AgentCore, monkeypatch) -> None:
     # A agent that never configured tools still gets the owner token (migration:
-    # unchanged behaviour until you opt a agent in).
+    # unchanged behaviour until you opt an agent in).
     plain = Agent(name="plain")
     cap = await _run(agent, plain, monkeypatch)
     assert cap["tool_env"]["GH_TOKEN"] == "owner-token"
@@ -107,7 +107,7 @@ async def test_agent_gh_token_secret_reference(agent: AgentCore, monkeypatch) ->
 
 
 async def test_subagent_keeps_agent_tool_identity(agent: AgentCore) -> None:
-    # A subagent spawned AS a agent must keep that agent's tool identity — else
+    # A subagent spawned AS an agent must keep that agent's tool identity — else
     # it falls back to the owner's token (the bleed #93 prevents). _narrow_agent
     # narrows skills/tools/secrets but tool_config is identity, copied verbatim.
     parent_state = agent._new_request_state(None)

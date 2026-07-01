@@ -161,7 +161,7 @@ def _agent_has_own_app(gh: dict) -> bool:
 
 
 def _agent_app_token(gh: dict, resolve_secret: Callable[[str], str | None]) -> str | None:
-    """Mint a agent's OWN GitHub App installation token, or ``None`` (#111).
+    """Mint an agent's OWN GitHub App installation token, or ``None`` (#111).
 
     ``app_id`` + ``installation_id`` are non-secret; the PEM is referenced by
     ``private_key_secret`` (an infra-vault name) so it is never stored in the
@@ -186,7 +186,7 @@ def _agent_gh_token(
     config: Config,
     resolve_secret: Callable[[str], str | None],
 ) -> str | None:
-    """Resolve a agent's ``GH_TOKEN`` honoring its explicit auth mode (#111).
+    """Resolve an agent's ``GH_TOKEN`` honoring its explicit auth mode (#111).
 
     * ``auth="pat"`` → its own PAT (``token_secret`` or ``GH_TOKEN_<slug>``); it
       never borrows the App.
@@ -217,7 +217,7 @@ def _agent_gh_token(
     if auth == "app":
         # Own app → own app or NOTHING: never silently cross over to the system
         # bot on a transient mint failure (that could be a different, broader
-        # identity). Only a agent that configured no own app uses the shared bot.
+        # identity). Only an agent that configured no own app uses the shared bot.
         return _agent_app_token(gh, resolve_secret) if _agent_has_own_app(gh) else system_app()
     # Legacy / inferred: PAT first, then own app (own-app-or-nothing — same
     # no-crossover rule as auth="app"), else the shared system bot.
@@ -282,7 +282,7 @@ _REGISTRY: tuple[ToolSpec, ...] = (
 
 # Env vars the tool registry manages. When a per-agent env override is applied
 # (#93), any managed key absent from the override is stripped from the inherited
-# process environment too — so a agent that switched `gh` off can never inherit
+# process environment too — so an agent that switched `gh` off can never inherit
 # a token that leaked in via `.env`/Docker ENV and act as the owner. `gh` reads
 # GH_TOKEN, then GITHUB_TOKEN, then the enterprise variants (in that precedence),
 # so ALL of them must be stripped, not just GH_TOKEN.
@@ -347,7 +347,7 @@ def tool_env(config: Config) -> dict[str, str]:
 
 
 def gh_token_secret_name(agent_name: str) -> str:
-    """Infra-vault name holding a agent's own GitHub token.
+    """Infra-vault name holding an agent's own GitHub token.
 
     Namespaced per agent so each agent authenticates as a distinct GitHub user.
     Stored in the *infra* vault (machine-key, boot-unsealed) so it works headless
@@ -400,7 +400,7 @@ def github_repo_violation(agent: Agent | None, command: str) -> str | None:
 
 
 def _agent_tool_note(key: str, setting: dict | None, agent: Agent | None) -> str:
-    """A one-line identity note injected into a tool's prompt block for a agent."""
+    """A one-line identity note injected into a tool's prompt block for an agent."""
     if agent is None or setting is None:
         return ""
     if key == "gh":
@@ -439,7 +439,7 @@ def effective_tool_env(
 ) -> dict[str, str]:
     """The tool environment for a turn, adjusted for the active agent (#93).
 
-    Starts from the system-wide :func:`tool_env` and, for a agent that has its
+    Starts from the system-wide :func:`tool_env` and, for an agent that has its
     own tool config, swaps in its own identity:
 
     * ``gh`` — replace ``GH_TOKEN`` with the agent's own token (resolved from the

@@ -261,7 +261,7 @@ class SecretStore:
         expires_at: str | None = None,
         max_uses: int | None = None,
     ) -> None:
-        """Encrypt and upsert a agent secret. ``value`` may be a scalar or dict."""
+        """Encrypt and upsert an agent secret. ``value`` may be a scalar or dict."""
         await self._ensure_schema()
         if not valid_name(name):
             raise ValueError(f"invalid secret name: {name!r}")

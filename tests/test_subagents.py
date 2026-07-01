@@ -613,7 +613,7 @@ async def test_agents_roster_marks_current_and_gates(agent, monkeypatch) -> None
     monkeypatch.setattr(agent.agents, "list_agents", AsyncMock(return_value=agents))
     block = await agent._agents_roster_block(Agent(name="me", role="r1"))
     assert "- me (you) — r1" in block
-    # a agent whose tool scope excludes spawn_subagent gets no roster
+    # an agent whose tool scope excludes spawn_subagent gets no roster
     scoped = Agent(name="me", tools=["web_search"])
     assert await agent._agents_roster_block(scoped) == ""
     # nor when subagents are disabled

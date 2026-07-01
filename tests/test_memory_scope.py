@@ -141,7 +141,7 @@ def test_scope_filter():
 
 
 def test_resolve_extracted_scope():
-    # Private only when a agent is active AND the model tagged it private.
+    # Private only when an agent is active AND the model tagged it private.
     assert _resolve_extracted_scope({"scope": "private"}, "coach") == "coach"
     assert _resolve_extracted_scope({"scope": "PRIVATE"}, "coach") == "coach"
     assert _resolve_extracted_scope({"scope": "shared"}, "coach") == ""

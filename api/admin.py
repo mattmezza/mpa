@@ -1043,7 +1043,7 @@ def create_admin_app(
                 if (await config_store.get(f"tools.{s.key}.enabled")) == "true"
             ],
             "infra_available": bool(secret_store and secret_store.infra.available),
-            # Existing infra-vault secret names a agent can reuse as its gh token
+            # Existing infra-vault secret names an agent can reuse as its gh token
             # instead of storing its own copy (#93). Infra vault only (boot-unsealed,
             # so it resolves headless like the per-agent token does).
             "infra_names": (
@@ -1051,7 +1051,7 @@ def create_admin_app(
                 if secret_store and secret_store.infra.available
                 else []
             ),
-            # Email/calendar accounts a agent can be bound to (#110). Names only —
+            # Email/calendar accounts an agent can be bound to (#110). Names only —
             # the account registry (Email/Calendar tabs) is the source of truth.
             "available_email_accounts": await _email_account_names(config_store),
             "available_calendar_accounts": [
@@ -1142,49 +1142,49 @@ def create_admin_app(
             scheduler_jobs=scheduler_jobs,
         )
 
-    @app.get("/partials/identity", dependencies=[Depends(auth)])
-    async def partial_identity() -> HTMLResponse:
-        """Agent identity tab partial."""
+    async def _identity_context() -> dict:
+        """Context for the default-agent identity fragment (identity.html).
+
+        Shared by the standalone ``/partials/identity`` route and the merged
+        Agents tab, which renders the default agent above the agent list (#115).
+        """
         from core.agents import _as_account_list
         from voice.pipeline import KOKORO_LANGUAGES, KOKORO_VOICES
 
-        character = await config_store.get("agent.character") or ""
-        agent_name = await config_store.get("agent.name") or ""
-        stt_model = await config_store.get("voice.stt_model") or "base"
-        tts_voice = await config_store.get("voice.tts_voice") or "en-US-AvaNeural"
-        tts_enabled = await config_store.get("voice.tts_enabled") or "true"
-        backend = await config_store.get("voice.backend") or "edge-tts"
-        kokoro_voice = await config_store.get("voice.kokoro.default_voice") or "af_bella"
-        # Default-identity account bindings (#110): the registry accounts to pick
-        # from, plus what's currently bound to the default agent (no agent).
-        return _render_partial(
-            "partials/identity.html",
-            character=character,
-            agent_name=agent_name,
-            stt_model=stt_model,
-            tts_voice=tts_voice,
-            tts_enabled=tts_enabled,
-            backend=backend,
-            kokoro_voice=kokoro_voice,
-            kokoro_voices=KOKORO_VOICES,
-            kokoro_languages=KOKORO_LANGUAGES,
-            available_email_accounts=await _email_account_names(config_store),
-            available_calendar_accounts=[
+        return {
+            "character": await config_store.get("agent.character") or "",
+            "agent_name": await config_store.get("agent.name") or "",
+            "stt_model": await config_store.get("voice.stt_model") or "base",
+            "tts_voice": await config_store.get("voice.tts_voice") or "en-US-AvaNeural",
+            "tts_enabled": await config_store.get("voice.tts_enabled") or "true",
+            "backend": await config_store.get("voice.backend") or "edge-tts",
+            "kokoro_voice": await config_store.get("voice.kokoro.default_voice") or "af_bella",
+            "kokoro_voices": KOKORO_VOICES,
+            "kokoro_languages": KOKORO_LANGUAGES,
+            # Default-agent account bindings (#110): the registry accounts to pick
+            # from, plus what's currently bound to the default agent (no agent).
+            "available_email_accounts": await _email_account_names(config_store),
+            "available_calendar_accounts": [
                 p["name"] for p in await _calendar_providers_context(config_store) if p["name"]
             ],
-            available_contacts_accounts=[
+            "available_contacts_accounts": [
                 p["name"] for p in await _contact_providers_context(config_store) if p["name"]
             ],
-            default_email_accounts=_as_account_list(
+            "default_email_accounts": _as_account_list(
                 await config_store.get("agent.email_accounts") or "", sender=True
             ),
-            default_calendar_accounts=_as_account_list(
+            "default_calendar_accounts": _as_account_list(
                 await config_store.get("agent.calendar_accounts") or ""
             ),
-            default_contacts_accounts=_as_account_list(
+            "default_contacts_accounts": _as_account_list(
                 await config_store.get("agent.contacts_accounts") or ""
             ),
-        )
+        }
+
+    @app.get("/partials/identity", dependencies=[Depends(auth)])
+    async def partial_identity() -> HTMLResponse:
+        """Default-agent identity fragment (also embedded in the Agents tab)."""
+        return _render_partial("partials/identity.html", **await _identity_context())
 
     @app.get("/partials/you", dependencies=[Depends(auth)])
     async def partial_you() -> HTMLResponse:
@@ -1201,7 +1201,7 @@ def create_admin_app(
 
     async def _render_permissions(scope: str = "") -> HTMLResponse:
         """Render the permissions tab for one scope (#100): "" = global default,
-        else a agent slug whose own overrides are shown."""
+        else an agent slug whose own overrides are shown."""
         agent = agent_state.agent
         store = await _agent_store_from_config(config_store)
         agents = [p.name for p in await store.list_agents()]
@@ -1229,11 +1229,17 @@ def create_admin_app(
 
     @app.get("/partials/agents", dependencies=[Depends(auth)])
     async def partial_agents() -> HTMLResponse:
-        """Agents tab partial — cards + active-agent selector."""
+        """Agents tab partial — the default agent (identity.html) above the list
+        of custom agents + the active-agent selector (#115)."""
         store = await _agent_store_from_config(config_store)
         agents = await store.list_agents()
         active = (await config_store.get("agent.active_agent") or "").strip()
-        return _render_partial("partials/agents.html", agents=agents, active=active)
+        return _render_partial(
+            "partials/agents.html",
+            agents=agents,
+            active=active,
+            **await _identity_context(),
+        )
 
     @app.get("/partials/channels", dependencies=[Depends(auth)])
     async def partial_channels() -> HTMLResponse:
@@ -2181,8 +2187,8 @@ def create_admin_app(
             try:
                 new_config = await _resolved_config()
                 agent.config = new_config
-                # Rebuild the default-identity account bindings so a change on the
-                # Assistant tab applies live, no restart (#110).
+                # Rebuild the default-agent account bindings so a change on the
+                # Agents tab (default agent) applies live, no restart (#110).
                 agent._default_accounts = agent._build_default_accounts(new_config)
                 agent.llm = LLMClient.from_agent_config(new_config.agent)
                 agent.llm.temperature = new_config.agent.temperature  # #12: live temp update
@@ -2940,7 +2946,12 @@ def create_admin_app(
         store = await _agent_store_from_config(config_store)
         agents = await store.list_agents()
         active = (await config_store.get("agent.active_agent") or "").strip()
-        return _render_partial("partials/agents.html", agents=agents, active=active)
+        return _render_partial(
+            "partials/agents.html",
+            agents=agents,
+            active=active,
+            **await _identity_context(),
+        )
 
     @app.get("/agents", dependencies=[Depends(auth)])
     async def list_agents() -> dict:
@@ -3042,7 +3053,7 @@ def create_admin_app(
 
     @app.post("/agents/rename", dependencies=[Depends(auth)])
     async def rename_agent(request: Request) -> HTMLResponse:
-        """Change a agent's slug, cascading it to every store that keys off it.
+        """Change an agent's slug, cascading it to every store that keys off it.
 
         The slug is a foreign key without a DB constraint: per-chat bindings,
         private memory scope, scheduled jobs, the active-agent selection and the
@@ -4086,7 +4097,7 @@ def _config_requires_restart(values: dict) -> bool:
     return any(key == "history.max_turns" or key.startswith("voice.") for key in values)
 
 
-# Function-tools that a agent may scope. ``load_skill`` is intentionally
+# Function-tools that an agent may scope. ``load_skill`` is intentionally
 # excluded — it is always available (the core mechanic agents use to read
 # their allowlisted skills); so are ``search_skills``/``list_skills`` (its
 # on-demand discovery counterparts — #50), the vault tools, and ``recall_memory``

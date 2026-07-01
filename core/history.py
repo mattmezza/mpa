@@ -484,7 +484,7 @@ class ConversationHistory:
     async def set_chat_agent(
         self, channel: str, user_id: str, agent: str, chat_id: str = ""
     ) -> None:
-        """Bind a (channel, user_id, chat_id) triple to a agent name (upsert)."""
+        """Bind a (channel, user_id, chat_id) triple to an agent name (upsert)."""
         await self._ensure_schema()
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -507,7 +507,7 @@ class ConversationHistory:
             await db.commit()
 
     async def bind_chat_agent(self, channel: str, user_id: str, chat_id: str, agent: str) -> None:
-        """Bind (or, with an empty name, unbind) a chat to a agent.
+        """Bind (or, with an empty name, unbind) a chat to an agent.
 
         Drops the snapshotted session system prompt so a new identity takes effect
         on the next turn without wiping the conversation (in injection mode there
@@ -523,7 +523,7 @@ class ConversationHistory:
         await self.clear_session_system(channel, user_id, chat_id)
 
     async def rename_agent(self, old: str, new: str) -> None:
-        """Repoint everything keyed by a agent slug after it is renamed (#69).
+        """Repoint everything keyed by an agent slug after it is renamed (#69).
 
         Two kinds of reference move: the ``chat_agent.agent`` binding value,
         and the ``telegram:<slug>`` channel that a per-agent bot's turns,

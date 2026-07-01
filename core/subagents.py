@@ -4,7 +4,7 @@ A *subagent* is one execution primitive (``AgentCore.run_subagent``) reached by
 two trigger paths: on demand via the ``spawn_subagent`` tool, or on a schedule
 via a ``subagent`` job. Either way it runs the existing agent loop with **system
 semantics** (no goal decomposition / memory / reflection / approval prompts) and
-a agent whose tool/skill/secret scope is a *subset* of the caller's — never
+an agent whose tool/skill/secret scope is a *subset* of the caller's — never
 wider (``narrow_scope``).
 
 This module holds only the lifecycle bookkeeping: a small in-memory registry of
@@ -108,7 +108,7 @@ def narrow_accounts(parent: list[dict] | None, child: list[dict] | None) -> list
 
     * ``parent is None`` — no parent agent (the spawning turn ran unscoped, i.e.
       the owner's own full access) → the child keeps its own bindings.
-    * ``parent == []`` — a agent with no account access → the child gets none.
+    * ``parent == []`` — an agent with no account access → the child gets none.
     * otherwise — keep only accounts the parent also has, at the *lower* of the two
       access levels, and drop a send identity the parent can't itself write to
       (inherit-never-widen).

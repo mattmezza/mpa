@@ -9,7 +9,7 @@ Job types:
   - "system": raw CLI command -> executor.run_command_trusted()
   - "memory_consolidation": review short-term memories, promote worthy ones
     to long-term, delete expired entries (uses a lightweight LLM call)
-  - "subagent": run agent.run_subagent() under a agent -> send result to channel (issue #15)
+  - "subagent": run agent.run_subagent() under an agent -> send result to channel (issue #15)
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ def _get_owner_chat_id(agent: AgentCore, channel: str) -> int | str | None:
     """Get the owner's chat ID for proactive messages.
 
     Works for the default ``telegram`` bot and every per-agent ``telegram:<agent>``
-    bot (#29): each registered channel carries its own allowlist (a agent bot
+    bot (#29): each registered channel carries its own allowlist (an agent bot
     inherits the global one when unset), so the owner is its first allowed user.
     """
     if channel != "telegram" and not channel.startswith("telegram:"):

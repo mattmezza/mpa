@@ -196,7 +196,7 @@ class AgentVault:
 
 
 class VaultLocked(RuntimeError):
-    """Raised when a agent-vault operation is attempted while sealed."""
+    """Raised when an agent-vault operation is attempted while sealed."""
 
 
 if __name__ == "__main__":

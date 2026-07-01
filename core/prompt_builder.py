@@ -155,7 +155,7 @@ def build_prompt_sections(
         getattr(config.prompt, "history_handling_override", ""),
     )
 
-    # When a agent is active it supplies its own identity (character); otherwise
+    # When an agent is active it supplies its own identity (character); otherwise
     # the configured default is used, so first-run behaviour with no agent is
     # unchanged. (personalia was merged into character in #98.)
     character_text = agent.character if agent else cfg.character
@@ -171,7 +171,7 @@ def build_prompt_sections(
         intro += f"\n\nYou are currently acting as the **{agent.role}** agent."
 
     # Prompt-injection rail (#3): untrusted content (email/web/file/tool output) must
-    # never be treated as instructions. Lives in the non-overridable intro so a agent
+    # never be treated as instructions. Lives in the non-overridable intro so an agent
     # or tool_usage override can't drop it. Defence-in-depth, not a guarantee.
     intro += (
         "\n\n<security>\n"

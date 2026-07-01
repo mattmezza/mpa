@@ -147,7 +147,7 @@ class TelegramChannel:
         self.app.add_handler(MessageHandler(filters.TEXT, self._on_text))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
         self.app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, self._on_photo))
-        # Topic→agent auto-bind only makes sense on the default bot: a agent
+        # Topic→agent auto-bind only makes sense on the default bot: an agent
         # bot resolves straight to its own agent (rung 0), so a per-topic binding
         # would be ignored. Topic *folding* (history isolation) still applies below.
         if config.topics_enabled and channel_name == "telegram":

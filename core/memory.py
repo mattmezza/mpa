@@ -362,7 +362,7 @@ def _normalize_subject(subject: str) -> str:
 def _extraction_scope_block(agent_scope: str) -> str:
     """Scope instruction injected into the extraction prompt (#42).
 
-    Empty when no agent is active (everything is shared). When a agent is
+    Empty when no agent is active (everything is shared). When an agent is
     active, lets the model mark domain-specific facts private to it; the default
     stays shared so owner-level facts reach every agent.
     """
@@ -380,7 +380,7 @@ def _extraction_scope_block(agent_scope: str) -> str:
 def _resolve_extracted_scope(mem: dict, agent_scope: str) -> str:
     """Map an extracted item's scope hint to a stored scope key (#42).
 
-    Private only when a agent is active AND the model tagged it private;
+    Private only when an agent is active AND the model tagged it private;
     everything else is shared (``''``).
     """
     if agent_scope and str(mem.get("scope", "")).strip().lower() == "private":
@@ -566,7 +566,7 @@ class MemoryStore:
         await db.commit()
 
     async def rename_scope(self, old: str, new: str) -> None:
-        """Move a agent's private memories to a new scope key after the agent
+        """Move an agent's private memories to a new scope key after the agent
         slug is renamed (#69). A agent's scope key is its slug (see #42)."""
         await self._ensure_schema()
         async with aiosqlite.connect(self.db_path) as db:
@@ -663,7 +663,7 @@ class MemoryStore:
         unavailable or the query can't be embedded, so recall always works.
 
         ``scope`` filters per #42 (see :func:`_scope_filter`) exactly like the
-        injection readers, so a agent only recalls shared + its own private
+        injection readers, so an agent only recalls shared + its own private
         memories, never another agent's; ``None`` = every scope.
         """
         query = (query or "").strip()
@@ -1028,7 +1028,7 @@ class MemoryStore:
         otherwise pure token overlap. A matching subject adds a fixed boost.
         Cheap and dependency-free at <1k rows.
 
-        ``scope`` (#42) bounds the candidate set: ``""`` = shared only, a agent
+        ``scope`` (#42) bounds the candidate set: ``""`` = shared only, an agent
         key = shared + that agent, ``None`` = every scope."""
         await self._ensure_schema()
         clause, params = _scope_filter(scope)

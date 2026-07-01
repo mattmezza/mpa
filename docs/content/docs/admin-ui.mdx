@@ -36,8 +36,7 @@ identity) takes effect immediately.
 
 Edit agent settings without touching config files:
 
-- **Assistant** — the default identity (agent name, character & tone), used when no agent is active
-- **Agents** — create, edit, and switch swappable agent identities (see below)
+- **Agents** — the **default agent** (name, character & tone, voice, and account bindings — used when no other agent is active) shown above the list of swappable agent identities you can create, edit, and switch between (see below)
 - **Inspect** — developer view with two sub-tabs: **Context** (a master/detail list of every active context showing the exact payload last sent to the LLM for each — see below) and **Logs** (the live application log stream)
 - **LLM** — split into three sub-tabs to keep it uncluttered:
     - **SysPrompt** — build and preview the system prompt (tool-usage / history-handling overrides, default-block references, prompt preview, captured runtime prompts). Links to the **Inspect** tab for debugging live payloads.
@@ -62,7 +61,7 @@ Built-in skill editor for creating, editing, and deleting skill files. Changes t
 
 ### Agents
 
-Manage swappable agent identities — each with its own character, skill allowlist, tool scope, voice, and secret scope. Cards show every agent and the active one; **Use** activates one (applied live to new turns) or revert to **Default** (the Assistant-tab identity). The editor offers a **guided form** (identity, agent name, voice with a **Preview** button and Edge/Kokoro suggestions, skill + tool checkboxes, secret scope) and a **raw markdown** toggle for power users. Six starter agents ship seeded. The page is responsive at phone width. See [Agents](/docs/agents) for the full model.
+Manage the default agent and swappable agent identities on one tab (#115). The **Default agent** — name, character & tone, voice, and account bindings, used when no other agent is active — sits at the top; below it, cards show every custom agent and the active one, each with its own character, skill allowlist, tool scope, voice, and secret scope. **Use** activates one (applied live to new turns) or revert to **Default** (the default agent above). The editor offers a **guided form** (identity, agent name, voice with a **Preview** button and Edge/Kokoro suggestions, skill + tool checkboxes, secret scope) and a **raw markdown** toggle for power users. Six starter agents ship seeded. The page is responsive at phone width. See [Agents](/docs/agents) for the full model.
 
 ### Inspect
 
@@ -94,7 +93,7 @@ Manage scheduled tasks:
 
 - View all registered jobs with their cron expressions and the **agent** each runs as
 - Filter the list by agent to focus on one agent's jobs
-- Create new jobs (optionally scoped to a agent for `agent`/`agent_silent`/`subagent` types)
+- Create new jobs (optionally scoped to an agent for `agent`/`agent_silent`/`subagent` types)
 - Pause/resume jobs
 - Delete jobs
 - View job execution history
@@ -109,7 +108,7 @@ Configure conversation history and browse stored turns:
 ### Vaults
 
 Manage the [secrets vault](/docs/secrets), organized into three sub-tabs: **Agents** (per-agent
-/ login secrets — a **agent × secret access matrix** to grant a agent use of a secret, plus
+/ login secrets — an **agent × secret access matrix** to grant an agent use of a secret, plus
 add/rotate/revoke), **Infra** (machine-key-encrypted infrastructure secrets and a one-click
 migrate of scattered plaintext credentials into the vault), and **Import** (Bitwarden JSON
 import). Lists secret **names** + descriptions + recent-use audit only — values are write-only

@@ -288,7 +288,8 @@ def test_partial_agents_renders(tmp_path) -> None:
     client, _ = _client(tmp_path)
     r = client.get("/partials/agents", headers=AUTH)
     assert r.status_code == 200
-    assert "Active agent" in r.text
+    # Merged tab (#115): the default agent renders above the agent list.
+    assert "Default agent" in r.text
 
 
 def test_agent_rename_cascades(tmp_path) -> None:

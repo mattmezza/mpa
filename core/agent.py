@@ -654,7 +654,7 @@ TOOLS = [
         "name": "spawn_subagent",
         "description": (
             "Delegate a self-contained subtask to a subagent. The subagent runs "
-            "the full agent loop under a agent, with a tool/skill/secret scope "
+            "the full agent loop under an agent, with a tool/skill/secret scope "
             "that is never wider than yours, and returns a structured result. It "
             "has NO memory of this conversation — put everything it needs in "
             "'task'.\n"
@@ -917,7 +917,7 @@ def scoped_tools(agent: Agent | None) -> list[dict]:
         return TOOLS
     # ``load_skill`` and the vault discovery/request tools are always retained:
     # they are the mechanics agents rely on to read skills and obtain secrets.
-    # ``search_skills``/``list_skills`` mirror ``load_skill`` (a agent needs them
+    # ``search_skills``/``list_skills`` mirror ``load_skill`` (an agent needs them
     # to discover its own allowlisted skills in on-demand mode — #50); the feature
     # gate below still drops them when that mode is off. ``recall_memory`` too —
     # memory is injected for every agent (scope-filtered), so its on-demand
@@ -995,7 +995,7 @@ class AgentCore:
         )
         # Account bindings for the default identity (no agent active) — built
         # once from config (#110). None = unscoped (legacy: any account); otherwise
-        # a Agent-shaped carrier used only for account routing/enforcement, never
+        # an Agent-shaped carrier used only for account routing/enforcement, never
         # for scoping/memory/character (which stay the default agent's).
         self._default_accounts = self._build_default_accounts(config)
         self.executor = ToolExecutor(tool_env=tool_env(config))
@@ -1312,7 +1312,7 @@ class AgentCore:
         return None
 
     async def _load_agent(self, name: str) -> Agent | None:
-        """Load a agent by name, returning ``None`` if it is missing/broken."""
+        """Load an agent by name, returning ``None`` if it is missing/broken."""
         try:
             return await self.agents.get(name)
         except Exception:
@@ -1322,7 +1322,7 @@ class AgentCore:
     async def bind_chat_agent(
         self, channel: str, user_id: str, chat_id: str, agent_name: str
     ) -> None:
-        """Bind (or, with an empty name, unbind) a chat to a agent.
+        """Bind (or, with an empty name, unbind) a chat to an agent.
 
         Thin pass-through to the history store, which also drops the snapshotted
         session system prompt so the new identity takes effect on the next turn.
@@ -1545,7 +1545,7 @@ class AgentCore:
 
         Reads the same message array that will be sent to the model, so the
         decision is correct by construction: after a /new or compaction the block
-        is gone (→ re-send), a agent rebind or new skill changes the block (→
+        is gone (→ re-send), an agent rebind or new skill changes the block (→
         re-send), and concurrent turns that haven't yet persisted both re-send
         (harmless). Cheap: a substring scan over the (compaction-bounded) history.
         """
@@ -2228,7 +2228,7 @@ class AgentCore:
                 command, serr = await self.secret_store.resolve_command_secrets(command, allowed)
                 if serr:
                     return {"error": serr}
-            # Per-agent tool identity (#93): a agent runs `gh`/`browser` with its
+            # Per-agent tool identity (#93): an agent runs `gh`/`browser` with its
             # own credentials/profile, never the owner's. No agent → the shared
             # default env (unchanged path).
             agent = request_state.get("agent_obj")
@@ -2243,7 +2243,7 @@ class AgentCore:
                     )
                 }
             agent_env = None
-            # Build the per-turn tool env when a agent is active OR a GitHub App
+            # Build the per-turn tool env when an agent is active OR a GitHub App
             # is configured — the latter so its rotating installation token (#111)
             # is minted fresh per command instead of the stale one cached at
             # construction. A static PAT doesn't rotate, so the no-agent/PAT case
@@ -2526,7 +2526,7 @@ class AgentCore:
 
         Returns ``(account, error)``. With no active agent the agent runs
         unscoped (legacy single-user behaviour) and the requested account is used
-        verbatim. With a agent, the email_accounts bindings are the allowlist:
+        verbatim. With an agent, the email_accounts bindings are the allowlist:
         the account defaults to the agent's send identity, an unbound account is
         refused, and sending on a read-only binding is refused. Credentials are
         never touched here — only the account *name* is resolved.
@@ -2747,7 +2747,7 @@ class AgentCore:
 
         Defence in depth: the tools are already feature-gated out of the
         advertised set when disabled, but the handlers refuse too — a stale
-        tool-call or a agent allowlist can't reach the filesystem.
+        tool-call or an agent allowlist can't reach the filesystem.
         """
         ws = self.config.workspace
         if not ws.enabled or not ws.directory.strip():
@@ -3044,7 +3044,7 @@ class AgentCore:
             # Capture the originating context (issue #71): the agent that
             # scheduled this and the chat it was scheduled in, so the scheduler
             # runs it as that agent and delivers back to the same chat. Deliver
-            # from the same bot that received the request (a agent bot answers
+            # from the same bot that received the request (an agent bot answers
             # as itself); non-telegram origins (e.g. the scheduler itself) keep
             # the explicit/default delivery channel.
             origin = (request_state or {}).get("origin") or {}

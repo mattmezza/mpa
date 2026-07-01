@@ -38,7 +38,7 @@ channels:
 - **Inline keyboards** — used for permission approval flow (Approve / Edit / Deny)
 - **User ID whitelist** — only allowed users can interact with the bot
 - **Forum topics** (opt-in) — with `topics_enabled`, each topic in a group becomes its own context with its own bound agent; see [Per-chat agents](/docs/agents#per-chat-agents)
-- **Bot-per-agent** (opt-in) — give a agent its own bot token and it becomes a separate Telegram contact, running alongside the default bot in the same process; see below
+- **Bot-per-agent** (opt-in) — give an agent its own bot token and it becomes a separate Telegram contact, running alongside the default bot in the same process; see below
 - **Group rooms** — several agent-bots share one group sanely: each replies only when addressed, ignores other bots, and tags who said what; see below
 
 ### Bot-per-agent
@@ -78,7 +78,7 @@ agent-bots. In a group or supergroup each bot then:
 - **ignores other bots** — another bot's messages are recorded for context but never
   trigger a reply, so two assistants can't loop. Set `ignore_bots: false` to allow it.
 - **tags every speaker** — each message a bot sees is recorded with a `[from <author>]`
-  prefix (`(bot)` for bots), so a agent is never confused about who said what in the
+  prefix (`(bot)` for bots), so an agent is never confused about who said what in the
   shared history. All participants share one conversation per bot (keyed by the group,
   not the sender).
 
