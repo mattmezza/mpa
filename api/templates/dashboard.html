@@ -134,17 +134,13 @@
             @click="select('secrets')">
       Secrets
     </button>
-    <button class="tab-link" :class="tab === 'admin' && 'tab-link-active'"
-            @click="select('admin')">
-      Admin
-    </button>
-    <button class="tab-link" :class="tab === 'logs' && 'tab-link-active'"
-            @click="select('logs')">
-      Logs
-    </button>
     <button class="tab-link" :class="tab === 'inspect' && 'tab-link-active'"
             @click="select('inspect')">
       Inspect
+    </button>
+    <button class="tab-link" :class="tab === 'admin' && 'tab-link-active'"
+            @click="select('admin')">
+      Admin
     </button>
   </div>
 
@@ -710,15 +706,23 @@
       email: '/partials/email',
       secrets: '/partials/secrets',
       admin: '/partials/admin',
-      logs: '/partials/logs',
-      inspect: '/partials/inspect'
+      inspect: '/partials/inspect-tabs'
     };
 
     return {
       tab: null,
       init() {
         const params = new URLSearchParams(window.location.search);
-        const urlTab = params.get('tab');
+        let urlTab = params.get('tab');
+        // Legacy: the standalone Logs tab is now Inspect -> Logs. Redirect old
+        // ?tab=logs links to the Inspect wrapper with the Logs sub-tab active.
+        if (urlTab === 'logs') {
+          const u = new URL(window.location.href);
+          u.searchParams.set('tab', 'inspect');
+          u.searchParams.set('inspectsub', 'logs');
+          history.replaceState(history.state, '', u);
+          urlTab = 'inspect';
+        }
         const initialTab = (urlTab && tabs[urlTab]) ? urlTab : 'identity';
         this.tab = initialTab;
         if (!urlTab) {

@@ -341,6 +341,16 @@ class TestVoicePreview:
         # The vault ref is left untouched (not overwritten with an empty token).
         assert store._data["channels.telegram.bot_token"] == "${vault:TELEGRAM_BOT_TOKEN}"
 
+    def test_inspect_tabs_wrapper(self):
+        # Inspect tab wraps Context + Logs sub-tabs, lazy-loaded via htmx, with
+        # the active sub-tab mirrored in the URL (?inspectsub=).
+        client = _client(setup_complete=True)
+        resp = client.get("/partials/inspect-tabs", headers=AUTH)
+        assert resp.status_code == 200
+        assert "inspectTabs()" in resp.text
+        assert "select('context')" in resp.text and "select('logs')" in resp.text
+        assert 'id="inspect-sub"' in resp.text
+
     def test_logs_partial(self):
         client = _client(setup_complete=True)
         resp = client.get("/partials/logs", headers=AUTH)
@@ -429,6 +439,7 @@ class TestVoicePreview:
             "/partials/history",
             "/partials/permissions",
             "/partials/admin",
+            "/partials/inspect-tabs",
             "/partials/logs",
             "/partials/logs-content",
         ]:

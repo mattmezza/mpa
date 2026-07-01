@@ -3113,6 +3113,15 @@ def create_admin_app(
             c["last_active_h"] = _humanize_ts(c.get("last_active", ""), now, tz)
         return _render_partial("partials/inspect.html", chats=chats)
 
+    @app.get("/partials/inspect-tabs", dependencies=[Depends(auth)])
+    async def partial_inspect_tabs() -> HTMLResponse:
+        """Inspect tab wrapper — Context (payload inspector) + Logs sub-tabs.
+
+        Thin shell; each sub-tab lazy-loads its own partial (/partials/inspect
+        and /partials/logs) via htmx so Logs polling only runs while shown.
+        """
+        return _render_partial("partials/inspect_tabs.html")
+
     @app.get("/partials/inspect", dependencies=[Depends(auth)])
     async def partial_inspect() -> HTMLResponse:
         """Inspect tab partial — active contexts (most-recently-active first) and

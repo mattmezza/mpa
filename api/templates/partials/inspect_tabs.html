@@ -1,0 +1,12 @@
+{# Inspect tab wrapper: Context | Logs sub-tabs. Each sub-tab lazy-loads its
+   own partial via htmx (so Logs polling only runs while Logs is shown). The
+   active sub-tab is mirrored in the URL as ?inspectsub= for copy-pasteable links. #}
+<div x-data="inspectTabs()" x-init="init()">
+  <div class="flex border-b border-border mb-4 overflow-x-auto">
+    <button type="button" class="tab-link" :class="sub === 'context' && 'tab-link-active'" @click="select('context')">Context</button>
+    <button type="button" class="tab-link" :class="sub === 'logs' && 'tab-link-active'" @click="select('logs')">Logs</button>
+  </div>
+  <div id="inspect-sub">
+    <span class="text-muted text-xs">Loading...</span>
+  </div>
+</div>

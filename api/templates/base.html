@@ -1191,6 +1191,49 @@
     }
     window.emailTab = emailTab;
 
+    // Inspect tab wrapper: Context | Logs sub-tabs, each lazy-loaded via htmx.
+    // Mirrors the active sub-tab in the URL (?inspectsub=) like the top-level
+    // ?tab= param, so links are copy-pasteable.
+    function inspectTabs() {
+      const subs = { context: '/partials/inspect', logs: '/partials/logs' };
+      const allowed = Object.keys(subs);
+      return {
+        sub: null,
+        init() {
+          let initial = 'context';
+          try {
+            const q = new URLSearchParams(window.location.search).get('inspectsub');
+            if (allowed.includes(q)) { initial = q; }
+            else {
+              const ls = localStorage.getItem('inspect_sub');
+              if (allowed.includes(ls)) { initial = ls; }
+            }
+          } catch (e) {}
+          this.sub = initial;
+          this._syncUrl(initial);
+          this.$nextTick(() => this._load(initial));
+        },
+        select(name) {
+          if (this.sub === name) { return; }
+          this.sub = name;
+          try { localStorage.setItem('inspect_sub', name); } catch (e) {}
+          this._syncUrl(name);
+          this._load(name);
+        },
+        _syncUrl(name) {
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('inspectsub', name);
+            history.replaceState(history.state, '', url);
+          } catch (e) {}
+        },
+        _load(name) {
+          if (window.htmx) { htmx.ajax('GET', subs[name], {target: '#inspect-sub', swap: 'innerHTML'}); }
+        }
+      };
+    }
+    window.inspectTabs = inspectTabs;
+
     // Global: handle 401 by redirecting to auth gate
     document.body.addEventListener('htmx:responseError', function(e) {
       if (e.detail.xhr.status === 401) {
