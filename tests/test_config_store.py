@@ -55,6 +55,25 @@ async def test_embedding_config_roundtrips_to_nested_model(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_seed_preserves_channel_telegram_keys(tmp_path) -> None:
+    # #133: `Config` no longer models `channels`, so Config validation would drop
+    # config.yml's channels.telegram.* — but they must still seed the store (the
+    # one-time seed for the default agent's bot). Regression guard for that path.
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "agent:\n  name: Test\n"
+        "channels:\n"
+        "  telegram:\n"
+        "    bot_token: '123:ABC'\n"
+        "    allowed_user_ids: '111,222'\n"
+    )
+    store = ConfigStore(db_path=str(tmp_path / "config.db"))
+    await store.seed_if_empty(str(cfg))
+    assert await store.get("channels.telegram.bot_token") == "123:ABC"
+    assert await store.get("channels.telegram.allowed_user_ids") == "111,222"
+
+
+@pytest.mark.asyncio
 async def test_set_get_delete(tmp_path) -> None:
     store = ConfigStore(db_path=str(tmp_path / "config.db"))
 

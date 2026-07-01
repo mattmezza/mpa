@@ -213,15 +213,30 @@ async def _migrate_telegram_to_default_agent(config_store, agent) -> None:
             {"enabled": True, "reply_when_addressed_only": addressed, "ignore_bots": ignore_bots}
         )
 
+    # ``token_pending`` stays true until the staged token is either folded onto the
+    # default agent or found redundant — while it is pending we must NOT clear the
+    # staged keys, or the token would be lost (no default yet, or an unresolved
+    # vault ref). A later boot (default created / vault unsealed) then retries.
+    token_pending = bool(staged_token)
     default = await agent.agents.get_default()
     if default is not None:
         changed = False
-        if staged_token and not default.bot_token:
+        if staged_token and default.bot_token:
+            token_pending = False  # default already has its own bot — staged one is redundant
+        elif staged_token:
             # A vaulted token (${vault:NAME}) is resolved before storing — per-agent
             # bot tokens are used verbatim at poll time (no config-pipeline resolve).
-            default.bot_token = resolve_vault_vars(staged_token, _secret_store.infra_resolve)
-            default.allowed_user_ids = _as_int_list(staged_users)
-            changed = True
+            resolved = resolve_vault_vars(staged_token, _secret_store.infra_resolve)
+            if "${vault:" in resolved:
+                log.warning(
+                    "Staged Telegram bot token did not resolve — leaving it for a "
+                    "later boot once the vault is unsealed (#133)"
+                )
+            else:
+                default.bot_token = resolved
+                default.allowed_user_ids = _as_int_list(staged_users)
+                changed = True
+                token_pending = False
         if group_chat and not default.group_chat:
             default.group_chat = group_chat
             changed = True
@@ -236,16 +251,19 @@ async def _migrate_telegram_to_default_agent(config_store, agent) -> None:
                 ag.group_chat = group_chat
                 await agent.agents.upsert(ag)
 
-    for key in (
-        "channels.telegram.enabled",
-        "channels.telegram.bot_token",
-        "channels.telegram.allowed_user_ids",
-        "channels.telegram.topics_enabled",
-        "channels.telegram.group_chat.enabled",
-        "channels.telegram.group_chat.reply_when_addressed_only",
-        "channels.telegram.group_chat.ignore_bots",
-    ):
-        await config_store.delete(key)
+    # Clear the staged keys only once the token has been consumed (folded in, found
+    # redundant, or never present) — otherwise leave them for a later boot to retry.
+    if not token_pending:
+        for key in (
+            "channels.telegram.enabled",
+            "channels.telegram.bot_token",
+            "channels.telegram.allowed_user_ids",
+            "channels.telegram.topics_enabled",
+            "channels.telegram.group_chat.enabled",
+            "channels.telegram.group_chat.reply_when_addressed_only",
+            "channels.telegram.group_chat.ignore_bots",
+        ):
+            await config_store.delete(key)
 
 
 async def _stop_telegram_bots(agent) -> None:
