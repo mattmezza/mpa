@@ -108,7 +108,9 @@ The agent can now manage GitHub — create issues, check notifications, review P
 
 ### Authenticating: PAT or GitHub App
 
-Enable `gh` under **Settings → Tools → GitHub CLI (gh)** and pick an auth mode:
+Enable `gh` under **Settings → Tools → GitHub CLI (gh)** and pick an auth mode. The choice
+is stored explicitly, so a private key left in the config from an earlier experiment can't
+silently override a PAT you later select:
 
 - **Personal Access Token** — paste a token. Simple, but every action appears under
   *your* GitHub account and scopes are coarse.
@@ -123,11 +125,15 @@ Enable `gh` under **Settings → Tools → GitHub CLI (gh)** and pick an auth mo
   stays as a fallback. The **Test connection** button confirms the identity and lists the
   repos the installation can reach.
 
-Per-persona: give a persona its own GitHub identity (its own PAT, a shared vault secret, or
-the App bot) in the **Personae** editor under *Tool identities*, and optionally an **allowed
-repos** list — a best-effort `--repo` gate on top of the app installation's own repo
-selection (which is the real, server-enforced boundary). Subagents inherit that repo scope
-and can only narrow it, never widen it.
+Per-persona: in the **Personae** editor under *Tool identities*, choose each persona's
+**GitHub identity** explicitly — **Personal Access Token** (its own token or a reused vault
+secret) or **GitHub App**. In App mode a persona can carry its **own** app (App ID +
+Installation ID + a vault-referenced PEM) and run as a distinct `<app>[bot]`, or leave those
+blank to use the system-wide App bot. So you can run **multiple apps — one per persona** —
+freely mixed with PAT personae; a persona never borrows the owner's PAT. Optionally add an
+**allowed repos** list — a best-effort `--repo` gate on top of the app installation's own
+repo selection (the real, server-enforced boundary). Subagents inherit that repo scope and
+can only narrow it, never widen it.
 
 ## Writing effective skill files
 

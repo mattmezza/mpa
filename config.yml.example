@@ -170,10 +170,14 @@ tools:
   #  - GitHub App (#111): set app_id + installation_id + private_key. A short-lived
   #    installation token is minted and used as GH_TOKEN, so `gh` acts as the App's
   #    bot identity (<app>[bot]) with fine-grained per-repo permissions and its own
-  #    rate limit. The App takes precedence; the PAT stays as a fallback. Register at
-  #    github.com/settings/apps/new, install it on your repos, then fill these in.
+  #    rate limit. Register at github.com/settings/apps/new, install it on your
+  #    repos, then fill these in.
+  #  `auth` makes the choice explicit: "app" (App, PAT only as mint-failure
+  #  fallback), "pat" (force PAT even if App fields linger), "" (infer). Personae
+  #  can each pick their own identity — even their own App — see docs/personae.
   gh:
     enabled: false
+    auth: ""                                      # "" (infer) | "pat" | "app"
     token: "${vault:GH_TOKEN}"                    # PAT (optional fallback)
     app_id: ""                                    # GitHub App ID (non-secret)
     installation_id: ""                           # Installation ID (non-secret)

@@ -114,19 +114,31 @@ class ToolSpec:
     prompt: Callable[[Config], str]
 
 
+def _gh_prefers_app(gh) -> bool:
+    """Whether the system default should use the GitHub App (#111).
+
+    Explicit ``auth`` wins: ``"app"`` → App, ``"pat"`` → never App (even if App
+    fields linger in config). ``""`` infers from whether the App fields are set.
+    """
+    ready = bool(gh.app_id and gh.installation_id and gh.private_key)
+    if not ready:
+        return False
+    return (gh.auth or "").strip().lower() != "pat"
+
+
 def _gh_env(config: Config) -> dict[str, str]:
     gh = config.tools.gh
     if not gh.enabled:
         return {}
-    # GitHub App takes precedence over the PAT (#111): mint a short-lived
-    # installation token so `gh` acts as the bot identity with its own rate limit.
-    if gh.app_id and gh.installation_id and gh.private_key:
+    # GitHub App takes precedence over the PAT (#111) unless auth is forced to
+    # "pat": mint a short-lived installation token so `gh` acts as the bot.
+    if _gh_prefers_app(gh):
         from core import github_app
 
         token = github_app.installation_token(gh.app_id, gh.installation_id, gh.private_key)
         if token:
             return {"GH_TOKEN": token}
-        # App configured but the mint failed → fall back to the PAT if present.
+        # App selected but the mint failed → fall back to the PAT if present.
     if gh.token:
         # `gh` reads GH_TOKEN (preferred) / GITHUB_TOKEN for non-interactive auth.
         return {"GH_TOKEN": gh.token}
@@ -134,8 +146,68 @@ def _gh_env(config: Config) -> dict[str, str]:
 
 
 def _gh_app_configured(config: Config) -> bool:
+    """Whether the system App can be a shared bot for personae (respects auth)."""
     gh = config.tools.gh
-    return bool(gh.enabled and gh.app_id and gh.installation_id and gh.private_key)
+    return bool(gh.enabled) and _gh_prefers_app(gh)
+
+
+def _persona_app_token(gh: dict, resolve_secret: Callable[[str], str | None]) -> str | None:
+    """Mint a persona's OWN GitHub App installation token, or ``None`` (#111).
+
+    ``app_id`` + ``installation_id`` are non-secret; the PEM is referenced by
+    ``private_key_secret`` (an infra-vault name) so it is never stored in the
+    persona doc — same posture as ``token_secret`` for PATs.
+    """
+    app_id = str(gh.get("app_id") or "").strip()
+    installation_id = str(gh.get("installation_id") or "").strip()
+    key_secret = str(gh.get("private_key_secret") or "").strip()
+    if not (app_id and installation_id and key_secret):
+        return None
+    pem = resolve_secret(key_secret)
+    if not pem:
+        return None
+    from core import github_app
+
+    return github_app.installation_token(app_id, installation_id, pem)
+
+
+def _persona_gh_token(
+    gh: dict,
+    persona_name: str,
+    config: Config,
+    resolve_secret: Callable[[str], str | None],
+) -> str | None:
+    """Resolve a persona's ``GH_TOKEN`` honoring its explicit auth mode (#111).
+
+    * ``auth="pat"`` → its own PAT (``token_secret`` or ``GH_TOKEN_<slug>``); it
+      never borrows the App.
+    * ``auth="app"`` → its own GitHub App if configured, else the shared *system*
+      App bot.
+    * ``auth=""`` (legacy/inferred) → PAT if it has one, else own App, else the
+      system App bot.
+
+    A persona NEVER falls back to the owner's PAT (#93 no-borrow): only its own
+    credentials or the App bot (which is not the owner) are ever used.
+    """
+    auth = (gh.get("auth") or "").strip().lower()
+
+    def own_pat() -> str | None:
+        name = (gh.get("token_secret") or "").strip() or gh_token_secret_name(persona_name)
+        return resolve_secret(name)
+
+    def system_app() -> str | None:
+        if not _gh_app_configured(config):
+            return None
+        from core import github_app
+
+        c = config.tools.gh
+        return github_app.installation_token(c.app_id, c.installation_id, c.private_key)
+
+    if auth == "pat":
+        return own_pat()
+    if auth == "app":
+        return _persona_app_token(gh, resolve_secret) or system_app()
+    return own_pat() or _persona_app_token(gh, resolve_secret) or system_app()
 
 
 def _whatsapp_env(config: Config) -> dict[str, str]:
@@ -369,22 +441,7 @@ def effective_tool_env(
         # Persona has an explicit gh policy → never inherit the owner's token.
         env.pop("GH_TOKEN", None)
         if gh.get("enabled") and config.tools.gh.enabled:
-            # ``token_secret`` lets a persona reuse an existing infra-vault secret
-            # (e.g. the system GH_TOKEN, or a shared PAT) instead of storing its own
-            # copy; otherwise its own namespaced token is used (#93).
-            name = (gh.get("token_secret") or "").strip() or gh_token_secret_name(persona.name)
-            token = resolve_secret(name)
-            if not token and _gh_app_configured(config):
-                # No own PAT, but a GitHub App is configured → use the shared bot
-                # identity (#111). Mint it directly (App-or-nothing) rather than via
-                # _gh_env: a persona must NEVER fall back to the owner's PAT, which
-                # is exactly what #93's no-borrow rule prevents.
-                from core import github_app
-
-                gh_cfg = config.tools.gh
-                token = github_app.installation_token(
-                    gh_cfg.app_id, gh_cfg.installation_id, gh_cfg.private_key
-                )
+            token = _persona_gh_token(gh, persona.name, config, resolve_secret)
             if token:
                 env["GH_TOKEN"] = token
 
@@ -449,9 +506,49 @@ if __name__ == "__main__":
     app_cfg.tools.gh.private_key = "PEM"
     import core.github_app as _ga
 
-    _real_it, _ga.installation_token = _ga.installation_token, lambda *_a: "bot-token"
+    # Tag the minted token with the app_id so we can tell own-App from system-App.
+    _real_it = _ga.installation_token
+    _ga.installation_token = lambda app_id, *_a: f"app:{app_id}"
     try:
-        assert effective_tool_env(app_cfg, atlas, resolve)["GH_TOKEN"] == "bot-token"
+        # Legacy (no auth): no own PAT → shared system App bot (app 42).
+        assert effective_tool_env(app_cfg, atlas, resolve)["GH_TOKEN"] == "app:42"
+
+        # Explicit auth="pat" → own PAT only, NEVER the App (even if App fields set).
+        pat_only = Persona(
+            name="hopper", tool_config={"gh": {"enabled": True, "auth": "pat", "app_id": "99"}}
+        )
+        assert effective_tool_env(app_cfg, pat_only, resolve)["GH_TOKEN"] == "hopper-token"
+        pat_none = Persona(name="none", tool_config={"gh": {"enabled": True, "auth": "pat"}})
+        assert "GH_TOKEN" not in effective_tool_env(app_cfg, pat_none, resolve)
+
+        # Persona's OWN GitHub App (multiple apps) → its own bot (app 500), not 42.
+        own_app = Persona(
+            name="coder",
+            tool_config={
+                "gh": {
+                    "enabled": True,
+                    "auth": "app",
+                    "app_id": "500",
+                    "installation_id": "9",
+                    "private_key_secret": "CODER_APP_KEY",
+                }
+            },
+        )
+        vault["CODER_APP_KEY"] = "coder-pem"
+        assert effective_tool_env(app_cfg, own_app, resolve)["GH_TOKEN"] == "app:500"
+
+        # auth="app" but no own App creds → falls back to the shared system App bot.
+        app_shared = Persona(name="w", tool_config={"gh": {"enabled": True, "auth": "app"}})
+        assert effective_tool_env(app_cfg, app_shared, resolve)["GH_TOKEN"] == "app:42"
+
+        # System auth forced to "pat" → the App bot is NOT offered to personae.
+        pat_sys = Config()
+        pat_sys.tools.gh.enabled = True
+        pat_sys.tools.gh.auth = "pat"
+        pat_sys.tools.gh.app_id = "42"
+        pat_sys.tools.gh.installation_id = "7"
+        pat_sys.tools.gh.private_key = "PEM"
+        assert "GH_TOKEN" not in effective_tool_env(pat_sys, atlas, resolve)
     finally:
         _ga.installation_token = _real_it
 

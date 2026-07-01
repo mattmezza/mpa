@@ -272,6 +272,9 @@ def test_persona_editor_offers_vault_token_source(tmp_path) -> None:
     assert r.status_code == 200
     assert "Token source" in r.text
     assert "SHARED_PAT" in r.text  # existing infra secret offered in the dropdown
+    # Explicit PAT/App identity selector + per-persona App fields (#111).
+    assert "GitHub identity" in r.text
+    assert "Installation ID" in r.text
 
 
 def test_activate_unknown_persona_404(tmp_path) -> None:
