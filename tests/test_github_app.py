@@ -111,6 +111,26 @@ def test_repo_gate_blocks_only_disallowed_repo_flags() -> None:
     assert github_repo_violation(open_p, "gh pr view 1 --repo any/thing") is None
 
 
+def test_repo_gate_is_quote_glue_tolerant_and_gh_scoped() -> None:
+    coder = Persona(name="coder", tool_config={"gh": {"enabled": True, "repos": ["me/mpa"]}})
+    # Quoting / `=` / glued `-R` must not bypass the gate.
+    assert github_repo_violation(coder, 'gh pr view 1 --repo "me/evil"') == "me/evil"
+    assert github_repo_violation(coder, "gh pr view 1 --repo='me/evil'") == "me/evil"
+    assert github_repo_violation(coder, "gh pr view 1 -Rme/evil") == "me/evil"
+    assert github_repo_violation(coder, "gh pr view 1 --repository me/evil") == "me/evil"
+    # Non-gh commands aren't repo-gated (no false-block on recursive flags).
+    assert github_repo_violation(coder, "grep -R foo/bar .") is None
+
+
+def test_repo_gate_empty_allowlist_blocks_everything() -> None:
+    # A present-but-empty allowlist (disjoint-narrow result) = allow nothing.
+    sub = Persona(name="sub", tool_config={"gh": {"enabled": True, "repos": []}})
+    assert github_repo_violation(sub, "gh pr view 1 --repo me/mpa") == "me/mpa"
+    # Absent repos key = unrestricted (distinct from empty list).
+    plain = Persona(name="plain", tool_config={"gh": {"enabled": True}})
+    assert github_repo_violation(plain, "gh pr view 1 --repo me/mpa") is None
+
+
 def test_narrow_gh_repos_never_widens() -> None:
     parent = Persona(name="p", tool_config={"gh": {"enabled": True, "repos": ["a/x", "a/y"]}})
     # Child asks for a repo the parent lacks → intersection drops it.
@@ -121,6 +141,16 @@ def test_narrow_gh_repos_never_widens() -> None:
     # Parent unrestricted → child keeps its own list (self-narrowing is fine).
     open_parent = Persona(name="o", tool_config={"gh": {"enabled": True}})
     assert _narrow_gh_repos(open_parent, child_tc)["gh"]["repos"] == ["a/y", "a/z"]
+
+
+def test_narrow_gh_repos_disjoint_blocks_not_widens() -> None:
+    # The escalation bug: disjoint child ∩ parent = [] must mean "block all",
+    # NOT "unrestricted". Narrowing yields an empty list, and the gate blocks.
+    parent = Persona(name="p", tool_config={"gh": {"enabled": True, "repos": ["me/a"]}})
+    narrowed = _narrow_gh_repos(parent, {"gh": {"enabled": True, "repos": ["me/evil"]}})
+    assert narrowed["gh"]["repos"] == []
+    child = Persona(name="c", tool_config=narrowed)
+    assert github_repo_violation(child, "gh issue create --repo other/xyz") == "other/xyz"
 
 
 # -- Admin UI wiring --------------------------------------------------------

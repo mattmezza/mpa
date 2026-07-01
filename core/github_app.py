@@ -68,10 +68,13 @@ def _token_headers(token: str) -> dict[str, str]:
 def _mint(app_id: str, installation_id: str, private_key_pem: str, now: int) -> tuple[str, float]:
     """Exchange a fresh App JWT for an installation token. Returns (token, expiry_epoch)."""
     jwt = _app_jwt(app_id, private_key_pem, now)
+    # Short timeout: this runs sync on the async loop (the injection point is
+    # sync), so a hanging GitHub API must not stall the loop for long. Rare —
+    # only on a cache miss/refresh, ~once/hour per installation.
     resp = httpx.post(
         f"{_API}/app/installations/{installation_id}/access_tokens",
         headers=_jwt_headers(jwt),
-        timeout=15,
+        timeout=10,
     )
     resp.raise_for_status()
     data = resp.json()

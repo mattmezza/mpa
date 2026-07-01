@@ -135,7 +135,7 @@ def _gh_env(config: Config) -> dict[str, str]:
 
 def _gh_app_configured(config: Config) -> bool:
     gh = config.tools.gh
-    return bool(gh.app_id and gh.installation_id and gh.private_key)
+    return bool(gh.enabled and gh.app_id and gh.installation_id and gh.private_key)
 
 
 def _whatsapp_env(config: Config) -> dict[str, str]:
@@ -269,16 +269,24 @@ def gh_token_secret_name(persona_name: str) -> str:
     return f"GH_TOKEN_{slug}"
 
 
-# Matches the explicit `--repo owner/name` / `-R owner/name` target flag.
-_GH_REPO_FLAG_RE = re.compile(r"(?:--repo[=\s]+|-R[=\s]+)([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)")
+# `gh` invoked as a word (so `grep -R foo/bar` etc. aren't repo-gated).
+_GH_INVOKED_RE = re.compile(r"\bgh\b")
+# The `--repo`/`--repository`/`-R` target flag, tolerant of `=`, quotes, and the
+# glued short form (`-Rowner/name`) — all forms `gh` itself accepts.
+_GH_REPO_FLAG_RE = re.compile(
+    r"""(?:--repo(?:sitory)?[=\s]+|-R\s*)["']?([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)"""
+)
 
 
 def github_repo_violation(persona: Persona | None, command: str) -> str | None:
     """First GitHub repo the persona is NOT allowed to touch, or ``None`` (#111).
 
-    Best-effort per-persona repo allowlist from ``tool_config["gh"]["repos"]``
-    (empty/absent = unrestricted). Only the explicit ``--repo owner/name`` /
-    ``-R owner/name`` flag is inspected — the documented way to target a repo.
+    Best-effort per-persona repo allowlist from ``tool_config["gh"]["repos"]``.
+    Absent ``repos`` key = unrestricted; a *present* list restricts to it, and a
+    present-but-empty list (e.g. a subagent whose scope was narrowed to a set
+    disjoint from its parent's) allows **nothing** — it blocks every ``--repo``
+    target. Only ``gh`` invocations are gated, and only the explicit
+    ``--repo``/``-R`` flag is inspected (its various quoted/glued forms).
     ponytail: the HARD boundary is the GitHub App installation's own repo
     selection (server-enforced); this is defense-in-depth, so it deliberately
     does NOT parse cwd checkouts, `gh api` paths, or git remotes — a parser for
@@ -288,9 +296,12 @@ def github_repo_violation(persona: Persona | None, command: str) -> str | None:
     if persona is None or not command:
         return None
     gh = persona.tool_setting("gh") or {}
-    allowed = {r.strip().lower() for r in (gh.get("repos") or []) if r and r.strip()}
-    if not allowed:
-        return None
+    repos = gh.get("repos")
+    if repos is None:
+        return None  # no allowlist → unrestricted
+    allowed = {str(r).strip().lower() for r in repos if r and str(r).strip()}
+    if not _GH_INVOKED_RE.search(command):
+        return None  # not a gh command → nothing to gate here
     for repo in _GH_REPO_FLAG_RE.findall(command):
         if repo.lower() not in allowed:
             return repo
@@ -450,6 +461,15 @@ if __name__ == "__main__":
     assert github_repo_violation(scoped, "gh pr view 1 -R me/other") == "me/other"
     assert github_repo_violation(scoped, "gh api user") is None  # no --repo → can't tell → allow
     assert github_repo_violation(plain, "gh pr view 1 --repo any/thing") is None  # no allowlist
+    # Quote/glue-tolerant + gh-scoped (no false-block on grep -R).
+    assert github_repo_violation(scoped, 'gh pr view 1 --repo "me/evil"') == "me/evil"
+    assert github_repo_violation(scoped, "gh pr view 1 -Rme/evil") == "me/evil"
+    assert github_repo_violation(scoped, "gh pr view 1 --repo=me/mpa") is None
+    assert github_repo_violation(scoped, "grep -R foo/bar .") is None  # not a gh command
+    # Present-but-empty allowlist = block every --repo (disjoint-narrow result).
+    blocked = Persona(name="sub", tool_config={"gh": {"enabled": True, "repos": []}})
+    assert github_repo_violation(blocked, "gh pr view 1 --repo me/mpa") == "me/mpa"
+    assert github_repo_violation(blocked, "gh api user") is None  # no --repo target
 
     # Prompts: hopper sees gh + browser, with identity notes; lingua's gh is hidden.
     hp = "\n".join(active_tool_prompts(cfg, hopper))
