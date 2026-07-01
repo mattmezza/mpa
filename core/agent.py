@@ -11,7 +11,7 @@ import re
 import shlex
 import time
 import uuid
-from collections import OrderedDict, defaultdict, deque
+from collections import OrderedDict, deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -1042,18 +1042,6 @@ class AgentCore:
         # ponytail: unbounded keys if you have thousands of distinct chats;
         # prune oldest keys if that ever shows up in memory.
         self._reply_times: dict[tuple[str, str], list[float]] = {}
-        # Per-chat turn lock: serialize concurrent turns of the SAME
-        # (channel, user_id, chat_id) so their read-modify-writes on the shared
-        # history/session caches can't interleave. In a crowded group room two
-        # inbound messages arrive as separate tasks and race the silent-fold RMW
-        # (_record_inbound) and the session cache — dropping a line of context.
-        # Different chats/agents get different keys, so cross-chat concurrency is
-        # untouched. In-memory, resets on restart.
-        # ponytail: one lock per distinct chat key, never evicted — a lock is
-        # tiny; prune stale keys only if a real deployment ever shows growth.
-        self._chat_locks: defaultdict[tuple[str, str, str], asyncio.Lock] = defaultdict(
-            asyncio.Lock
-        )
 
         # Web search (Tavily)
         if config.search.enabled and config.search.api_key:
@@ -1089,7 +1077,7 @@ class AgentCore:
         cross-chat concurrency is unchanged. The turn logic lives in
         ``_process_impl``.
         """
-        async with self._chat_locks[(channel, user_id, chat_id)]:
+        async with self._chat_lock(channel, user_id, chat_id):
             return await self._process_impl(
                 message,
                 channel,
@@ -1101,6 +1089,25 @@ class AgentCore:
                 addressed=addressed,
                 message_id=message_id,
             )
+
+    def _chat_lock(self, channel: str, user_id: str, chat_id: str) -> asyncio.Lock:
+        """The turn lock for one chat key, created on first use.
+
+        Built lazily rather than in ``__init__`` so ``process()`` also works on an
+        instance created via ``object.__new__`` (the bare-agent test pattern) and
+        on any future alternate constructor — the lock map has a single owner here.
+        In-memory, resets on restart. ponytail: one lock per distinct chat key,
+        never evicted — a lock is tiny; prune stale keys only if a real deployment
+        ever shows growth.
+        """
+        locks = getattr(self, "_chat_locks", None)
+        if locks is None:
+            locks = self._chat_locks = {}
+        key = (channel, user_id, chat_id)
+        lock = locks.get(key)
+        if lock is None:
+            lock = locks[key] = asyncio.Lock()
+        return lock
 
     async def _process_impl(
         self,
