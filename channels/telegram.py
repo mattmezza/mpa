@@ -606,10 +606,16 @@ class TelegramChannel:
         await query.answer()  # Acknowledge the button press
 
         user_id = user.id
-        folded = self._fold(chat, getattr(query, "message", None))
+        message = getattr(query, "message", None)
+        folded = self._fold(chat, message)
         if folded is not None:
             self._last_chat_for_user[user_id] = folded
-        if not self._is_allowed(user_id):
+        # Same gate as an inbound turn (#129): a button press (approve/deny/cancel)
+        # is an action in this chat, so a user the resolved agent bars here can't
+        # drive it either. Resolve with the turn's own (convo_user, chat_id) keys.
+        convo_user = self._convo_user_id(chat, user_id, message)
+        chat_id = folded if folded is not None else user_id
+        if not await self._may_act(user_id, convo_user, str(chat_id)):
             return
 
         data = query.data or ""
