@@ -102,6 +102,110 @@ def test_persona_without_pat_uses_app_bot_identity(monkeypatch) -> None:
     assert env["GH_TOKEN"] == "bot-token"
 
 
+def _app_cfg() -> Config:
+    cfg = Config()
+    cfg.tools.gh.enabled = True
+    cfg.tools.gh.app_id = "42"
+    cfg.tools.gh.installation_id = "7"
+    cfg.tools.gh.private_key = "PEM"
+    return cfg
+
+
+def test_persona_own_app_beats_system_app(monkeypatch) -> None:
+    # Tag the minted token by app_id so we can tell own-App from system-App.
+    monkeypatch.setattr(github_app, "installation_token", lambda app_id, *_a: f"app:{app_id}")
+    cfg = _app_cfg()
+    vault = {"CODER_KEY": "coder-pem"}
+    coder = Persona(
+        name="coder",
+        tool_config={
+            "gh": {
+                "enabled": True,
+                "auth": "app",
+                "app_id": "500",
+                "installation_id": "9",
+                "private_key_secret": "CODER_KEY",
+            }
+        },
+    )
+    # Persona's OWN app (500) is used, not the system app (42) — multiple apps.
+    assert effective_tool_env(cfg, coder, vault.get)["GH_TOKEN"] == "app:500"
+    # auth="app" but no own creds → falls back to the shared system app bot.
+    shared = Persona(name="w", tool_config={"gh": {"enabled": True, "auth": "app"}})
+    assert effective_tool_env(cfg, shared, vault.get)["GH_TOKEN"] == "app:42"
+
+
+def test_persona_own_app_mint_failure_does_not_cross_to_system(monkeypatch) -> None:
+    # Own-app mint fails transiently → NO token, never the system bot (no silent
+    # escalation to a possibly-broader identity).
+    monkeypatch.setattr(github_app, "installation_token", lambda *_a: None)
+    cfg = _app_cfg()
+    coder = Persona(
+        name="coder",
+        tool_config={
+            "gh": {
+                "enabled": True,
+                "auth": "app",
+                "app_id": "500",
+                "installation_id": "9",
+                "private_key_secret": "CODER_KEY",
+            }
+        },
+    )
+    assert "GH_TOKEN" not in effective_tool_env(cfg, coder, {"CODER_KEY": "pem"}.get)
+
+
+def test_legacy_auth_own_app_mint_failure_does_not_cross_to_system(monkeypatch) -> None:
+    # Same no-crossover rule for the legacy auth="" path (reachable via raw YAML):
+    # own-app configured + mint fails → no token, never the system bot.
+    monkeypatch.setattr(github_app, "installation_token", lambda *_a: None)
+    cfg = _app_cfg()
+    coder = Persona(
+        name="coder",
+        tool_config={
+            "gh": {
+                "enabled": True,
+                "app_id": "500",
+                "installation_id": "9",
+                "private_key_secret": "CODER_KEY",
+            }
+        },
+    )
+    assert "GH_TOKEN" not in effective_tool_env(cfg, coder, {"CODER_KEY": "pem"}.get)
+
+
+def test_persona_auth_pat_never_uses_app(monkeypatch) -> None:
+    monkeypatch.setattr(github_app, "installation_token", lambda app_id, *_a: f"app:{app_id}")
+    cfg = _app_cfg()
+    vault = {"GH_TOKEN_p": "pat-tok"}
+    # Explicit PAT mode: own PAT is used even though App fields linger.
+    p = Persona(name="p", tool_config={"gh": {"enabled": True, "auth": "pat", "app_id": "500"}})
+    assert effective_tool_env(cfg, p, vault.get)["GH_TOKEN"] == "pat-tok"
+    # Explicit PAT with no token → nothing (never the App bot, never the owner).
+    none = Persona(name="none", tool_config={"gh": {"enabled": True, "auth": "pat"}})
+    assert "GH_TOKEN" not in effective_tool_env(cfg, none, lambda _n: None)
+
+
+def test_system_auth_pat_disables_app(monkeypatch) -> None:
+    monkeypatch.setattr(github_app, "installation_token", lambda app_id, *_a: f"app:{app_id}")
+    cfg = _app_cfg()
+    cfg.tools.gh.auth = "pat"
+    cfg.tools.gh.token = "sys-pat"
+    # _gh_env forces the PAT even though App fields are set.
+    assert _gh_env(cfg) == {"GH_TOKEN": "sys-pat"}
+    # And the App bot is not offered to personae.
+    atlas = Persona(name="atlas", tool_config={"gh": {"enabled": True}})
+    assert "GH_TOKEN" not in effective_tool_env(cfg, atlas, lambda _n: None)
+
+
+def test_gh_env_auth_app_uses_app(monkeypatch) -> None:
+    monkeypatch.setattr(github_app, "installation_token", lambda app_id, *_a: f"app:{app_id}")
+    cfg = _app_cfg()
+    cfg.tools.gh.auth = "app"
+    cfg.tools.gh.token = "sys-pat"
+    assert _gh_env(cfg) == {"GH_TOKEN": "app:42"}
+
+
 def test_repo_gate_blocks_only_disallowed_repo_flags() -> None:
     coder = Persona(name="coder", tool_config={"gh": {"enabled": True, "repos": ["me/mpa"]}})
     assert github_repo_violation(coder, "gh pr list --repo me/mpa") is None

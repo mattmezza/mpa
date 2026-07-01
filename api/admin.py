@@ -1405,6 +1405,7 @@ def create_admin_app(
         gh_token_vaulted = _is_vault_ref(gh_token)
         # GitHub App (#111) — App ID + Installation ID are non-secret; the PEM
         # private key is vault-backed like the PAT.
+        gh_auth = await config_store.get("tools.gh.auth") or ""
         gh_app_id = await config_store.get("tools.gh.app_id") or ""
         gh_installation_id = await config_store.get("tools.gh.installation_id") or ""
         gh_private_key = await config_store.get("tools.gh.private_key") or ""
@@ -1471,6 +1472,7 @@ def create_admin_app(
             whatsapp_available=wa_status.get("available") is True,
             whatsapp_authenticated=wa_status.get("authenticated") is True,
             gh_enabled=gh_enabled,
+            gh_auth=gh_auth,
             gh_token="" if gh_token_vaulted else gh_token,
             gh_token_vaulted=gh_token_vaulted,
             gh_app_id=gh_app_id,

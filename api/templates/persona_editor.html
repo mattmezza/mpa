@@ -230,30 +230,76 @@
             </template>
             <template x-if="infraAvailable">
               <div class="space-y-2">
+                {# Explicit identity: PAT vs GitHub App (#111). #}
                 <div>
-                  <label class="label">Token source</label>
-                  <select class="select input-sm" x-model="ghTokenSecret">
-                    <option value="">Type a new token…</option>
-                    <template x-for="n in infraNames" :key="n">
-                      <option :value="n" x-text="'Vault secret: ' + n"></option>
-                    </template>
+                  <label class="label">GitHub identity</label>
+                  <select class="select input-sm" x-model="ghAuth">
+                    <option value="pat">Personal Access Token</option>
+                    <option value="app">GitHub App</option>
                   </select>
                 </div>
-                {# Type a new PAT (stored as this persona's own vault token). #}
-                <div x-show="!ghTokenSecret">
-                  <input type="password" class="input-sm" autocomplete="new-password"
-                         x-model="ghToken" placeholder="ghp_… (leave blank to keep current)">
-                  <p class="text-xs text-muted mt-1">
-                    <span x-show="ghTokenSet">🔒 A token is stored for this persona — type a new one to replace it.</span>
-                    <span x-show="!ghTokenSet">Stored encrypted in the infra vault; injected as this persona's <code>GH_TOKEN</code>.</span>
-                  </p>
-                </div>
-                {# Reuse an existing vault secret — no second copy stored. #}
-                <p class="text-xs text-muted" x-show="ghTokenSecret">
-                  Reuses the vault secret <code x-text="ghTokenSecret"></code> as this persona's
-                  <code>GH_TOKEN</code> — no separate copy is stored.
-                </p>
-                {# Per-persona repo allowlist (#111). #}
+
+                {# ── PAT mode ── #}
+                <template x-if="ghAuth === 'pat'">
+                  <div class="space-y-2">
+                    <div>
+                      <label class="label">Token source</label>
+                      <select class="select input-sm" x-model="ghTokenSecret">
+                        <option value="">Type a new token…</option>
+                        <template x-for="n in infraNames" :key="n">
+                          <option :value="n" x-text="'Vault secret: ' + n"></option>
+                        </template>
+                      </select>
+                    </div>
+                    <div x-show="!ghTokenSecret">
+                      <input type="password" class="input-sm" autocomplete="new-password"
+                             x-model="ghToken" placeholder="ghp_… (leave blank to keep current)">
+                      <p class="text-xs text-muted mt-1">
+                        <span x-show="ghTokenSet">🔒 A token is stored for this persona — type a new one to replace it.</span>
+                        <span x-show="!ghTokenSet">Stored encrypted in the infra vault; injected as this persona's <code>GH_TOKEN</code>.</span>
+                      </p>
+                    </div>
+                    <p class="text-xs text-muted" x-show="ghTokenSecret">
+                      Reuses the vault secret <code x-text="ghTokenSecret"></code> as this persona's
+                      <code>GH_TOKEN</code> — no separate copy is stored.
+                    </p>
+                  </div>
+                </template>
+
+                {# ── GitHub App mode (per-persona app, #111) ── #}
+                <template x-if="ghAuth === 'app'">
+                  <div class="space-y-2">
+                    <div class="grid gap-2" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+                      <div>
+                        <label class="label">App ID</label>
+                        <input type="text" inputmode="numeric" class="input-sm"
+                               x-model="ghAppId" placeholder="123456">
+                      </div>
+                      <div>
+                        <label class="label">Installation ID</label>
+                        <input type="text" inputmode="numeric" class="input-sm"
+                               x-model="ghInstallationId" placeholder="7890123">
+                      </div>
+                    </div>
+                    <div>
+                      <label class="label">Private key</label>
+                      <select class="select input-sm" x-model="ghKeySecret">
+                        <option value="">— use the system-wide App —</option>
+                        <template x-for="n in infraNames" :key="n">
+                          <option :value="n" x-text="'Vault secret: ' + n"></option>
+                        </template>
+                      </select>
+                      <p class="text-xs text-muted mt-1">
+                        Paste this app's PEM as an infra secret in the <strong>Secrets</strong> tab,
+                        then pick it here — gives the persona its <strong>own</strong> bot identity.
+                        Leave blank (or clear App ID) to use the system-wide App bot. App ID and
+                        Installation ID are not secret.
+                      </p>
+                    </div>
+                  </div>
+                </template>
+
+                {# Per-persona repo allowlist (#111) — applies to either identity. #}
                 <div>
                   <label class="label">Allowed repos <span class="text-muted">(optional)</span></label>
                   <input type="text" class="input-sm" x-model="ghRepos"
@@ -325,6 +371,10 @@
       ghTokenSet: {{ gh_token_set|tojson }},
       ghTokenSecret: '',
       ghRepos: '',
+      ghAuth: 'pat',
+      ghAppId: '',
+      ghInstallationId: '',
+      ghKeySecret: '',
       infraAvailable: {{ infra_available|tojson }},
       infraNames: {{ infra_names|tojson }},
       modes: {},
@@ -348,8 +398,14 @@
           this.modes[k] = !e ? 'inherit' : (e.enabled ? 'on' : 'off');
           this.profiles[k] = (e && e.profile) || '';
         }
-        this.ghTokenSecret = (this.toolConfig.gh && this.toolConfig.gh.token_secret) || '';
-        this.ghRepos = ((this.toolConfig.gh && this.toolConfig.gh.repos) || []).join(', ');
+        const g = this.toolConfig.gh || {};
+        this.ghTokenSecret = g.token_secret || '';
+        this.ghRepos = (g.repos || []).join(', ');
+        this.ghAppId = g.app_id || '';
+        this.ghInstallationId = g.installation_id || '';
+        this.ghKeySecret = g.private_key_secret || '';
+        // Explicit stored mode wins; else infer from which fields are present.
+        this.ghAuth = g.auth || ((g.app_id || g.private_key_secret) ? 'app' : 'pat');
 
         // Seed the account selectors: every known account starts at 'none', then
         // existing bindings override. A binding to an account no longer in the
@@ -412,10 +468,19 @@
           if (m === 'inherit') continue;
           const e = { enabled: m === 'on' };
           if (k === 'browser' && (this.profiles[k] || '').trim()) e.profile = this.profiles[k].trim();
-          // gh: a chosen vault secret is referenced instead of storing a copy.
-          if (k === 'gh' && this.ghTokenSecret) e.token_secret = this.ghTokenSecret;
-          // gh: per-persona repo allowlist (#111). Blank = no restriction.
           if (k === 'gh') {
+            // Explicit identity (#111): PAT (own/reused token) or GitHub App
+            // (own app_id + installation_id + vault-referenced PEM).
+            e.auth = this.ghAuth;
+            if (this.ghAuth === 'app') {
+              if (this.ghAppId.trim()) e.app_id = this.ghAppId.trim();
+              if (this.ghInstallationId.trim()) e.installation_id = this.ghInstallationId.trim();
+              if (this.ghKeySecret) e.private_key_secret = this.ghKeySecret;
+            } else if (this.ghTokenSecret) {
+              // A chosen vault secret is referenced instead of storing a copy.
+              e.token_secret = this.ghTokenSecret;
+            }
+            // Per-persona repo allowlist. Blank = no restriction.
             const repos = this.ghRepos.split(',').map(s => s.trim()).filter(Boolean);
             if (repos.length) e.repos = repos;
           }

@@ -349,9 +349,14 @@ class GhToolConfig(BaseModel):
     ``gh`` acts as the App's bot identity (``<app>[bot]``) with its own
     permissions and rate limit (#111). The App takes precedence over the PAT;
     if it is not configured (or a mint fails) the PAT is used as a fallback.
+
+    ``auth`` makes that choice explicit: ``"app"`` uses the App (PAT only as a
+    mint-failure fallback), ``"pat"`` forces the PAT even if App fields linger,
+    and ``""`` infers (App if its fields are filled, else PAT) for back-compat.
     """
 
     enabled: bool = False
+    auth: str = ""  # "" (infer) | "pat" | "app"
     token: str = ""  # GitHub PAT, injected as GH_TOKEN when running `gh`
     # GitHub App (#111). app_id + installation_id are non-secret; the PEM private
     # key is the sensitive credential → keep it in the vault

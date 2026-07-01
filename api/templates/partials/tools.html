@@ -4,7 +4,8 @@
   {{ gh_token|default('', true)|tojson|forceescape }},
   {{ gh_app_id|default('', true)|tojson|forceescape }},
   {{ gh_installation_id|default('', true)|tojson|forceescape }},
-  {{ gh_private_key|default('', true)|tojson|forceescape }}
+  {{ gh_private_key|default('', true)|tojson|forceescape }},
+  {{ gh_auth|default('', true)|tojson|forceescape }}
 )">
   <div class="card">
     <h2 class="text-base mb-1">Tools</h2>
@@ -597,14 +598,15 @@
 </div>
 
 <script>
-  function toolsTab(ghEnabled, ghToken, ghAppId, ghInstallationId, ghPrivateKey) {
+  function toolsTab(ghEnabled, ghToken, ghAppId, ghInstallationId, ghPrivateKey, ghAuth) {
     return {
       ghEnabled: ghEnabled,
       ghToken: ghToken,
       ghAppId: ghAppId || '',
       ghInstallationId: ghInstallationId || '',
       ghPrivateKey: ghPrivateKey || '',
-      ghMode: ghAppId ? 'app' : 'pat',
+      // Explicit stored mode wins; fall back to inferring from App fields (legacy).
+      ghMode: ghAuth || (ghAppId ? 'app' : 'pat'),
       result: '',
       resultOk: false,
       testing: false,
@@ -612,7 +614,9 @@
       testOk: false,
       saveGh() {
         const vals = {
-          'tools.gh.enabled': String(this.ghEnabled === true || this.ghEnabled === 'true')
+          'tools.gh.enabled': String(this.ghEnabled === true || this.ghEnabled === 'true'),
+          // Persist the explicit choice so a lingering App field can't flip identity.
+          'tools.gh.auth': this.ghMode
         };
         if (this.ghMode === 'app') {
           vals['tools.gh.app_id'] = this.ghAppId.trim();
