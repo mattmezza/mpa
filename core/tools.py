@@ -151,6 +151,15 @@ def _gh_app_configured(config: Config) -> bool:
     return bool(gh.enabled) and _gh_prefers_app(gh)
 
 
+def _persona_has_own_app(gh: dict) -> bool:
+    """Whether the persona carries its OWN GitHub App creds (#111)."""
+    return bool(
+        str(gh.get("app_id") or "").strip()
+        and str(gh.get("installation_id") or "").strip()
+        and str(gh.get("private_key_secret") or "").strip()
+    )
+
+
 def _persona_app_token(gh: dict, resolve_secret: Callable[[str], str | None]) -> str | None:
     """Mint a persona's OWN GitHub App installation token, or ``None`` (#111).
 
@@ -158,11 +167,11 @@ def _persona_app_token(gh: dict, resolve_secret: Callable[[str], str | None]) ->
     ``private_key_secret`` (an infra-vault name) so it is never stored in the
     persona doc — same posture as ``token_secret`` for PATs.
     """
-    app_id = str(gh.get("app_id") or "").strip()
-    installation_id = str(gh.get("installation_id") or "").strip()
-    key_secret = str(gh.get("private_key_secret") or "").strip()
-    if not (app_id and installation_id and key_secret):
+    if not _persona_has_own_app(gh):
         return None
+    app_id = str(gh.get("app_id")).strip()
+    installation_id = str(gh.get("installation_id")).strip()
+    key_secret = str(gh.get("private_key_secret")).strip()
     pem = resolve_secret(key_secret)
     if not pem:
         return None
@@ -206,7 +215,13 @@ def _persona_gh_token(
     if auth == "pat":
         return own_pat()
     if auth == "app":
-        return _persona_app_token(gh, resolve_secret) or system_app()
+        # Own app → own app or NOTHING: never silently cross over to the system
+        # bot on a transient mint failure (that could be a different, broader
+        # identity). Only a persona that configured no own app uses the shared bot.
+        if _persona_has_own_app(gh):
+            return _persona_app_token(gh, resolve_secret)
+        return system_app()
+    # Legacy / inferred: PAT, else own app, else the shared system bot.
     return own_pat() or _persona_app_token(gh, resolve_secret) or system_app()
 
 

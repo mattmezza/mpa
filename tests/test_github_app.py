@@ -135,6 +135,26 @@ def test_persona_own_app_beats_system_app(monkeypatch) -> None:
     assert effective_tool_env(cfg, shared, vault.get)["GH_TOKEN"] == "app:42"
 
 
+def test_persona_own_app_mint_failure_does_not_cross_to_system(monkeypatch) -> None:
+    # Own-app mint fails transiently → NO token, never the system bot (no silent
+    # escalation to a possibly-broader identity).
+    monkeypatch.setattr(github_app, "installation_token", lambda *_a: None)
+    cfg = _app_cfg()
+    coder = Persona(
+        name="coder",
+        tool_config={
+            "gh": {
+                "enabled": True,
+                "auth": "app",
+                "app_id": "500",
+                "installation_id": "9",
+                "private_key_secret": "CODER_KEY",
+            }
+        },
+    )
+    assert "GH_TOKEN" not in effective_tool_env(cfg, coder, {"CODER_KEY": "pem"}.get)
+
+
 def test_persona_auth_pat_never_uses_app(monkeypatch) -> None:
     monkeypatch.setattr(github_app, "installation_token", lambda app_id, *_a: f"app:{app_id}")
     cfg = _app_cfg()
