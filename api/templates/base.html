@@ -119,7 +119,7 @@
         // Persisted so switching away and back, or a partial reload after a
         // provider save, lands on the same sub-tab.
         section: (() => {
-          const allowed = ['sysprompt', 'inference', 'providers'];
+          const allowed = ['sysprompt', 'inference', 'providers', 'history'];
           try {
             const q = new URLSearchParams(window.location.search).get('llmsub');
             if (allowed.includes(q)) return q;

@@ -1413,6 +1413,8 @@ def create_admin_app(
             default_tool_usage=DEFAULT_TOOL_USAGE_BLOCK,
             default_history_handling=DEFAULT_HISTORY_HANDLING_BLOCK,
             prompt_capture_enabled=prompt_capture_enabled,
+            # History sub-tab (included into the LLM tab) needs its config too.
+            **(await _history_ctx()),
         )
 
     def _browser_rules() -> list[dict]:
@@ -1781,29 +1783,30 @@ def create_admin_app(
         """Memory tab partial."""
         return await _render_memory_partial()
 
+    async def _history_ctx() -> dict:
+        """History + compaction config, shared by the History sub-tab of the LLM
+        tab (included there) and the standalone /partials/history route."""
+        c_enabled = await config_store.get("compaction.enabled")
+        return {
+            "mode": await config_store.get("history.mode") or "injection",
+            "max_turns": await config_store.get("history.max_turns") or "10",
+            "compaction_enabled": c_enabled if c_enabled is not None else "true",
+            "compaction_threshold_type": await config_store.get("compaction.threshold_type")
+            or "percent",
+            "compaction_threshold_percent": await config_store.get("compaction.threshold_percent")
+            or "80",
+            "compaction_threshold_tokens": await config_store.get("compaction.threshold_tokens")
+            or "150000",
+            "compaction_context_window": await config_store.get("compaction.context_window")
+            or "200000",
+            "compaction_keep_recent_turns": await config_store.get("compaction.keep_recent_turns")
+            or "4",
+        }
+
     @app.get("/partials/history", dependencies=[Depends(auth)])
     async def partial_history() -> HTMLResponse:
         """History tab partial."""
-        mode = await config_store.get("history.mode") or "injection"
-        max_turns = await config_store.get("history.max_turns") or "10"
-        c_enabled = await config_store.get("compaction.enabled")
-        c_enabled = c_enabled if c_enabled is not None else "true"
-        c_threshold_type = await config_store.get("compaction.threshold_type") or "percent"
-        c_threshold_percent = await config_store.get("compaction.threshold_percent") or "80"
-        c_threshold_tokens = await config_store.get("compaction.threshold_tokens") or "150000"
-        c_context_window = await config_store.get("compaction.context_window") or "200000"
-        c_keep_recent_turns = await config_store.get("compaction.keep_recent_turns") or "4"
-        return _render_partial(
-            "partials/history.html",
-            mode=mode,
-            max_turns=max_turns,
-            compaction_enabled=c_enabled,
-            compaction_threshold_type=c_threshold_type,
-            compaction_threshold_percent=c_threshold_percent,
-            compaction_threshold_tokens=c_threshold_tokens,
-            compaction_context_window=c_context_window,
-            compaction_keep_recent_turns=c_keep_recent_turns,
-        )
+        return _render_partial("partials/history.html", **(await _history_ctx()))
 
     @app.get("/partials/logs", dependencies=[Depends(auth)])
     async def partial_logs() -> HTMLResponse:

@@ -80,6 +80,7 @@
     <button type="button" class="tab-link" :class="section === 'sysprompt' && 'tab-link-active'" @click="setSection('sysprompt')">SysPrompt</button>
     <button type="button" class="tab-link" :class="section === 'inference' && 'tab-link-active'" @click="setSection('inference')">Inference</button>
     <button type="button" class="tab-link" :class="section === 'providers' && 'tab-link-active'" @click="setSection('providers')">Providers</button>
+    <button type="button" class="tab-link" :class="section === 'history' && 'tab-link-active'" @click="setSection('history')">History</button>
   </div>
 
   <div class="space-y-6" x-show="section === 'sysprompt'">
@@ -596,7 +597,7 @@
 
   <div class="card">
     <h2 class="text-base mb-1">History Compaction</h2>
-    <p class="text-muted text-xs mb-4">Model used to summarize older conversation turns when a session's context grows large. Enable compaction and set the trigger threshold in the <strong>History</strong> tab.</p>
+    <p class="text-muted text-xs mb-4">Model used to summarize older conversation turns when a session's context grows large. Enable compaction and set the trigger threshold in the <button type="button" class="text-accent hover:underline" @click="setSection('history')">History</button> sub-tab.</p>
 
     <form class="space-y-4" @submit.prevent>
       <div>
@@ -1029,4 +1030,8 @@
     </div>
   </div>
   </div>{# /providers #}
+
+  <div class="space-y-6" x-show="section === 'history'" style="display:none">
+    {% include 'partials/history.html' %}
+  </div>{# /history #}
 </div>
