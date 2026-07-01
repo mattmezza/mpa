@@ -8,7 +8,7 @@
     </button>
     <span class="text-muted text-xs">{{ jobs|length }} job{{ 's' if jobs|length != 1 else '' }}</span>
     {% if job_agents %}
-    <select class="input-sm" style="max-width:200px" x-model="agentFilter"
+    <select id="jobs-agent-filter" class="input-sm" style="max-width:200px" x-model="agentFilter"
             title="Filter jobs by the agent they run as">
       <option value="">All agents</option>
       {% for p in job_agents %}
@@ -211,7 +211,14 @@
 function jobsTab() {
   return {
     editing: false,
-    agentFilter: '',
+    // Persist filter so it survives HTMX re-renders (Refresh, Show completed, add/edit/delete).
+    agentFilter: sessionStorage.getItem('jobsAgentFilter') || '',
+    init() {
+      // Drop a stale filter whose agent no longer has any listed job.
+      const opts = [...this.$el.querySelectorAll('#jobs-agent-filter option')].map(o => o.value);
+      if (this.agentFilter && !opts.includes(this.agentFilter)) this.agentFilter = '';
+      this.$watch('agentFilter', v => sessionStorage.setItem('jobsAgentFilter', v));
+    },
     form: {
       id: '',
       schedule: 'cron',
