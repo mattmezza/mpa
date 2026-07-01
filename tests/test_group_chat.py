@@ -246,6 +246,9 @@ def _channel(
     ch = TelegramChannel(cfg, MagicMock(), channel_name=channel_name)
     ch._bot_id = 999
     ch._bot_username = "coachbot"
+    # Per-chat trigger/DM gate (#129) is async and defaults permissive here; the
+    # tests that exercise it set their own return value.
+    ch.agent.may_act_in_chat = AsyncMock(return_value=True)
     return ch
 
 
