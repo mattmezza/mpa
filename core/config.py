@@ -333,10 +333,23 @@ class PromptConfig(BaseModel):
 
 
 class GhToolConfig(BaseModel):
-    """GitHub CLI (`gh`) tool — auth via a Personal Access Token."""
+    """GitHub CLI (`gh`) tool — auth via a Personal Access Token or a GitHub App.
+
+    When ``app_id`` + ``installation_id`` + ``private_key`` are all set, a
+    short-lived installation token is minted and injected as ``GH_TOKEN`` so
+    ``gh`` acts as the App's bot identity (``<app>[bot]``) with its own
+    permissions and rate limit (#111). The App takes precedence over the PAT;
+    if it is not configured (or a mint fails) the PAT is used as a fallback.
+    """
 
     enabled: bool = False
     token: str = ""  # GitHub PAT, injected as GH_TOKEN when running `gh`
+    # GitHub App (#111). app_id + installation_id are non-secret; the PEM private
+    # key is the sensitive credential → keep it in the vault
+    # (${vault:GITHUB_APP_PRIVATE_KEY}), same posture as the PAT.
+    app_id: str = ""
+    installation_id: str = ""
+    private_key: str = ""  # RSA PEM
 
 
 class BrowserToolConfig(BaseModel):
