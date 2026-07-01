@@ -365,9 +365,15 @@ def effective_tool_env(
             token = resolve_secret(name)
             if not token and _gh_app_configured(config):
                 # No own PAT, but a GitHub App is configured → use the shared bot
-                # identity (#111). Safe: the App is not the owner, so this doesn't
-                # re-open the identity bleed that #93's no-borrow rule prevents.
-                token = _gh_env(config).get("GH_TOKEN")
+                # identity (#111). Mint it directly (App-or-nothing) rather than via
+                # _gh_env: a persona must NEVER fall back to the owner's PAT, which
+                # is exactly what #93's no-borrow rule prevents.
+                from core import github_app
+
+                gh_cfg = config.tools.gh
+                token = github_app.installation_token(
+                    gh_cfg.app_id, gh_cfg.installation_id, gh_cfg.private_key
+                )
             if token:
                 env["GH_TOKEN"] = token
 
