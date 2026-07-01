@@ -31,6 +31,7 @@ Key variables:
 | `GROK_API_KEY` | xAI Grok API key (optional) |
 | `GOOGLE_API_KEY` | Google Gemini API key (optional) |
 | `DEEPSEEK_API_KEY` | DeepSeek API key (optional) |
+| `OPENROUTER_API_KEY` | OpenRouter API key (optional) — one key, many models via an OpenAI-compatible gateway |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token from BotFather |
 | `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated Telegram user IDs |
 | `ADMIN_API_KEY` | API key for the admin UI |
@@ -58,6 +59,7 @@ agent:
   google_api_key: "${GOOGLE_API_KEY}"
   grok_api_key: "${GROK_API_KEY}"
   deepseek_api_key: "${DEEPSEEK_API_KEY}"
+  openrouter_api_key: "${OPENROUTER_API_KEY}"
   model: "claude-sonnet-4-5-20250514"
   timezone: "Europe/Zurich"
   skills_dir: "skills/"

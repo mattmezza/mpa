@@ -11,6 +11,8 @@ agent:
   grok_base_url: "${GROK_BASE_URL}"
   deepseek_api_key: "${DEEPSEEK_API_KEY}"
   deepseek_base_url: "${DEEPSEEK_BASE_URL}"
+  openrouter_api_key: "${OPENROUTER_API_KEY}"   # one key, many models via an OpenAI-compatible gateway
+  openrouter_base_url: "${OPENROUTER_BASE_URL}" # optional; defaults to https://openrouter.ai/api/v1
   model: "deepseek-v4-flash"
   max_tokens: 8192                  # max tokens the model may emit per response; raise for capable models (Claude up to 128000)
   timezone: "Europe/Zurich"

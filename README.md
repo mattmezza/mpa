@@ -32,7 +32,7 @@ MPA follows a **Python orchestrator + CLI tools** design. Python glues everythin
 
 | Concern | Tool |
 |---------|------|
-| LLM | Anthropic Claude, OpenAI, Grok (xAI), DeepSeek |
+| LLM | Anthropic Claude, OpenAI, Grok (xAI), Google, DeepSeek, OpenRouter |
 | Email | Himalaya CLI (Rust) |
 | Contacts | Built-in contacts CLI |
 | Calendar | python-caldav |
@@ -179,7 +179,7 @@ The binary is installed from a pinned upstream tag (`WACLI_VERSION` in the `Dock
 ## Tech stack
 
 - **Python 3.14** with **uv** for package management
-- **Anthropic Claude**, **OpenAI**, **Grok (xAI)**, or **DeepSeek** as the LLM backend
+- **Anthropic Claude**, **OpenAI**, **Grok (xAI)**, **Google**, **DeepSeek**, or **OpenRouter** as the LLM backend
 - **SQLite** via aiosqlite for all persistence
 - **FastAPI** + **Jinja2** + **HTMX** + **Alpine.js** + **Tailwind CSS v4** for the admin UI
 - **python-telegram-bot** for the Telegram channel
