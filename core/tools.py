@@ -218,11 +218,15 @@ def _persona_gh_token(
         # Own app → own app or NOTHING: never silently cross over to the system
         # bot on a transient mint failure (that could be a different, broader
         # identity). Only a persona that configured no own app uses the shared bot.
-        if _persona_has_own_app(gh):
-            return _persona_app_token(gh, resolve_secret)
-        return system_app()
-    # Legacy / inferred: PAT, else own app, else the shared system bot.
-    return own_pat() or _persona_app_token(gh, resolve_secret) or system_app()
+        return _persona_app_token(gh, resolve_secret) if _persona_has_own_app(gh) else system_app()
+    # Legacy / inferred: PAT first, then own app (own-app-or-nothing — same
+    # no-crossover rule as auth="app"), else the shared system bot.
+    token = own_pat()
+    if token:
+        return token
+    if _persona_has_own_app(gh):
+        return _persona_app_token(gh, resolve_secret)
+    return system_app()
 
 
 def _whatsapp_env(config: Config) -> dict[str, str]:

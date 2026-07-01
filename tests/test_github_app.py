@@ -155,6 +155,25 @@ def test_persona_own_app_mint_failure_does_not_cross_to_system(monkeypatch) -> N
     assert "GH_TOKEN" not in effective_tool_env(cfg, coder, {"CODER_KEY": "pem"}.get)
 
 
+def test_legacy_auth_own_app_mint_failure_does_not_cross_to_system(monkeypatch) -> None:
+    # Same no-crossover rule for the legacy auth="" path (reachable via raw YAML):
+    # own-app configured + mint fails → no token, never the system bot.
+    monkeypatch.setattr(github_app, "installation_token", lambda *_a: None)
+    cfg = _app_cfg()
+    coder = Persona(
+        name="coder",
+        tool_config={
+            "gh": {
+                "enabled": True,
+                "app_id": "500",
+                "installation_id": "9",
+                "private_key_secret": "CODER_KEY",
+            }
+        },
+    )
+    assert "GH_TOKEN" not in effective_tool_env(cfg, coder, {"CODER_KEY": "pem"}.get)
+
+
 def test_persona_auth_pat_never_uses_app(monkeypatch) -> None:
     monkeypatch.setattr(github_app, "installation_token", lambda app_id, *_a: f"app:{app_id}")
     cfg = _app_cfg()
