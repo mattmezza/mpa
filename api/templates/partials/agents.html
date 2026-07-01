@@ -1,10 +1,10 @@
-{# Personae tab partial — swappable agent identities #}
+{# Agents tab partial — swappable agent identities #}
 <div x-data="{ filter: '' }">
-  {# Active-persona strip #}
+  {# Active-agent strip #}
   <div class="card mb-4">
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <div>
-        <h2 class="text-base mb-0.5">Active persona</h2>
+        <h2 class="text-base mb-0.5">Active agent</h2>
         {% if active %}
         <p class="text-muted text-xs">
           The agent answers as <span class="text-accent">{{ active }}</span> in every chat.
@@ -18,7 +18,7 @@
       </div>
       {% if active %}
       <button class="btn btn-sm"
-              hx-post="/personae/activate" hx-vals='{"name": ""}'
+              hx-post="/agents/activate" hx-vals='{"name": ""}'
               hx-target="#tab-content" hx-swap="innerHTML">
         Use default
       </button>
@@ -31,15 +31,15 @@
 
   {# Toolbar #}
   <div class="flex items-center gap-2 mb-4 flex-wrap">
-    <a class="btn btn-sm" href="/admin/personae/new">+ Create persona</a>
+    <a class="btn btn-sm" href="/admin/agents/new">+ Create agent</a>
     <input type="text" class="input-sm flex-1" style="max-width:280px"
-           placeholder="Filter personae..." x-model="filter">
-    <span class="text-muted text-xs">{{ personae|length }} personae</span>
+           placeholder="Filter agents..." x-model="filter">
+    <span class="text-muted text-xs">{{ agents|length }} agents</span>
   </div>
 
   {# Card grid — 1 col on phone, 2 on small, 3 on large #}
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-    {% for p in personae %}
+    {% for p in agents %}
     <div class="card flex flex-col gap-2 {% if p.name == active %}border-accent{% endif %}"
          x-show="!filter
                  || {{ p.name|tojson|forceescape }}.toLowerCase().includes(filter.toLowerCase())
@@ -66,23 +66,23 @@
         <button class="btn btn-sm" disabled>Active</button>
         {% else %}
         <button class="btn-primary btn-sm"
-                hx-post="/personae/activate" hx-vals='{"name": {{ p.name|tojson }} }'
+                hx-post="/agents/activate" hx-vals='{"name": {{ p.name|tojson }} }'
                 hx-target="#tab-content" hx-swap="innerHTML">
           Use
         </button>
         {% endif %}
-        <a class="btn btn-sm" href="/admin/personae/{{ p.name }}">edit</a>
+        <a class="btn btn-sm" href="/admin/agents/{{ p.name }}">edit</a>
         <button class="btn-danger btn-sm ml-auto"
-                hx-post="/personae/delete" hx-target="#tab-content" hx-swap="innerHTML"
+                hx-post="/agents/delete" hx-target="#tab-content" hx-swap="innerHTML"
                 hx-vals='{"name": {{ p.name|tojson }} }'
-                hx-confirm="Delete persona &quot;{{ p.name }}&quot;?">
+                hx-confirm="Delete agent &quot;{{ p.name }}&quot;?">
           x
         </button>
       </div>
     </div>
     {% endfor %}
-    {% if not personae %}
-    <div class="text-muted text-xs text-center py-6 col-span-full">No personae yet.</div>
+    {% if not agents %}
+    <div class="text-muted text-xs text-center py-6 col-span-full">No agents yet.</div>
     {% endif %}
   </div>
 </div>
