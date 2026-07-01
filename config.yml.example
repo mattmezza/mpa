@@ -165,6 +165,19 @@ artifacts:
 # Optional tools the agent can use. Configure via the admin UI (Settings → Tools)
 # or here. Image generation (generate_image) sends results as native photos:
 tools:
+  # GitHub CLI (`gh`). Two auth modes:
+  #  - PAT: set `token` (actions appear as you; coarser scopes).
+  #  - GitHub App (#111): set app_id + installation_id + private_key. A short-lived
+  #    installation token is minted and used as GH_TOKEN, so `gh` acts as the App's
+  #    bot identity (<app>[bot]) with fine-grained per-repo permissions and its own
+  #    rate limit. The App takes precedence; the PAT stays as a fallback. Register at
+  #    github.com/settings/apps/new, install it on your repos, then fill these in.
+  gh:
+    enabled: false
+    token: "${vault:GH_TOKEN}"                    # PAT (optional fallback)
+    app_id: ""                                    # GitHub App ID (non-secret)
+    installation_id: ""                           # Installation ID (non-secret)
+    private_key: "${vault:GITHUB_APP_PRIVATE_KEY}"  # PEM — keep it in the vault
   imagegen:
     enabled: false
     provider: "openrouter"   # openrouter | fal | openai

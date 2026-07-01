@@ -106,6 +106,29 @@ gh issue create --repo owner/repo --title "Bug" --body "Description"
 
 The agent can now manage GitHub — create issues, check notifications, review PRs — with zero Python code changes.
 
+### Authenticating: PAT or GitHub App
+
+Enable `gh` under **Settings → Tools → GitHub CLI (gh)** and pick an auth mode:
+
+- **Personal Access Token** — paste a token. Simple, but every action appears under
+  *your* GitHub account and scopes are coarse.
+- **GitHub App** — the recommended path for an agent. Register an app at
+  [github.com/settings/apps/new](https://github.com/settings/apps/new), grant it the
+  fine-grained permissions you want, install it on the repos it may touch, then paste the
+  **App ID**, **Installation ID**, and **private key** (PEM). MPA signs a short JWT with the
+  key, exchanges it for an installation access token (valid ~1h, auto-refreshed in memory,
+  never persisted), and injects it as `GH_TOKEN`. Actions then show as the app's bot
+  identity (`<app>[bot]`) with the app's own rate-limit pool. The private key lives in the
+  vault (`${vault:GITHUB_APP_PRIVATE_KEY}`); the App takes precedence over a PAT, which
+  stays as a fallback. The **Test connection** button confirms the identity and lists the
+  repos the installation can reach.
+
+Per-persona: give a persona its own GitHub identity (its own PAT, a shared vault secret, or
+the App bot) in the **Personae** editor under *Tool identities*, and optionally an **allowed
+repos** list — a best-effort `--repo` gate on top of the app installation's own repo
+selection (which is the real, server-enforced boundary). Subagents inherit that repo scope
+and can only narrow it, never widen it.
+
 ## Writing effective skill files
 
 ### Be specific about syntax
