@@ -388,7 +388,47 @@ TOOLS = [
             "required": ["summary", "start", "end"],
         },
     },
+    {
+        "name": "create_contact",
+        "description": "Add a contact to a CardDAV address book.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account": {
+                    "type": "string",
+                    "description": "Contacts account name. Optional — defaults to the active "
+                    "identity's writable contacts account. Only accounts with read_write "
+                    "access may be used.",
+                },
+                "name": {"type": "string", "description": "Full name of the contact"},
+                "email": {"type": "string", "description": "Email address (optional)"},
+                "phone": {"type": "string", "description": "Phone number (optional)"},
+                "organization": {"type": "string", "description": "Organization (optional)"},
+            },
+            "required": ["name"],
+        },
+    },
     # Read-only / utility tools
+    {
+        "name": "search_contacts",
+        "description": "Search or list contacts in a CardDAV address book. Omit 'query' to "
+        "list all contacts.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account": {
+                    "type": "string",
+                    "description": "Contacts account name. Optional — defaults to the active "
+                    "identity's bound contacts account.",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Name/email substring to match; omit to list all.",
+                },
+            },
+            "required": [],
+        },
+    },
     {
         "name": "web_search",
         "description": "Search the web for information.",
@@ -929,6 +969,11 @@ class AgentCore:
             db_path=config.agent.personae_db_path,
             seed_dir=config.agent.personae_dir,
         )
+        # Account bindings for the default identity (no persona active) — built
+        # once from config (#110). None = unscoped (legacy: any account); otherwise
+        # a Persona-shaped carrier used only for account routing/enforcement, never
+        # for scoping/memory/character (which stay the default agent's).
+        self._default_accounts = self._build_default_accounts(config)
         self.executor = ToolExecutor(tool_env=tool_env(config))
         # Image-generation usage guardrail (issue #55). Cheap to construct; the
         # SQLite table is created lazily on first use.
@@ -1403,11 +1448,13 @@ class AgentCore:
             if roster:
                 preamble += f"\n\n{roster}"
 
-        # Which email/calendar accounts this persona may use, so send_email /
-        # create_calendar_event route without guessing account names (#110). Names
-        # and access levels only — credentials never enter the prompt.
-        if persona is not None:
-            note = self._account_note(persona)
+        # Which email/calendar/contacts accounts this identity may use, so the
+        # tools route without guessing account names (#110). Names and access
+        # levels only — credentials never enter the prompt. Falls back to the
+        # default-agent bindings when no persona is active.
+        accounts_identity = persona if persona is not None else self._default_accounts
+        if accounts_identity is not None:
+            note = self._account_note(accounts_identity)
             if note:
                 preamble += f"\n\n{note}"
 
@@ -2194,6 +2241,15 @@ class AgentCore:
                 executed_writes.add(write_sig)
             return result
 
+        if name == "search_contacts":
+            return await self._tool_search_contacts(params, request_state)
+
+        if name == "create_contact":
+            result = await self._tool_create_contact(params, request_state)
+            if is_write_action and self._is_tool_success(result):
+                executed_writes.add(write_sig)
+            return result
+
         if name == "web_search":
             log.info("Tool call: web_search — %s", params.get("query", ""))
             return await self._tool_web_search(params)
@@ -2364,9 +2420,39 @@ class AgentCore:
     # -- Structured tool implementations --
 
     @staticmethod
+    def _build_default_accounts(config: Config) -> Persona | None:
+        """Build the default identity's account carrier from config (#110).
+
+        When no persona is active, ``send_email``/``create_calendar_event``/etc.
+        route through this. It is a :class:`Persona` holding ONLY the account
+        bindings (no skills/tools/secrets/character), so it never affects scoping,
+        memory, or identity — only account routing. Returns ``None`` when the
+        default agent has no bindings, preserving the legacy unscoped behaviour.
+        """
+        from core.personae import _as_account_list
+
+        email = _as_account_list(config.agent.email_accounts, sender=True)
+        calendar = _as_account_list(config.agent.calendar_accounts)
+        contacts = _as_account_list(config.agent.contacts_accounts)
+        if not email and not calendar and not contacts:
+            return None
+        return Persona(
+            name="",
+            email_accounts=email,
+            calendar_accounts=calendar,
+            contacts_accounts=contacts,
+        )
+
+    def _accounts_identity(self, request_state: dict | None) -> Persona | None:
+        """The identity whose account bindings apply this turn: the active persona,
+        else the default-agent carrier (#110). ``None`` = unscoped (legacy)."""
+        persona = (request_state or {}).get("persona_obj")
+        return persona if persona is not None else self._default_accounts
+
+    @staticmethod
     def _account_note(persona: Persona) -> str:
-        """Preamble block naming the persona's bound email/calendar accounts and
-        access levels (#110). Names + levels only — never credentials."""
+        """Preamble block naming the identity's bound email/calendar/contacts
+        accounts and access levels (#110). Names + levels only — never credentials."""
         lines: list[str] = []
         if persona.email_accounts:
             parts = []
@@ -2377,15 +2463,19 @@ class AgentCore:
         if persona.calendar_accounts:
             parts = [f"{e['account']} ({e['access_level']})" for e in persona.calendar_accounts]
             lines.append("Calendar accounts: " + ", ".join(parts))
+        if persona.contacts_accounts:
+            parts = [f"{e['account']} ({e['access_level']})" for e in persona.contacts_accounts]
+            lines.append("Contacts accounts: " + ", ".join(parts))
         if not lines:
             return ""
         body = "\n".join(lines)
         return (
             "<accounts>\n"
-            "The only email/calendar accounts you may use, with your access level. "
-            "read = read only; read_write = read plus send / create events. send_email "
+            "The only email/calendar/contacts accounts you may use, with your access "
+            "level. read = read only; read_write = read plus send / create. send_email "
             "and reply_email default to your sender identity; create_calendar_event "
-            "defaults to your writable calendar.\n"
+            "defaults to your writable calendar; create_contact to your writable "
+            "contacts account.\n"
             f"{body}\n"
             "</accounts>"
         )
@@ -2412,19 +2502,17 @@ class AgentCore:
             account = persona.sender_identity() or ""
             if not account:
                 return None, {
-                    "error": "This persona has no send email identity. Bind an email "
-                    "account as its sender identity on the persona's admin page."
+                    "error": "No send email identity is bound. Bind an email account as "
+                    "the sender identity in the admin UI (persona editor or Assistant tab)."
                 }
         level = persona.email_access(account)
         if level is None:
             return None, {
-                "error": f"This persona is not allowed to use the '{account}' email "
-                "account. Grant it access on the persona's admin page."
+                "error": f"Not allowed to use the '{account}' email account. "
+                "Grant it access in the admin UI."
             }
         if level != "read_write":
-            return None, {
-                "error": f"This persona has read-only access to '{account}' and cannot send email."
-            }
+            return None, {"error": f"Read-only access to '{account}' — cannot send email from it."}
         return account, None
 
     @staticmethod
@@ -2450,22 +2538,67 @@ class AgentCore:
             )
             if not calendar:
                 return None, {
-                    "error": "This persona has no writable calendar. Grant it read_write "
-                    "on a calendar account on the persona's admin page."
+                    "error": "No writable calendar is bound. Grant read_write on a "
+                    "calendar account in the admin UI."
                 }
         level = persona.calendar_access(calendar)
         if level is None:
-            return None, {"error": f"This persona is not allowed to use the '{calendar}' calendar."}
+            return None, {"error": f"Not allowed to use the '{calendar}' calendar."}
         if level != "read_write":
             return None, {
-                "error": f"This persona has read-only access to '{calendar}' and cannot "
-                "create events."
+                "error": f"Read-only access to '{calendar}' — cannot create events on it."
             }
         return calendar, None
 
+    @staticmethod
+    def _resolve_contacts_access(
+        persona: Persona | None, params: dict, *, need_write: bool
+    ) -> tuple[str | None, dict | None]:
+        """Route + authorise a contacts account, mirroring the email/calendar
+        resolvers (#110). ``need_write`` gates create_contact on a read_write
+        binding; read tools pass ``need_write=False``. Defaults to the first bound
+        account (first writable one when ``need_write``)."""
+        account = str(params.get("account") or "").strip()
+        if persona is None:
+            if not account:
+                return None, {"error": "The 'account' parameter is required."}
+            return account, None
+        if not account:
+            if need_write:
+                account = next(
+                    (
+                        e["account"]
+                        for e in persona.contacts_accounts
+                        if e.get("access_level") == "read_write"
+                    ),
+                    "",
+                )
+                if not account:
+                    return None, {
+                        "error": "No writable contacts account is bound. Grant read_write "
+                        "on a contacts account in the admin UI."
+                    }
+            else:
+                account = (
+                    persona.contacts_accounts[0]["account"] if persona.contacts_accounts else ""
+                )
+                if not account:
+                    return None, {
+                        "error": "No contacts account is bound. Grant access to a contacts "
+                        "account in the admin UI."
+                    }
+        level = persona.contacts_access(account)
+        if level is None:
+            return None, {"error": f"Not allowed to use the '{account}' contacts account."}
+        if need_write and level != "read_write":
+            return None, {
+                "error": f"Read-only access to '{account}' — cannot create contacts on it."
+            }
+        return account, None
+
     async def _tool_send_email(self, params: dict, request_state: dict | None = None) -> dict:
         """Send an email via himalaya CLI."""
-        account, err = self._resolve_email_send((request_state or {}).get("persona_obj"), params)
+        account, err = self._resolve_email_send(self._accounts_identity(request_state), params)
         if err:
             return err
         to = params["to"]
@@ -2495,7 +2628,7 @@ class AgentCore:
 
     async def _tool_reply_email(self, params: dict, request_state: dict | None = None) -> dict:
         """Reply to an email via himalaya CLI."""
-        account, err = self._resolve_email_send((request_state or {}).get("persona_obj"), params)
+        account, err = self._resolve_email_send(self._accounts_identity(request_state), params)
         if err:
             return err
         message_id = params["message_id"]
@@ -2733,9 +2866,7 @@ class AgentCore:
         self, params: dict, request_state: dict | None = None
     ) -> dict:
         """Create a calendar event via the CalDAV helper script."""
-        calendar, err = self._resolve_calendar_write(
-            (request_state or {}).get("persona_obj"), params
-        )
+        calendar, err = self._resolve_calendar_write(self._accounts_identity(request_state), params)
         if err:
             return err
         summary = params["summary"]
@@ -2754,6 +2885,49 @@ class AgentCore:
         for addr in attendees:
             cmd_parts.append(f"--attendee {_shell_quote(addr)}")
 
+        return await self.executor.run_command(" ".join(cmd_parts))
+
+    async def _tool_search_contacts(self, params: dict, request_state: dict | None = None) -> dict:
+        """Search/list contacts in the identity's bound CardDAV account (#110)."""
+        account, err = self._resolve_contacts_access(
+            self._accounts_identity(request_state), params, need_write=False
+        )
+        if err:
+            return err
+        query = str(params.get("query") or "").strip()
+        log.info("Tool call: search_contacts — account=%s query=%r", account, query)
+        cmd_parts = ["python3 /app/tools/contacts.py"]
+        if query:
+            cmd_parts += ["search", f"--query {_shell_quote(query)}"]
+        else:
+            cmd_parts.append("list")
+        cmd_parts += [f"--provider {_shell_quote(account)}", "--output json"]
+        return await self.executor.run_command(" ".join(cmd_parts))
+
+    async def _tool_create_contact(self, params: dict, request_state: dict | None = None) -> dict:
+        """Create a contact in the identity's writable CardDAV account (#110)."""
+        account, err = self._resolve_contacts_access(
+            self._accounts_identity(request_state), params, need_write=True
+        )
+        if err:
+            return err
+        name = str(params.get("name") or "").strip()
+        if not name:
+            return {"error": "A contact 'name' is required."}
+        log.info("Tool call: create_contact — account=%s name=%s", account, name)
+        cmd_parts = [
+            "python3 /app/tools/contacts.py",
+            "add",
+            f"--provider {_shell_quote(account)}",
+            f"--name {_shell_quote(name)}",
+        ]
+        if params.get("email"):
+            cmd_parts.append(f"--email {_shell_quote(str(params['email']))}")
+        if params.get("phone"):
+            cmd_parts.append(f"--phone {_shell_quote(str(params['phone']))}")
+        if params.get("organization"):
+            cmd_parts.append(f"--org {_shell_quote(str(params['organization']))}")
+        cmd_parts.append("--output json")
         return await self.executor.run_command(" ".join(cmd_parts))
 
     async def _tool_manage_jobs(self, params: dict, request_state: dict | None = None) -> dict:
@@ -3111,10 +3285,14 @@ class AgentCore:
         p_skills = parent.skills if parent else []
         p_tools = parent.tools if parent else []
         p_secrets = parent.secrets if parent else []
-        # Account bindings pass None (not []) when there is no parent persona, so
-        # narrow_accounts can tell "unscoped owner" from "persona with no access".
-        p_email = parent.email_accounts if parent else None
-        p_cal = parent.calendar_accounts if parent else None
+        # Account bindings are narrowed against the caller's *account* identity: the
+        # parent persona, else the default-agent bindings when the top-level agent
+        # ran unscoped. None (no persona and no default bindings) = unscoped owner,
+        # so the child keeps its own — narrow_accounts distinguishes None from [].
+        account_parent = parent if parent is not None else self._default_accounts
+        p_email = account_parent.email_accounts if account_parent else None
+        p_cal = account_parent.calendar_accounts if account_parent else None
+        p_contacts = account_parent.contacts_accounts if account_parent else None
         return Persona(
             name=requested.name,
             agent_name=requested.agent_name,
@@ -3134,6 +3312,7 @@ class AgentCore:
             # never reach an account (or a higher access level) its parent lacks (#110).
             email_accounts=narrow_accounts(p_email, requested.email_accounts),
             calendar_accounts=narrow_accounts(p_cal, requested.calendar_accounts),
+            contacts_accounts=narrow_accounts(p_contacts, requested.contacts_accounts),
         )
 
     async def _run_subagent_loop(

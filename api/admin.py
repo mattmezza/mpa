@@ -3939,6 +3939,8 @@ GATEABLE_TOOLS = [
     "send_message",
     "set_reaction",
     "create_calendar_event",
+    "search_contacts",
+    "create_contact",
     "web_search",
     "manage_jobs",
     "spawn_subagent",

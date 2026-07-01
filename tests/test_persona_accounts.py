@@ -42,12 +42,12 @@ def test_send_defaults_to_sender_identity() -> None:
 
 def test_send_from_read_only_account_denied() -> None:
     account, err = AgentCore._resolve_email_send(_persona(), {"account": "personal"})
-    assert account is None and err and "read-only" in err["error"]
+    assert account is None and err and "read-only" in err["error"].lower()
 
 
 def test_send_from_unbound_account_denied() -> None:
     account, err = AgentCore._resolve_email_send(_persona(), {"account": "work"})
-    assert account is None and err and "not allowed" in err["error"]
+    assert account is None and err and "not allowed" in err["error"].lower()
 
 
 def test_send_from_writable_account_allowed() -> None:
@@ -78,12 +78,12 @@ def test_calendar_defaults_to_writable() -> None:
 def test_calendar_read_only_denied() -> None:
     p = Persona(name="ro", calendar_accounts=[{"account": "shared", "access_level": "read"}])
     cal, err = AgentCore._resolve_calendar_write(p, {"calendar": "shared"})
-    assert cal is None and err and "read-only" in err["error"]
+    assert cal is None and err and "read-only" in err["error"].lower()
 
 
 def test_calendar_unbound_denied() -> None:
     cal, err = AgentCore._resolve_calendar_write(_persona(), {"calendar": "work"})
-    assert cal is None and err and "not allowed" in err["error"]
+    assert cal is None and err and "not allowed" in err["error"].lower()
 
 
 # ── Subagent inherit-never-widen ──────────────────────────────────────────
