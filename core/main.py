@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from os import environ
@@ -67,6 +68,34 @@ async def _start_agent(config_store: ConfigStore):
     if config.scheduler.jobs:
         seed_data = [j.model_dump() for j in config.scheduler.jobs]
         await agent.job_store.seed_from_config(seed_data)
+
+    # -- One-time #110 account-binding migration --
+    # Before #110 any persona could use any configured email/calendar account. Now
+    # an empty binding means no access, so on first start we grant every persona
+    # (that has none yet) full access to all existing accounts, preserving prior
+    # behaviour. Personae created afterwards start empty (safe default). Runs once.
+    if not await config_store.get("accounts.persona_binding_migrated"):
+        from core.personae import bind_existing_accounts
+
+        def _account_names(raw: str | None) -> list[str]:
+            try:
+                items = json.loads(raw) if raw else []
+            except ValueError, TypeError:
+                return []
+            return [
+                str(i.get("name", "")).strip()
+                for i in items
+                if isinstance(i, dict) and str(i.get("name", "")).strip()
+            ]
+
+        n = await bind_existing_accounts(
+            agent.personae,
+            _account_names(await config_store.get("email.providers")),
+            _account_names(await config_store.get("calendar.providers")),
+        )
+        await config_store.set("accounts.persona_binding_migrated", "true")
+        if n:
+            log.info("Bound existing email/calendar accounts to %d persona(s) (#110)", n)
 
     # -- Voice pipeline --
     voice: VoicePipeline | None = None

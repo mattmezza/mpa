@@ -459,6 +459,40 @@ class PersonaStore:
             return cursor.rowcount > 0
 
 
+async def bind_existing_accounts(
+    store: PersonaStore, email_names: list[str], calendar_names: list[str]
+) -> int:
+    """One-time #110 compatibility: bind existing accounts to existing personae.
+
+    Before #110 any persona could use any configured email/calendar account (the
+    tools took an ``account`` argument with no per-persona gate). #110 makes an
+    empty binding mean *no access*, so on upgrade every persona that has **no**
+    bindings yet is granted full (``read_write``) access to all existing accounts —
+    the first email account becomes its sender identity — preserving prior
+    behaviour exactly. Personae created afterwards start empty (safe default).
+    Idempotent: a persona that already has bindings is left untouched, so a re-run
+    (or a persona configured post-migration) is a no-op. Returns the count updated.
+    """
+    updated = 0
+    for p in await store.list_personae():
+        changed = False
+        if email_names and not p.email_accounts:
+            p.email_accounts = [
+                {"account": n, "access_level": "read_write", "is_sender_identity": (i == 0)}
+                for i, n in enumerate(email_names)
+            ]
+            changed = True
+        if calendar_names and not p.calendar_accounts:
+            p.calendar_accounts = [
+                {"account": n, "access_level": "read_write"} for n in calendar_names
+            ]
+            changed = True
+        if changed:
+            await store.upsert(p)
+            updated += 1
+    return updated
+
+
 if __name__ == "__main__":
     # ponytail: one runnable check covering the parse/serialise round-trip + scopes.
     md = """---
