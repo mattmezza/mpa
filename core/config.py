@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _resolve_env_vars(obj: object) -> object:
@@ -354,6 +354,11 @@ class GhToolConfig(BaseModel):
     mint-failure fallback), ``"pat"`` forces the PAT even if App fields linger,
     and ``""`` infers (App if its fields are filled, else PAT) for back-compat.
     """
+
+    # app_id / installation_id are numeric on GitHub; YAML and the App-install
+    # API hand them over as ints, so coerce numbers to str instead of rejecting
+    # them (fixes "Input should be a valid string" on restart, #111).
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
     enabled: bool = False
     auth: str = ""  # "" (infer) | "pat" | "app"

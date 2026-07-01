@@ -30,6 +30,16 @@ def _pem() -> str:
     ).decode()
 
 
+def test_gh_numeric_ids_coerced_to_str() -> None:
+    # GitHub hands app_id / installation_id over as ints (via YAML or the
+    # App-install API); Config must coerce them, not reject them (#111).
+    cfg = Config.model_validate(
+        {"tools": {"gh": {"app_id": 4191143, "installation_id": 143760902}}}
+    )
+    assert cfg.tools.gh.app_id == "4191143"
+    assert cfg.tools.gh.installation_id == "143760902"
+
+
 def test_app_jwt_is_valid_rs256() -> None:
     pem = _pem()
     pub = serialization.load_pem_private_key(pem.encode(), password=None).public_key()
