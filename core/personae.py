@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS personae (
     bot_token TEXT DEFAULT '',
     allowed_user_ids TEXT DEFAULT '',
     tool_config TEXT DEFAULT '',
+    email_accounts TEXT DEFAULT '',
+    calendar_accounts TEXT DEFAULT '',
     created_at DATETIME DEFAULT (datetime('now')),
     updated_at DATETIME DEFAULT (datetime('now'))
 );
@@ -57,6 +59,8 @@ _MIGRATIONS = (
     "ALTER TABLE personae ADD COLUMN bot_token TEXT DEFAULT ''",  # #29
     "ALTER TABLE personae ADD COLUMN allowed_user_ids TEXT DEFAULT ''",  # #29
     "ALTER TABLE personae ADD COLUMN tool_config TEXT DEFAULT ''",  # #93
+    "ALTER TABLE personae ADD COLUMN email_accounts TEXT DEFAULT ''",  # #110
+    "ALTER TABLE personae ADD COLUMN calendar_accounts TEXT DEFAULT ''",  # #110
     # #98: personalia merged into character. Prepend any existing personalia to
     # character (idempotent — the WHERE guard empties it, so a re-run is a no-op),
     # then drop the now-unused column. On a fresh DB (no such column) both raise
@@ -86,12 +90,41 @@ class Persona:
     # Shape: {tool_key: {"enabled": bool, **tool-specific cfg}}. Empty = inherit
     # the system-wide tool config (own credentials/profile fall back to shared).
     tool_config: dict = field(default_factory=dict)
+    # Per-persona email/calendar account bindings (#110). Each email entry is
+    # {account, access_level: read|read_write, is_sender_identity: bool}; each
+    # calendar entry drops the sender flag. Empty = NO email/calendar access
+    # (safe default — a persona reaches only the accounts it is bound to).
+    email_accounts: list[dict] = field(default_factory=list)
+    calendar_accounts: list[dict] = field(default_factory=list)
 
     def allows_skill(self, name: str) -> bool:
         return not self.skills or name in self.skills
 
     def allows_tool(self, name: str) -> bool:
         return not self.tools or name in self.tools
+
+    def email_access(self, account: str) -> str | None:
+        """This persona's access level ('read'/'read_write') on ``account``, or
+        None if it is not bound to that email account (#110)."""
+        for e in self.email_accounts:
+            if e.get("account") == account:
+                return e.get("access_level")
+        return None
+
+    def calendar_access(self, account: str) -> str | None:
+        """This persona's access level on calendar ``account``, or None (#110)."""
+        for e in self.calendar_accounts:
+            if e.get("account") == account:
+                return e.get("access_level")
+        return None
+
+    def sender_identity(self) -> str | None:
+        """The email account this persona sends from (its is_sender_identity
+        binding), or None if it has no send identity (#110)."""
+        for e in self.email_accounts:
+            if e.get("is_sender_identity"):
+                return e.get("account")
+        return None
 
     def tool_setting(self, key: str) -> dict | None:
         """This persona's config for external tool ``key`` (gh/browser), or None
@@ -127,6 +160,53 @@ def _as_tool_config(value: object) -> dict:
             return {}
         return _as_tool_config(loaded)
     return {}
+
+
+_ACCESS_LEVELS = ("read", "read_write")
+
+
+def _as_account_list(value: object, *, sender: bool = False) -> list[dict]:
+    """Coerce a frontmatter / DB-column value into account-binding dicts (#110).
+
+    Accepts a parsed list (frontmatter) or a JSON string (DB column). Each entry
+    normalises to ``{account, access_level}``; for email (``sender=True``) an
+    ``is_sender_identity`` flag is kept too. A bare string is read as a
+    read-only binding. Unknown access levels default to ``read`` (safe). A sender
+    identity is forced to ``read_write`` — you cannot send from a read-only
+    account — and at most one sender identity survives (later ones demoted).
+    Anything malformed drops out so a broken value never breaks load.
+    """
+    if isinstance(value, str) and value.strip():
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError, ValueError:
+            return []
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    sender_taken = False
+    for item in value:
+        if isinstance(item, str):
+            item = {"account": item}
+        if not isinstance(item, dict):
+            continue
+        account = str(item.get("account", "") or "").strip()
+        if not account or account in seen:
+            continue
+        seen.add(account)
+        level = str(item.get("access_level", "") or "").strip().lower()
+        if level not in _ACCESS_LEVELS:
+            level = "read"
+        entry: dict = {"account": account, "access_level": level}
+        if sender:
+            is_sender = bool(item.get("is_sender_identity")) and not sender_taken
+            if is_sender:
+                entry["access_level"] = "read_write"  # sending needs write
+                sender_taken = True
+            entry["is_sender_identity"] = is_sender
+        out.append(entry)
+    return out
 
 
 def _as_int_list(value: object) -> list[int]:
@@ -189,6 +269,8 @@ def parse_markdown(text: str, *, name: str) -> Persona:
         bot_token=str(fm.get("bot_token", "") or ""),
         allowed_user_ids=_as_int_list(fm.get("allowed_user_ids")),
         tool_config=_as_tool_config(fm.get("tool_config")),
+        email_accounts=_as_account_list(fm.get("email_accounts"), sender=True),
+        calendar_accounts=_as_account_list(fm.get("calendar_accounts")),
     )
 
 
@@ -205,6 +287,8 @@ def to_markdown(p: Persona) -> str:
         "tools": p.tools,
         "secrets": p.secrets,
         "tool_config": p.tool_config,
+        "email_accounts": p.email_accounts,
+        "calendar_accounts": p.calendar_accounts,
         "character": p.character,
     }
     dumped = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True, default_flow_style=False)
@@ -258,14 +342,16 @@ class PersonaStore:
         await db.execute(
             "INSERT INTO personae "
             "(name, agent_name, role, emoji, voice, character, skills, tools, "
-            "secrets, bot_token, allowed_user_ids, tool_config) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "secrets, bot_token, allowed_user_ids, tool_config, "
+            "email_accounts, calendar_accounts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(name) DO UPDATE SET "
             "agent_name=excluded.agent_name, role=excluded.role, emoji=excluded.emoji, "
             "voice=excluded.voice, character=excluded.character, "
             "skills=excluded.skills, tools=excluded.tools, secrets=excluded.secrets, "
             "bot_token=excluded.bot_token, allowed_user_ids=excluded.allowed_user_ids, "
-            "tool_config=excluded.tool_config, updated_at=datetime('now')",
+            "tool_config=excluded.tool_config, email_accounts=excluded.email_accounts, "
+            "calendar_accounts=excluded.calendar_accounts, updated_at=datetime('now')",
             (
                 p.name,
                 p.agent_name,
@@ -279,6 +365,8 @@ class PersonaStore:
                 p.bot_token,
                 "\n".join(str(i) for i in p.allowed_user_ids),
                 json.dumps(p.tool_config) if p.tool_config else "",
+                json.dumps(p.email_accounts) if p.email_accounts else "",
+                json.dumps(p.calendar_accounts) if p.calendar_accounts else "",
             ),
         )
 
@@ -299,6 +387,12 @@ class PersonaStore:
                 row["allowed_user_ids"] if "allowed_user_ids" in row.keys() else ""
             ),
             tool_config=_as_tool_config(row["tool_config"] if "tool_config" in row.keys() else ""),
+            email_accounts=_as_account_list(
+                row["email_accounts"] if "email_accounts" in row.keys() else "", sender=True
+            ),
+            calendar_accounts=_as_account_list(
+                row["calendar_accounts"] if "calendar_accounts" in row.keys() else ""
+            ),
         )
 
     async def list_personae(self) -> list[Persona]:
@@ -384,6 +478,15 @@ tool_config:
   browser:
     enabled: true
     profile: forge
+email_accounts:
+  - account: fitness-agent
+    access_level: read_write
+    is_sender_identity: true
+  - account: personal
+    access_level: read
+calendar_accounts:
+  - account: fitness-agent
+    access_level: read_write
 personalia: |
   You are Forge, a strength coach.
 character: |
@@ -408,10 +511,34 @@ Extra prose in the body.
     assert p.tool_setting("browser") == {"enabled": True, "profile": "forge"}
     assert p.tool_setting("weather") is None  # no entry = inherit system config
 
-    # Empty allowlists = allow everything (default persona semantics).
+    # #110: email/calendar account bindings + access levels.
+    assert p.email_access("fitness-agent") == "read_write", p.email_accounts
+    assert p.email_access("personal") == "read"
+    assert p.email_access("work") is None  # not bound = no access
+    assert p.sender_identity() == "fitness-agent", p.sender_identity()
+    assert p.calendar_access("fitness-agent") == "read_write"
+    assert p.calendar_access("personal") is None
+
+    # A read-only account marked as sender is force-upgraded to read_write, and
+    # only the first sender identity survives.
+    coerced = _as_account_list(
+        [
+            {"account": "a", "access_level": "read", "is_sender_identity": True},
+            {"account": "b", "access_level": "read_write", "is_sender_identity": True},
+            "c",  # bare string → read-only binding
+        ],
+        sender=True,
+    )
+    assert coerced[0] == {"account": "a", "access_level": "read_write", "is_sender_identity": True}
+    assert coerced[1]["is_sender_identity"] is False  # second sender demoted
+    assert coerced[2] == {"account": "c", "access_level": "read", "is_sender_identity": False}
+
+    # Empty allowlists = allow everything (default persona semantics)…
     blank = Persona(name="default")
     assert blank.allows_skill("anything") and blank.allows_tool("anything")
     assert blank.tool_setting("gh") is None  # no per-tool config by default
+    # …but no account bindings = NO email/calendar access (safe default, #110).
+    assert blank.email_access("personal") is None and blank.sender_identity() is None
 
     # Round-trip through markdown preserves the structured fields.
     p2 = parse_markdown(to_markdown(p), name="fitness-coach")
@@ -419,4 +546,6 @@ Extra prose in the body.
     assert p2.character.strip() == p.character.strip()
     assert p2.bot_token == p.bot_token and p2.allowed_user_ids == p.allowed_user_ids
     assert p2.tool_config == p.tool_config, p2.tool_config
+    assert p2.email_accounts == p.email_accounts, p2.email_accounts
+    assert p2.calendar_accounts == p.calendar_accounts, p2.calendar_accounts
     print("personae.py self-check OK")
