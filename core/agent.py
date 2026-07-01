@@ -3624,24 +3624,31 @@ class AgentCore:
     ) -> None:
         """Record a background batch's notification + digest as an assistant turn —
         merged into the trailing assistant turn so replayed history stays strictly
-        alternating for providers that require it (#15)."""
+        alternating for providers that require it (#15).
+
+        Runs in the background subagent task, so it holds the same per-chat lock as
+        ``process()``: this fold is another read-modify-write on the chat's history,
+        and a concurrent foreground turn on the same chat would otherwise interleave
+        with it. Background delivery never runs under a held lock for this key (the
+        spawning turn returned long ago), so acquiring it here can't deadlock."""
         if not chat_id or channel == "system":
             return
         try:
-            if self.history_mode == "session":
-                merged = await self.history.append_to_last_session_message(
-                    channel, user_id, f"\n\n{framed}", chat_id
-                )
-                if not merged:
-                    await self.history.append_session_message(
-                        channel, user_id, {"role": "assistant", "content": framed}, chat_id
+            async with self._chat_lock(channel, user_id, chat_id):
+                if self.history_mode == "session":
+                    merged = await self.history.append_to_last_session_message(
+                        channel, user_id, f"\n\n{framed}", chat_id
                     )
-            else:
-                merged = await self.history.append_to_last_turn(
-                    channel, user_id, "assistant", f"\n\n{framed}", chat_id
-                )
-                if not merged:
-                    await self.history.add_turn(channel, user_id, "assistant", framed, chat_id)
+                    if not merged:
+                        await self.history.append_session_message(
+                            channel, user_id, {"role": "assistant", "content": framed}, chat_id
+                        )
+                else:
+                    merged = await self.history.append_to_last_turn(
+                        channel, user_id, "assistant", f"\n\n{framed}", chat_id
+                    )
+                    if not merged:
+                        await self.history.add_turn(channel, user_id, "assistant", framed, chat_id)
         except Exception:
             log.exception("Failed to record subagent context (chat=%s)", chat_id)
 
@@ -3665,10 +3672,10 @@ class AgentCore:
         starts a fresh user turn — ``_coalesce_user_messages`` merges the run back
         into one before the next LLM call, so alternation always holds.
 
-        ponytail: the fold is a non-locked read-modify-write, so two silent
-        records racing in one busy group can drop a line of ambient context (never
-        a reply). Add a per-(channel,user,chat) asyncio.Lock around process() if a
-        room ever shows missing turns.
+        This fold is a read-modify-write; two silent records racing in one busy
+        group would drop a line of ambient context. It runs inside ``process()``,
+        which now holds a per-(channel,user,chat) lock, so records of one chat are
+        serialized and the race is closed.
         """
         if channel == "system":
             return
