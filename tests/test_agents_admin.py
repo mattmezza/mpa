@@ -199,6 +199,35 @@ def test_agent_bot_fields_persist(tmp_path) -> None:
     assert got["allowed_user_ids"] == [111, 222]
 
 
+def test_agent_group_chat_persists(tmp_path) -> None:
+    # #133: per-agent group-room settings round-trip; missing sub-flags default on,
+    # and a disabled config is normalised back to {} (the off default).
+    client, _ = _client(tmp_path)
+    r = client.post(
+        "/agents",
+        json={
+            "name": "coach",
+            "role": "Coach",
+            "group_chat": {"enabled": True, "reply_when_addressed_only": False},
+        },
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    got = client.get("/agents/coach", headers=AUTH).json()
+    assert got["group_chat"] == {
+        "enabled": True,
+        "reply_when_addressed_only": False,
+        "ignore_bots": True,
+    }
+
+    client.post(
+        "/agents",
+        json={"name": "coach", "role": "Coach", "group_chat": {"enabled": False}},
+        headers=AUTH,
+    )
+    assert client.get("/agents/coach", headers=AUTH).json()["group_chat"] == {}
+
+
 def test_agent_tool_config_persists(tmp_path) -> None:
     # Per-agent tool identity config (#93) survives the round-trip.
     client, _ = _client(tmp_path)

@@ -124,3 +124,42 @@ def test_lifecycle_requires_auth() -> None:
     for path in ["/agent/start", "/agent/stop", "/agent/restart"]:
         resp = client.post(path)
         assert resp.status_code == 401, f"{path} should require auth"
+
+
+async def test_migrate_telegram_to_default_agent(tmp_path) -> None:
+    """#133: the old global Telegram bot config folds onto the default agent and
+    the staged channels.telegram.* keys are cleared (self-clearing, one-shot)."""
+    from core.agents import AgentStore, default_agent_from_values
+    from core.config_store import ConfigStore
+
+    cs = ConfigStore(db_path=str(tmp_path / "config.db"))
+    await cs.set("channels.telegram.bot_token", "123:ABC")
+    await cs.set("channels.telegram.allowed_user_ids", "111, 222")
+    await cs.set("channels.telegram.group_chat.enabled", "true")
+    await cs.set("channels.telegram.group_chat.reply_when_addressed_only", "false")
+
+    store = AgentStore(
+        db_path=str(tmp_path / "agents.db"),
+        seed_dir=None,
+        default_identity=default_agent_from_values(character="Base"),
+    )
+    await store.ensure_seeded()
+    agent = SimpleNamespace(agents=store)
+
+    await main._migrate_telegram_to_default_agent(cs, agent)
+
+    d = await store.get_default()
+    assert d is not None
+    assert d.bot_token == "123:ABC"
+    assert d.allowed_user_ids == [111, 222]
+    assert d.group_chat == {
+        "enabled": True,
+        "reply_when_addressed_only": False,
+        "ignore_bots": True,
+    }
+    # Staged keys are cleared, so a restart won't re-run or relaunch a global bot.
+    assert not await cs.get("channels.telegram.bot_token")
+
+    # Idempotent: a second run finds nothing staged and leaves the token in place.
+    await main._migrate_telegram_to_default_agent(cs, agent)
+    assert (await store.get_default()).bot_token == "123:ABC"
