@@ -210,6 +210,7 @@ DEFAULT_RULES: dict[str, str] = {
     # so a quick emoji ack never interrupts the user with a prompt (#70).
     "set_reaction": "ALWAYS",
     "create_calendar_event": "ASK",
+    "create_contact": "ASK",
     "run_command:himalaya*send*": "ASK",
     "run_command:himalaya*delete*": "ASK",
     "run_command:himalaya*move*": "ASK",
@@ -230,6 +231,8 @@ DEFAULT_RULES: dict[str, str] = {
     # (list_secrets/request_secret) are deliberately left to ASK.
     "search_skills": "ALWAYS",
     "list_skills": "ALWAYS",
+    # Read-only contacts lookup — safe, high-frequency (mirrors search_skills).
+    "search_contacts": "ALWAYS",
 }
 
 
@@ -454,6 +457,7 @@ class PermissionEngine:
             "reply_email",
             "send_message",
             "create_calendar_event",
+            "create_contact",
             "schedule_task",
             "manage_jobs",
             "spawn_subagent",
@@ -664,6 +668,10 @@ def format_approval_message(tool_name: str, params: dict) -> str:
         summary = params.get("summary", "?")
         start = params.get("start", "?")
         return f"Create event: {summary}\nAt: {start}"
+    if tool_name == "create_contact":
+        name = params.get("name", "?")
+        account = params.get("account") or "the default contacts account"
+        return f"Add contact: {name}\nTo: {account}"
     if tool_name == "schedule_task":
         task = params.get("task", "?")
         run_at = params.get("run_at", "?")

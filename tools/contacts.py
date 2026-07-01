@@ -89,27 +89,89 @@ def _flatten_vcard(card: vobject.base.Component) -> dict[str, object]:
     }
 
 
-def _carddav_list(provider: dict) -> list[dict[str, object]]:
-    import caldav
+# CardDAV over plain WebDAV (PROPFIND / GET / PUT). The `caldav` library shipped
+# here has no CardDAV support, so we speak the protocol directly — which also works
+# against simple WebDAV address books such as Purelymail's.
+_DAV_NS = "{DAV:}"
 
-    client = caldav.DAVClient(
-        url=provider.get("url", ""),
-        username=provider.get("username", ""),
-        password=provider.get("password", ""),
+
+def _carddav_session(provider: dict) -> requests.Session:
+    s = requests.Session()
+    s.auth = (provider.get("username", ""), provider.get("password", ""))
+    return s
+
+
+def _carddav_base(provider: dict) -> str:
+    return provider.get("url", "").rstrip("/") + "/"
+
+
+def _same_origin_url(base: str, href: str) -> str | None:
+    """Resolve ``href`` against ``base`` only if it stays on the same origin.
+
+    A CardDAV server response controls the hrefs we then GET. Because the request
+    session carries the account's basic-auth on *every* request, an absolute href
+    to another host (or an https→http downgrade) would leak those credentials to
+    an attacker-controlled endpoint. So we reject anything whose scheme+host does
+    not match the configured base, and only follow same-origin resources.
+    """
+    from urllib.parse import urljoin, urlsplit
+
+    full = urljoin(base, href)
+    b, f = urlsplit(base), urlsplit(full)
+    if (f.scheme, f.netloc) != (b.scheme, b.netloc):
+        return None
+    return full
+
+
+def _parse_propfind_hrefs(xml_text: str) -> list[str]:
+    """Pull member hrefs out of a PROPFIND multistatus response."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    return [
+        href.text
+        for resp in root.findall(f"{_DAV_NS}response")
+        for href in resp.findall(f"{_DAV_NS}href")
+        if href.text
+    ]
+
+
+def _carddav_list(provider: dict) -> list[dict[str, object]]:
+    base = _carddav_base(provider)
+    s = _carddav_session(provider)
+    body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<d:propfind xmlns:d="DAV:"><d:prop><d:getcontenttype/></d:prop></d:propfind>'
     )
-    principal = client.principal()
-    books = principal.addressbooks()
+    resp = s.request(
+        "PROPFIND",
+        base,
+        data=body,
+        headers={"Depth": "1", "Content-Type": "application/xml; charset=utf-8"},
+        timeout=30,
+    )
+    resp.raise_for_status()
     contacts: list[dict[str, object]] = []
-    for book in books:
-        for obj in book.contacts():
-            try:
-                card = vobject.readOne(obj.data)
-            except Exception:
-                continue
-            data = _flatten_vcard(card)
-            data["id"] = obj.url
-            data["source"] = provider.get("name", "")
-            contacts.append(data)
+    for href in _parse_propfind_hrefs(resp.text):
+        if not href.lower().endswith(".vcf"):
+            continue
+        full = _same_origin_url(base, href)  # never follow a cross-origin href (leaks creds)
+        if not full:
+            continue
+        got = s.get(full, timeout=30)
+        if got.status_code != 200:
+            continue
+        try:
+            card = vobject.readOne(got.text)
+        except Exception:
+            continue
+        data = _flatten_vcard(card)
+        data["id"] = href.rsplit("/", 1)[-1]
+        data["source"] = provider.get("name", "")
+        contacts.append(data)
     return contacts
 
 
@@ -125,23 +187,64 @@ def _carddav_search(provider: dict, query: str) -> list[dict[str, object]]:
 
 
 def _carddav_get(provider: dict, contact_id: str) -> dict[str, object] | None:
-    import caldav
-
-    client = caldav.DAVClient(
-        url=provider.get("url", ""),
-        username=provider.get("username", ""),
-        password=provider.get("password", ""),
-    )
-    obj = caldav.objects.Contact(client=client, url=contact_id)
+    full = _same_origin_url(_carddav_base(provider), contact_id)
+    if not full:
+        return None
+    s = _carddav_session(provider)
+    got = s.get(full, timeout=30)
+    if got.status_code != 200:
+        return None
     try:
-        obj.load()
+        card = vobject.readOne(got.text)
     except Exception:
         return None
-    card = vobject.readOne(obj.data)
     data = _flatten_vcard(card)
-    data["id"] = contact_id
+    data["id"] = contact_id.rsplit("/", 1)[-1]
     data["source"] = provider.get("name", "")
     return data
+
+
+def _build_vcard(uid: str, name: str, email: str, phone: str, org: str) -> str:
+    """Serialise a minimal vCard (FN/N + optional EMAIL/TEL/ORG)."""
+    card = vobject.vCard()
+    card.add("fn").value = name
+    parts = name.split()
+    n = card.add("n")
+    n.value = vobject.vcard.Name(
+        family=" ".join(parts[1:]) if len(parts) > 1 else "", given=parts[0] if parts else name
+    )
+    card.add("uid").value = uid
+    if email:
+        e = card.add("email")
+        e.value = email
+        e.type_param = "INTERNET"
+    if phone:
+        t = card.add("tel")
+        t.value = phone
+        t.type_param = "CELL"
+    if org:
+        card.add("org").value = [org]
+    return card.serialize()
+
+
+def _carddav_add(provider: dict, name: str, email: str, phone: str, org: str) -> dict[str, object]:
+    import uuid
+    from urllib.parse import urljoin
+
+    uid = str(uuid.uuid4())
+    resource = f"{uid}.vcf"
+    body = _build_vcard(uid, name, email, phone, org)
+    s = _carddav_session(provider)
+    full = urljoin(_carddav_base(provider), resource)
+    put = s.put(
+        full,
+        data=body.encode("utf-8"),
+        headers={"Content-Type": "text/vcard; charset=utf-8"},
+        timeout=30,
+    )
+    if put.status_code not in (200, 201, 204):
+        return {"error": f"CardDAV PUT failed: HTTP {put.status_code} {put.text[:200]}"}
+    return {"ok": True, "id": resource, "full_name": name, "source": provider.get("name", "")}
 
 
 def _google_headers(db_path: str) -> dict[str, str]:
@@ -245,6 +348,14 @@ def main() -> None:
     get_cmd.add_argument("--id", required=True)
     get_cmd.add_argument("--output", "-o", choices=["json", "text"], default="json")
 
+    add_cmd = sub.add_parser("add", help="Create a contact (CardDAV only)")
+    add_cmd.add_argument("--provider", "-p", required=True)
+    add_cmd.add_argument("--name", required=True)
+    add_cmd.add_argument("--email", default="")
+    add_cmd.add_argument("--phone", default="")
+    add_cmd.add_argument("--org", default="")
+    add_cmd.add_argument("--output", "-o", choices=["json", "text"], default="json")
+
     args = parser.parse_args()
     providers = _load_contacts_providers(args.config, args.db)
     provider = _select_provider(providers, args.provider)
@@ -259,6 +370,17 @@ def main() -> None:
             results = _google_search(provider, args.query, db_path=args.db)
         else:
             results = _carddav_search(provider, args.query)
+    elif args.cmd == "add":
+        if _is_google(provider):
+            print(
+                json.dumps({"error": "Google Contacts is read-only (OAuth scope)."}),
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        results = _carddav_add(provider, args.name, args.email, args.phone, args.org)
+        if isinstance(results, dict) and results.get("error"):
+            print(json.dumps(results, ensure_ascii=False), file=sys.stderr)
+            sys.exit(1)
     else:
         if _is_google(provider):
             results = _google_get(provider, args.id, db_path=args.db)

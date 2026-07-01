@@ -42,12 +42,12 @@ def test_send_defaults_to_sender_identity() -> None:
 
 def test_send_from_read_only_account_denied() -> None:
     account, err = AgentCore._resolve_email_send(_persona(), {"account": "personal"})
-    assert account is None and err and "read-only" in err["error"]
+    assert account is None and err and "read-only" in err["error"].lower()
 
 
 def test_send_from_unbound_account_denied() -> None:
     account, err = AgentCore._resolve_email_send(_persona(), {"account": "work"})
-    assert account is None and err and "not allowed" in err["error"]
+    assert account is None and err and "not allowed" in err["error"].lower()
 
 
 def test_send_from_writable_account_allowed() -> None:
@@ -78,12 +78,12 @@ def test_calendar_defaults_to_writable() -> None:
 def test_calendar_read_only_denied() -> None:
     p = Persona(name="ro", calendar_accounts=[{"account": "shared", "access_level": "read"}])
     cal, err = AgentCore._resolve_calendar_write(p, {"calendar": "shared"})
-    assert cal is None and err and "read-only" in err["error"]
+    assert cal is None and err and "read-only" in err["error"].lower()
 
 
 def test_calendar_unbound_denied() -> None:
     cal, err = AgentCore._resolve_calendar_write(_persona(), {"calendar": "work"})
-    assert cal is None and err and "not allowed" in err["error"]
+    assert cal is None and err and "not allowed" in err["error"].lower()
 
 
 # ── Subagent inherit-never-widen ──────────────────────────────────────────
@@ -104,6 +104,112 @@ def test_account_note_lists_bindings_not_credentials() -> None:
     assert "fitness-agent (read_write, sender)" in note
     assert "personal (read)" in note
     assert "password" not in note.lower()
+
+
+# ── Contacts routing + enforcement (#110 follow-up) ───────────────────────
+def _contacts_persona() -> Persona:
+    return Persona(
+        name="c",
+        contacts_accounts=[
+            {"account": "agent-book", "access_level": "read_write"},
+            {"account": "shared", "access_level": "read"},
+        ],
+    )
+
+
+def test_contacts_read_defaults_to_first_bound() -> None:
+    acc, err = AgentCore._resolve_contacts_access(_contacts_persona(), {}, need_write=False)
+    assert err is None and acc == "agent-book"
+
+
+def test_contacts_write_defaults_to_first_writable() -> None:
+    p = Persona(
+        name="c",
+        contacts_accounts=[
+            {"account": "shared", "access_level": "read"},
+            {"account": "agent-book", "access_level": "read_write"},
+        ],
+    )
+    acc, err = AgentCore._resolve_contacts_access(p, {}, need_write=True)
+    assert err is None and acc == "agent-book"  # skips the read-only one
+
+
+def test_contacts_write_on_read_only_denied() -> None:
+    acc, err = AgentCore._resolve_contacts_access(
+        _contacts_persona(), {"account": "shared"}, need_write=True
+    )
+    assert acc is None and err and "read-only" in err["error"].lower()
+
+
+def test_contacts_unbound_denied() -> None:
+    acc, err = AgentCore._resolve_contacts_access(
+        _contacts_persona(), {"account": "work"}, need_write=False
+    )
+    assert acc is None and err and "not allowed" in err["error"].lower()
+
+
+def test_contacts_no_persona_legacy_requires_account() -> None:
+    acc, err = AgentCore._resolve_contacts_access(None, {"account": "x"}, need_write=True)
+    assert err is None and acc == "x"
+    acc, err = AgentCore._resolve_contacts_access(None, {}, need_write=False)
+    assert acc is None and err and "required" in err["error"].lower()
+
+
+def test_account_note_includes_contacts() -> None:
+    note = AgentCore._account_note(_contacts_persona())
+    assert "Contacts accounts: agent-book (read_write), shared (read)" in note
+
+
+def test_narrow_accounts_contacts_downgrades() -> None:
+    parent = [{"account": "shared", "access_level": "read"}]
+    child = [
+        {"account": "shared", "access_level": "read_write"},
+        {"account": "private", "access_level": "read_write"},
+    ]
+    assert narrow_accounts(parent, child) == [{"account": "shared", "access_level": "read"}]
+
+
+# ── Default-agent bindings (#110 follow-up) ────────────────────────────────
+def _config_with_defaults() -> object:
+    from core.config import Config
+
+    cfg = Config()
+    cfg.agent.email_accounts = [
+        {"account": "me", "access_level": "read_write", "is_sender_identity": True}
+    ]
+    cfg.agent.calendar_accounts = [{"account": "gcal", "access_level": "read"}]
+    cfg.agent.contacts_accounts = [{"account": "book", "access_level": "read_write"}]
+    return cfg
+
+
+def test_default_accounts_none_when_unset() -> None:
+    from core.config import Config
+
+    assert AgentCore._build_default_accounts(Config()) is None  # unscoped legacy
+
+
+def test_default_accounts_built_and_enforced() -> None:
+    identity = AgentCore._build_default_accounts(_config_with_defaults())
+    assert identity is not None
+    # Default agent routes send to its bound sender identity…
+    acc, err = AgentCore._resolve_email_send(identity, {})
+    assert err is None and acc == "me"
+    # …and is blocked from writing a read-only calendar.
+    cal, err = AgentCore._resolve_calendar_write(identity, {"calendar": "gcal"})
+    assert cal is None and err and "read-only" in err["error"].lower()
+    # …and its contacts write routes to the writable book.
+    cacc, err = AgentCore._resolve_contacts_access(identity, {}, need_write=True)
+    assert err is None and cacc == "book"
+
+
+@pytest.mark.asyncio
+async def test_migration_binds_contacts_too(tmp_path) -> None:
+    store = PersonaStore(db_path=str(tmp_path / "p.db"), seed_dir=tmp_path / "missing")
+    await store.upsert(Persona(name="coach"))
+    n = await bind_existing_accounts(store, ["mail"], [], ["book"])
+    assert n == 1
+    coach = await store.get("coach")
+    assert coach.contacts_access("book") == "read_write"
 
 
 # ── Compat migration + DB round-trip ──────────────────────────────────────

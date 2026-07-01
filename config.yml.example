@@ -45,11 +45,12 @@ channels:
     bridge_url: "local-wacli"
     allowed_numbers: "${WHATSAPP_ALLOWED_NUMBERS}"
 
-# Each account below is a registry entry. Personae bind to accounts by name with a
-# read / read_write access level (Persona editor → "Email & calendar accounts", or the
-# email_accounts / calendar_accounts frontmatter keys). A persona with no bindings has no
-# email/calendar access. Passwords may be ${vault:NAME} references (infra vault) so the
-# credential never sits in config or the model's context. See /docs/personae.
+# Each account below is a registry entry. Personae (and the default agent, on the
+# Assistant tab) bind to accounts by name with a read / read_write access level
+# (email_accounts / calendar_accounts / contacts_accounts). An identity with no
+# bindings has no email/calendar/contacts access. Passwords may be ${vault:NAME}
+# references (infra vault) so the credential never sits in config or the model's
+# context. See /docs/personae.
 calendar:
   providers:
     - name: "google"
@@ -60,6 +61,15 @@ calendar:
     #   url: "https://caldav.icloud.com/"
     #   username: "${ICLOUD_EMAIL}"
     #   password: "${ICLOUD_APP_PASSWORD}"
+
+# Contacts: CardDAV over plain WebDAV (search + create) or Google Contacts (read-only).
+# contacts:
+#   providers:
+#     - name: "agent-book"          # agent-owned address book (e.g. Purelymail WebDAV)
+#       type: "carddav"             # your unique URL: purelymail.com/manage/cardDavUrl
+#       url: "${PURELYMAIL_CARDDAV_URL}"
+#       username: "${PURELYMAIL_EMAIL}"
+#       password: "${PURELYMAIL_APP_PASSWORD}"
 
 voice:
   stt_model: "base"

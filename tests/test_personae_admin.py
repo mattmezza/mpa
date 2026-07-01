@@ -118,6 +118,7 @@ def test_persona_account_bindings_roundtrip(tmp_path) -> None:
                 {"account": "personal", "access_level": "read"},
             ],
             "calendar_accounts": [{"account": "google", "access_level": "read_write"}],
+            "contacts_accounts": [{"account": "agent-book", "access_level": "read_write"}],
         },
         headers=AUTH,
     )
@@ -131,6 +132,7 @@ def test_persona_account_bindings_roundtrip(tmp_path) -> None:
     }
     assert got["email_accounts"][1]["access_level"] == "read"
     assert got["calendar_accounts"] == [{"account": "google", "access_level": "read_write"}]
+    assert got["contacts_accounts"] == [{"account": "agent-book", "access_level": "read_write"}]
 
 
 def test_persona_editor_lists_available_accounts(tmp_path) -> None:
@@ -152,7 +154,7 @@ def test_persona_editor_lists_available_accounts(tmp_path) -> None:
         headers=AUTH,
     )
     page = client.get("/admin/personae/coach", headers=AUTH).text
-    assert "Email &amp; calendar accounts" in page  # the binding card renders
+    assert "Email, calendar &amp; contacts accounts" in page  # the binding card renders
     assert "coach-agent" in page and "google" in page  # available accounts injected
 
 

@@ -96,6 +96,15 @@ class AgentConfig(BaseModel):
     personae_db_path: str = "data/personae.db"
     active_persona: str = ""  # empty = default identity (character below)
     character: str = ""  # identity + tone (legacy `personalia` was merged in — #98)
+    # Account bindings for the DEFAULT identity — used when no persona is active
+    # (#110). Same shape as the per-persona facets: email entries carry
+    # {account, access_level, is_sender_identity}, calendar/contacts drop the
+    # sender flag. Empty = the default agent is unscoped (legacy behaviour: it may
+    # use any configured account); non-empty = it is scoped to these accounts,
+    # enforced exactly like a persona's.
+    email_accounts: list[dict] = Field(default_factory=list)
+    calendar_accounts: list[dict] = Field(default_factory=list)
+    contacts_accounts: list[dict] = Field(default_factory=list)
 
 
 class GroupChatConfig(BaseModel):
