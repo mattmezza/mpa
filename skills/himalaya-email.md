@@ -141,3 +141,12 @@ himalaya flag add -a personal 123 Flagged
   error, confirm that env var is exported.
 - Use `printf` with `\n` for newlines when building raw messages; never use bare `echo`
   with literal newlines.
+- Accounts are identified by NAME (`-a personal`), which is all any command needs. The
+  config file holding the addresses lives outside the workspace and is not readable —
+  don't `cat`/`grep`/`read_file` it. If you genuinely need an account's own address,
+  read it off any message: `himalaya envelope list -a NAME -s 1 -o json` (the `to`/`from`
+  field). To just see which accounts exist, run `himalaya account list`.
+- Server-side search lags delivery: a message you just sent may not match a `subject`/
+  `from` query for a few seconds even though it has already arrived. To find just-sent
+  mail, list recent envelopes (`envelope list -s 20 -o json`) rather than searching — the
+  envelope listing reflects new mail immediately.

