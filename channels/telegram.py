@@ -416,14 +416,15 @@ class TelegramChannel:
         routing = self._turn_routing(update, message, context)
         convo_user = routing["user_id"]
         self._remember_chat(convo_user, folded)
+        chat_id = folded if folded is not None else sender_id
         # The whitelist gates who can make the bot *reply/act*; a record-only turn
         # (respond=False) writes to history but runs no inference and takes no
         # action, so it bypasses the gate — that is what lets the loop guard
-        # record other bots and the shared history tag every speaker (#30).
-        if routing["respond"] and not self._is_allowed(sender_id):
+        # record other bots and the shared history tag every speaker (#30). The
+        # per-chat gate (#129) can further restrict who triggers in this chat.
+        if routing["respond"] and not await self._may_act(sender_id, convo_user, str(chat_id)):
             return
 
-        chat_id = folded if folded is not None else sender_id
         text = (message.text or "").strip()
         respond = routing["respond"]
         first = text.split(maxsplit=1)[0] if text else ""
@@ -463,14 +464,15 @@ class TelegramChannel:
         routing = self._turn_routing(update, message, context)
         convo_user = routing["user_id"]
         self._remember_chat(convo_user, folded)
+        chat_id = folded if folded is not None else sender_id
         # The whitelist gates who can make the bot *reply/act*; a record-only turn
         # (respond=False) writes to history but runs no inference and takes no
         # action, so it bypasses the gate — that is what lets the loop guard
-        # record other bots and the shared history tag every speaker (#30).
-        if routing["respond"] and not self._is_allowed(sender_id):
+        # record other bots and the shared history tag every speaker (#30). The
+        # per-chat gate (#129) can further restrict who triggers in this chat.
+        if routing["respond"] and not await self._may_act(sender_id, convo_user, str(chat_id)):
             return
 
-        chat_id = folded if folded is not None else sender_id
         reply_context = self._reply_context(message)
         prefix = f"{routing['speaker_tag']}{reply_context}"
         # Respond-gate: a voice message we're staying silent on is recorded as a
@@ -519,14 +521,15 @@ class TelegramChannel:
         routing = self._turn_routing(update, message, context)
         convo_user = routing["user_id"]
         self._remember_chat(convo_user, folded)
+        chat_id = folded if folded is not None else sender_id
         # The whitelist gates who can make the bot *reply/act*; a record-only turn
         # (respond=False) writes to history but runs no inference and takes no
         # action, so it bypasses the gate — that is what lets the loop guard
-        # record other bots and the shared history tag every speaker (#30).
-        if routing["respond"] and not self._is_allowed(sender_id):
+        # record other bots and the shared history tag every speaker (#30). The
+        # per-chat gate (#129) can further restrict who triggers in this chat.
+        if routing["respond"] and not await self._may_act(sender_id, convo_user, str(chat_id)):
             return
 
-        chat_id = folded if folded is not None else sender_id
         caption = message.caption or ""
         reply_context = self._reply_context(message)
         prefix = f"{routing['speaker_tag']}{reply_context}"
@@ -572,9 +575,11 @@ class TelegramChannel:
         """/jobs — list active subagent runs with inline cancel buttons (issue #15)."""
         user = update.effective_user
         message = update.message
+        chat = update.effective_chat
         if not user or not message:
             return
-        if not self._is_allowed(user.id):
+        cid = str(chat.id) if chat else str(user.id)
+        if not await self._may_act(user.id, cid, cid):
             return
         runs = self.agent.subagents.list_runs(active_only=True)
         if not runs:
@@ -884,6 +889,23 @@ class TelegramChannel:
             log.warning("Ignoring message from unauthorized user %s", user_id)
             return False
         return True
+
+    async def _may_act(self, sender_id: int, convo_user: str, chat_id: str) -> bool:
+        """Gate who can make the bot reply/act: the bot-wide ACL (#29) plus the
+        resolved agent's per-chat trigger/DM permissions (#129)."""
+        if not self._is_allowed(sender_id):
+            return False
+        allowed = await self.agent.may_act_in_chat(
+            self.channel_name, convo_user, chat_id, sender_id
+        )
+        if not allowed:
+            log.info(
+                "Per-chat settings block user %s in chat %s (%s)",
+                sender_id,
+                chat_id,
+                self.channel_name,
+            )
+        return allowed
 
     async def _handle_text(
         self,
