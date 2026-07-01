@@ -131,6 +131,64 @@ def test_inspect_payload_renders_captured_request(tmp_path) -> None:
     llm.clear_captured()
 
 
+def test_inspect_payload_shows_context_usage_and_percent(tmp_path) -> None:
+    # #116: the real prompt size (usage.context_tokens) + % of the model's window.
+    asyncio.run(_seed(tmp_path))
+    client = _client(tmp_path)
+    llm.clear_captured()
+    llm.record_sent_payload(
+        ("telegram", "u1", "c1"),
+        {
+            "captured_at": 1_700_000_000.0,
+            "provider": "anthropic",
+            "model": "claude-opus-4-5",  # 200_000 window in CONTEXT_WINDOWS
+            "max_tokens": 8192,
+            "system": "S",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [],
+            "usage": {"context_tokens": 4000, "input_tokens": 4000, "output_tokens": 10},
+        },
+    )
+    r = client.get(
+        "/inspect/payload",
+        params={"channel": "telegram", "user_id": "u1", "chat_id": "c1"},
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    assert "4,000" in r.text  # token count, thousands-separated
+    assert "200,000" in r.text  # window pulled from the shared CONTEXT_WINDOWS map
+    assert "2.0% of context window" in r.text  # 4000 / 200000
+    llm.clear_captured()
+
+
+def test_inspect_payload_omits_usage_when_absent(tmp_path) -> None:
+    # Payloads captured before a response (or a provider without usage) show no
+    # meter rather than "0 tokens".
+    asyncio.run(_seed(tmp_path))
+    client = _client(tmp_path)
+    llm.clear_captured()
+    llm.record_sent_payload(
+        ("telegram", "u1", "c1"),
+        {
+            "captured_at": 1_700_000_000.0,
+            "provider": "x",
+            "model": "m",
+            "max_tokens": 100,
+            "system": "S",
+            "messages": [],
+            "tools": [],
+        },
+    )
+    r = client.get(
+        "/inspect/payload",
+        params={"channel": "telegram", "user_id": "u1", "chat_id": "c1"},
+        headers=AUTH,
+    )
+    assert r.status_code == 200
+    assert "of context window" not in r.text
+    llm.clear_captured()
+
+
 def test_inspect_payload_empty_for_uncaptured_context(tmp_path) -> None:
     asyncio.run(_seed(tmp_path))
     client = _client(tmp_path)
