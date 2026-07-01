@@ -2524,8 +2524,11 @@ class AgentCore:
         headers.append(f"Subject: {subject}")
         mml = "\n".join(headers) + "\n\n" + body
 
+        # himalaya v1.2.0: -a/--account is an OPTION on the subcommand, so it must
+        # follow `message send` — a leading `himalaya -a … message send` is rejected
+        # as an unexpected argument. The body is piped in as MML on stdin.
         command = (
-            f"printf %s {_shell_quote(mml)} | himalaya -a {_shell_quote(account)} message send"
+            f"printf %s {_shell_quote(mml)} | himalaya message send -a {_shell_quote(account)}"
         )
         return await self.executor.run_command_trusted(command)
 
@@ -2540,15 +2543,19 @@ class AgentCore:
         folder = params.get("folder")
         log.info("Tool call: reply_email — account=%s message=%s", account, message_id)
 
-        cmd_parts = [f"printf %s {_shell_quote(body)} | himalaya -a {_shell_quote(account)}"]
-        if folder:
-            cmd_parts.append(f"--folder {_shell_quote(folder)}")
-        cmd_parts.append("message reply")
+        # himalaya v1.2.0: `message reply` opens $EDITOR (not automation-safe), so
+        # build the reply template non-interactively and pipe it to `template send`.
+        # -a/-A/--folder are OPTIONS on the subcommand (a leading -a is rejected);
+        # <ID> then [BODY] are positional.
+        reply = ["himalaya template reply", "-a", _shell_quote(account)]
         if reply_all:
-            cmd_parts.append("--all")
-        cmd_parts.append(_shell_quote(message_id))
+            reply.append("-A")
+        if folder:
+            reply += ["--folder", _shell_quote(folder)]
+        reply += [_shell_quote(message_id), _shell_quote(body)]
+        command = " ".join(reply) + f" | himalaya template send -a {_shell_quote(account)}"
 
-        return await self.executor.run_command_trusted(" ".join(cmd_parts))
+        return await self.executor.run_command_trusted(command)
 
     async def _tool_send_message(self, params: dict) -> dict:
         """Send a message via a registered channel."""
