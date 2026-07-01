@@ -95,7 +95,7 @@ MPA uses a dual-layer config system:
 | `config.yml` | Agent settings, channels, calendar, scheduler jobs |
 | `character.md` | Agent identity, personality, and communication style (editable) |
 | `skills/*.md` | Skill documents that teach the agent how to use tools |
-| `agents/*.md` | Agent definitions — swappable agent identities (starter gallery) |
+| `agents/*.md` | Optional agent-definition seed files (none ship; create agents in the admin UI) |
 
 ## Project structure
 
@@ -124,7 +124,7 @@ tools/          CLI helper scripts
   calendar_write.py  CalDAV event creator
   wacli/              WhatsApp CLI (vendor)
 skills/         Markdown skill files
-agents/       Agent definitions (starter gallery)
+agents/       Optional agent-definition seed files (empty by default)
 schema/         Database schemas
 tests/          Test suite
 data/           Runtime SQLite databases (gitignored)

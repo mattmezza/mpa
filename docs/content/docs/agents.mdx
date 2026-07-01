@@ -31,8 +31,9 @@ Agents mirror the [skills](/docs/skills) pipeline:
 
 - **Definitions** are stored in SQLite at `data/agents.db` (table `agents`), configurable
   via `agent.agents_db_path`.
-- They are **seeded** at first access from markdown files in `agents/` (configurable via
-  `agent.agents_dir`) — this is the starter gallery.
+- On first access they are **seeded** from any markdown files in `agents/` (configurable via
+  `agent.agents_dir`). No agents ship by default — the directory is empty, so a fresh install
+  starts with none; drop your own `.md` files there to auto-seed a gallery.
 - The **active** agent is a single config value, `agent.active_agent`, in the config store
   (`data/config.db`). Empty = the default identity.
 
@@ -85,21 +86,21 @@ agent as a card below, marking the active one. From there you can:
 
 The page is responsive and touch-friendly: cards reflow to a single column at phone width.
 
-### Starter gallery
+### Seeding your own
 
-Six ready-made agents ship seeded and ready to use or customise: fitness coach, finance
-assistant, travel planner, coding helper, writing editor, and language tutor. They are normal
-rows — edit them in place, or activate one as-is.
+No agents ship by default — you build them from scratch on the **Agents** tab (or in the
+markdown format above). To pre-load a gallery, drop `.md` files into `agents/` (the
+`agent.agents_dir`); each is seeded on first access.
 
-Seeding is by file stem: a gallery slug is seeded whenever no row by that name exists. Deleting
-or renaming a starter agent **tombstones its old slug**, so the gallery file no longer
-re-seeds it — a delete stays deleted and a rename moves the agent cleanly instead of leaving a
-duplicate copy behind. Re-creating a slug (saving a new agent under it) clears the tombstone.
+Seeding is by file stem: a slug is seeded whenever no row by that name exists. Deleting or
+renaming a seeded agent **tombstones its old slug**, so its file no longer re-seeds it — a
+delete stays deleted and a rename moves the agent cleanly instead of leaving a duplicate copy
+behind. Re-creating a slug (saving a new agent under it) clears the tombstone.
 
 ## Setup wizard
 
-The setup wizard has a skippable **agent** step (after *identity*): pick a starter agent to
-specialise your assistant out of the box, or keep the default in one tap.
+The setup wizard has a skippable **agent** step (after *identity*): keep the default general
+assistant, pick one of any agents you've seeded, or skip and build agents later.
 
 ## Testing an agent from the terminal
 
@@ -107,9 +108,9 @@ The REPL can start with a specific agent active, so you can iterate on one witho
 the global setting:
 
 ```bash
-make repl AGENT=fitness-coach
+make repl AGENT=<slug>
 # or
-uv run python -m core.repl --agent fitness-coach
+uv run python -m core.repl --agent <slug>
 ```
 
 An unknown name fails loudly and lists the available agents.

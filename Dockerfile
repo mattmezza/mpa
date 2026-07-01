@@ -71,7 +71,6 @@ COPY core/ core/
 COPY channels/ channels/
 COPY schema/ schema/
 COPY skills/ skills/
-COPY agents/ agents/
 COPY tools/ tools/
 COPY voice/ voice/
 COPY api/ api/

@@ -15,7 +15,7 @@ agent:
   max_tokens: 8192                  # max tokens the model may emit per response; raise for capable models (Claude up to 128000)
   timezone: "Europe/Zurich"
   skills_dir: "skills/"
-  agents_dir: "agents/"        # starter-gallery seed directory
+  agents_dir: "agents/"        # optional seed dir — drop agent .md files here to auto-seed (empty by default)
   active_agent: ""               # slug of the active agent; "" = default identity
 
 channels:

@@ -21,6 +21,9 @@
         <span class="text-muted text-xs">{{ p.name }}</span></span>
     </label>
     {% endfor %}
+    {% if not step_ctx.agents %}
+    <p class="text-muted text-xs px-2 pt-1">No prebuilt agents — create your own anytime on the Agents tab.</p>
+    {% endif %}
   </div>
 
   <div class="flex justify-between mt-4">

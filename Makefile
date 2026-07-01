@@ -31,7 +31,7 @@ help:
 	@echo ""
 	@echo "  Development:"
 	@echo "    make repl         Chat with the agent from the terminal (no Telegram)"
-	@echo "                      (make repl AGENT=fitness-coach to test an agent)"
+	@echo "                      (make repl AGENT=<slug> to test a specific agent)"
 	@echo "                      (make repl YOLO=1 to auto-approve all permissions)"
 	@echo "    make dev          Show instructions for running dev services"
 	@echo "    make dev-agent    Run agent with auto-reload"
