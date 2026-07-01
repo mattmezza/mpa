@@ -56,6 +56,24 @@
   </div>
 </div>
 
+{# Context-window usage meter (#116) — real prompt size the provider reported #}
+{%- if meta.context_tokens %}
+{% set pct = meta.context_pct or 0 %}
+{% set fill = 'var(--color-danger)' if pct >= 90 else ('var(--color-warn)' if pct >= 70 else 'var(--color-accent)') %}
+<div class="card mb-2">
+  <div class="flex items-center justify-between mb-1">
+    <span class="text-sm font-semibold">Context usage</span>
+    <span class="text-xs text-muted">
+      {{ '{:,}'.format(meta.context_tokens) }} / {{ '{:,}'.format(meta.context_window) }} tokens
+      {%- if meta.context_pct is not none %} — {{ meta.context_pct }}% of context window{%- endif %}
+    </span>
+  </div>
+  <div style="width:100%;height:0.5rem;border-radius:9999px;background:var(--color-border);overflow:hidden">
+    <div style="width:{{ pct if pct < 100 else 100 }}%;height:100%;border-radius:9999px;background:{{ fill }};transition:width .2s"></div>
+  </div>
+</div>
+{%- endif %}
+
 {# System prompt / identity #}
 <details class="card mb-2" open>
   <summary class="cursor-pointer text-sm font-semibold">System prompt

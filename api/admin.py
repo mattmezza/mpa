@@ -34,6 +34,8 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel, Field
 
 from core.artifacts import ARTIFACT_CSP, NOT_FOUND_HTML, resolve, serving_base, valid_id
+from core.compaction import effective_window
+from core.config import CompactionConfig
 from core.config_store import ConfigStore
 from core.goal_decomposition import classify_complexity, decompose_goal
 from core.llm import LLMClient, get_sent_payload
@@ -3125,6 +3127,23 @@ def create_admin_app(
             # view shows a placeholder, while every other field stays verbatim.
             messages = _elide_image_data(payload.get("messages") or [])
             tools = payload.get("tools") or []
+            # Context size + % of the model's window (#116). context_tokens is the
+            # real prompt size the provider reported for the last-sent request;
+            # the window comes from the same map compaction uses (single source).
+            usage = payload.get("usage") or {}
+            context_tokens = int(usage.get("context_tokens") or 0)
+            context_window = 0
+            context_pct: float | None = None
+            if context_tokens:
+                try:
+                    fallback = int(await config_store.get("compaction.context_window") or 200000)
+                except TypeError, ValueError:
+                    fallback = 200000
+                context_window = effective_window(
+                    CompactionConfig(context_window=fallback), payload.get("model") or ""
+                )
+                if context_window:
+                    context_pct = round(context_tokens / context_window * 100, 1)
             meta = {
                 "provider": payload.get("provider", ""),
                 "model": payload.get("model", ""),
@@ -3132,6 +3151,9 @@ def create_admin_app(
                 "n_messages": len(messages),
                 "n_tools": len(tools),
                 "captured_at": captured,
+                "context_tokens": context_tokens,
+                "context_window": context_window,
+                "context_pct": context_pct,
             }
             pretty = json.dumps(
                 {

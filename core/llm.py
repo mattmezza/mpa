@@ -335,18 +335,18 @@ class LLMClient:
         # Snapshot the exact request for the Inspect tab (#99). Shallow-copy the
         # lists so the caller's later mutations (tool-result ping-pong) don't edit
         # what we stored; each generate() overwrites, so the slot holds last-sent.
-        record_sent_payload(
-            _capture_ctx.get(),
-            {
-                "captured_at": time.time(),
-                "provider": self.provider,
-                "model": resolved_model,
-                "max_tokens": max_tokens,
-                "system": system,
-                "messages": list(messages),
-                "tools": list(tools),
-            },
-        )
+        # We keep a reference so the real token usage from the response can be
+        # backfilled below (#116) — the Inspect tab shows context size + % window.
+        payload = {
+            "captured_at": time.time(),
+            "provider": self.provider,
+            "model": resolved_model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": list(messages),
+            "tools": list(tools),
+        }
+        record_sent_payload(_capture_ctx.get(), payload)
         if self.provider == "anthropic":
             client_any = cast(Any, self._client)
             messages_client = cast(Any, getattr(client_any, "messages"))  # type: ignore[attr-defined]
@@ -389,12 +389,14 @@ class LLMClient:
             reasoning = "\n".join(p for p in reasoning_parts if p).strip()
             if reasoning:
                 reasoning_log.info("%s", reasoning)
+            usage = _anthropic_usage(response)
+            payload["usage"] = usage  # backfill real context size for Inspect (#116)
             return LLMResponse(
                 text="\n".join(text_parts).strip(),
                 tool_calls=tool_calls,
                 reasoning=reasoning,
                 raw=response.content,
-                usage=_anthropic_usage(response),
+                usage=usage,
                 truncated=getattr(response, "stop_reason", None) == "max_tokens",
             )
 
@@ -423,12 +425,14 @@ class LLMClient:
         ).strip()
         if reasoning:
             reasoning_log.info("%s", reasoning)
+        usage = _openai_usage(response)
+        payload["usage"] = usage  # backfill real context size for Inspect (#116)
         return LLMResponse(
             text=(message.content or "").strip(),
             tool_calls=tool_calls,
             reasoning=reasoning,
             raw=message.model_dump(exclude_none=True),
-            usage=_openai_usage(response),
+            usage=usage,
             truncated=getattr(response.choices[0], "finish_reason", None) == "length",
         )
 

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from core import llm
 from core.config import AgentConfig
 from core.llm import LLMClient
 
@@ -99,6 +100,38 @@ async def test_openai_generate_flags_truncation() -> None:
 
     out = await client.generate(model="deepseek-v4-flash", system="s", messages=[], tools=[])
     assert out.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_generate_backfills_usage_into_captured_payload() -> None:
+    """The Inspect tab needs the real context size (#116); generate() writes the
+    response's usage back onto the payload it captured before the call."""
+    client = LLMClient("anthropic", "x")
+    usage = type(
+        "U",
+        (),
+        {
+            "input_tokens": 1200,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 800,
+            "cache_creation_input_tokens": 0,
+        },
+    )()
+    resp = type("R", (), {"content": [], "usage": usage, "stop_reason": "end_turn"})()
+    create = AsyncMock(return_value=resp)
+    client._client = type("C", (), {"messages": type("M", (), {"create": create})()})()
+
+    llm.clear_captured()
+    ctx = ("telegram", "u1", "c1")
+    tok = llm.set_capture_context(ctx)
+    try:
+        await client.generate(model="claude-opus-4-8", system="s", messages=[], tools=[])
+    finally:
+        llm.reset_capture_context(tok)
+    captured = llm.get_sent_payload(ctx)
+    assert captured is not None
+    assert captured["usage"]["context_tokens"] == 2000  # 1200 input + 800 cache read
+    llm.clear_captured()
 
 
 def test_truncation_tool_results_carries_notice() -> None:
