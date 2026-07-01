@@ -203,7 +203,9 @@ class TestPartialRoutes:
         resp = client.get("/partials/identity", headers=AUTH)
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
-        assert "character" in resp.text.lower()
+        # #115 flw: identity/character moved to the agent editor; this fragment is
+        # now the global Voice card.
+        assert "voice" in resp.text.lower()
 
     def test_identity_partial_has_voice_backend_and_kokoro(self):
         # #84: backend selector + Kokoro voice picker + preview wiring.
@@ -555,7 +557,7 @@ class TestSetupWizard:
         assert "Alice" in store._data.get("agent.character", "")
         # Should have advanced to the agent step
         assert store._step == "agent"
-        assert "starting agent" in resp.text.lower()
+        assert "assistant is ready" in resp.text.lower()
 
     def test_setup_calendar_step(self):
         store = _ConfigStoreStub(setup_complete=False, step="calendar")
@@ -1070,9 +1072,9 @@ class TestWizardPrePopulation:
             data={"agent_name": "Test", "owner_name": "Owner", "timezone": "UTC"},
         )
         assert resp.status_code == 200
-        # Agent step offers the default + a Skip path.
-        assert "starting agent" in resp.text.lower()
-        assert "Default" in resp.text
+        # Agent step confirms the default assistant is set up.
+        assert "assistant is ready" in resp.text.lower()
+        assert "default" in resp.text.lower()
 
     def test_calendar_forward_pre_populates_search(self):
         """Submitting calendar step should pre-populate search with any saved values."""

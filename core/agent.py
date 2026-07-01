@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 from tavily import TavilyClient
 
 from core import coding, imagegen
-from core.agents import Agent, AgentStore
+from core.agents import Agent, AgentStore, default_agent_from_values
 from core.compaction import compact_messages, should_compact
 from core.config import Config
 from core.embeddings import LOCAL_PROVIDERS, EmbeddingClient, LocalEmbeddingClient
@@ -992,11 +992,19 @@ class AgentCore:
         self.agents = AgentStore(
             db_path=config.agent.agents_db_path,
             seed_dir=config.agent.agents_dir,
+            # Seed the base ``default`` agent row from config on first boot (#115
+            # follow-up: the default identity is a real agent row now).
+            default_identity=default_agent_from_values(
+                character=config.agent.character,
+                agent_name=config.agent.name,
+                email_accounts=config.agent.email_accounts,
+                calendar_accounts=config.agent.calendar_accounts,
+                contacts_accounts=config.agent.contacts_accounts,
+            ),
         )
-        # Account bindings for the default identity (no agent active) — built
-        # once from config (#110). None = unscoped (legacy: any account); otherwise
-        # an Agent-shaped carrier used only for account routing/enforcement, never
-        # for scoping/memory/character (which stay the default agent's).
+        # Account bindings for the base default when it is the *implicit* carrier
+        # (a subagent spawned with no parent identity). The main flow resolves the
+        # default agent row directly; this is the fallback for that one edge (#110).
         self._default_accounts = self._build_default_accounts(config)
         self.executor = ToolExecutor(tool_env=tool_env(config))
         # Image-generation usage guardrail (issue #55). Cheap to construct; the
@@ -1159,6 +1167,21 @@ class AgentCore:
 
         command = _strip_command_suffix(message)
 
+        # Resolve the agent for this turn — a per-chat binding wins over the default
+        # (#14); an explicit override (scheduler) skips the ladder (#29).
+        if agent_name:
+            agent = await self._load_agent(agent_name)
+        else:
+            agent = await self._resolve_agent(channel, user_id, chat_id)
+
+        # Kill-switch (#115 flw): a disabled agent processes NOTHING — no reply, no
+        # LLM, no tools, not even a /new or /yolo command. Its Telegram bot goes
+        # silent. Gated BEFORE the command shortcuts below; applies to every channel
+        # and to scheduler overrides too.
+        if agent is not None and not agent.enabled:
+            log.info("Agent %r is disabled (kill-switch) — dropping turn", agent.name)
+            return AgentResponse(text="")
+
         # YOLO toggle — /yolo-on grants this agent a free pass (ASK actions run
         # without a prompt); /yolo-off restores prompting. Require explicit
         # addressing, not just respond=True: with reply_when_addressed_only=False
@@ -1209,14 +1232,6 @@ class AgentCore:
                 chat_id,
             )
             return AgentResponse(text="Conversation cleared.")
-
-        # Resolve the active agent (its identity, skills + tool scope) — a
-        # per-chat binding wins over the globally selected agent (#14). An
-        # explicit override (scheduler) skips the ladder (#29).
-        if agent_name:
-            agent = await self._load_agent(agent_name)
-        else:
-            agent = await self._resolve_agent(channel, user_id, chat_id)
 
         # Tag this turn's log records with the agent's stream (#75) so the admin
         # Logs tab can filter per agent. Subagents spawned below inherit it (the
@@ -1336,13 +1351,12 @@ class AgentCore:
             reset_capture_context(cap_token)
 
     async def _resolve_agent(self, channel: str, user_id: str, chat_id: str) -> Agent | None:
-        """Resolve the active agent for this request, in precedence order:
+        """Resolve the agent for this request, in precedence order:
 
         0. a per-agent bot — a ``"telegram:<name>"`` channel binds straight to
            agent ``<name>``: the bot that received the message *is* the agent (#29),
         1. the per-chat binding for ``(channel, user_id, chat_id)`` (#14),
-        2. the globally-selected agent (``config.agent.active_agent``, #13),
-        3. the default identity (``None``).
+        2. the agent flagged as the default (``is_default``) — or ``None``.
         """
         # 0. Bot-per-agent: the channel name carries the agent (e.g. "telegram:coach").
         _, sep, agent_name = channel.partition(":")
@@ -1359,13 +1373,14 @@ class AgentCore:
             if agent:
                 return agent
 
-        # 2. Globally-selected agent.
-        name = (self.config.agent.active_agent or "").strip()
-        if name:
-            return await self._load_agent(name)
-
-        # 3. Default identity.
-        return None
+        # 2. The agent flagged as the default — a normal agent (its own scope/tools/
+        # accounts) that answers when nothing else is selected. None if none is
+        # flagged, which reproduces the pre-row config base.
+        try:
+            return await self.agents.get_default()
+        except Exception:
+            log.exception("Failed to resolve the default agent")
+            return None
 
     async def may_act_in_chat(
         self, channel: str, user_id: str, chat_id: str, sender_id: int
@@ -1586,7 +1601,7 @@ class AgentCore:
         if agent is not None and not agent.allows_tool("spawn_subagent"):
             return ""
         try:
-            agents = await self.agents.list_agents()
+            agents = [a for a in await self.agents.list_agents() if a.enabled]
         except Exception:
             log.exception("Failed to list agents for the subagent roster")
             return ""
@@ -1918,7 +1933,7 @@ class AgentCore:
 
         # Check if the LLM wants to respond with voice
         voice_bytes = await self._maybe_synthesize_voice(
-            final_text, voice=agent.voice if agent else None
+            final_text, voice=(agent.voice or None) if agent else None
         )
         # Strip the control marker unconditionally — it must never reach the user,
         # even when synthesis was skipped or failed (voice_bytes is None).
@@ -2086,7 +2101,7 @@ class AgentCore:
 
         # Check if the LLM wants to respond with voice
         voice_bytes = await self._maybe_synthesize_voice(
-            final_text, voice=agent.voice if agent else None
+            final_text, voice=(agent.voice or None) if agent else None
         )
         # Strip the control marker unconditionally — it must never reach the user,
         # even when synthesis was skipped or failed (voice_bytes is None).
@@ -3306,7 +3321,7 @@ class AgentCore:
             requested = await self._load_agent(agent_name)
             if requested is None:
                 try:
-                    names = [p.name for p in await self.agents.list_agents()]
+                    names = [p.name for p in await self.agents.list_agents() if p.enabled]
                 except Exception:
                     names = []
                 hint = f" Available: {', '.join(names)}." if names else ""
@@ -3315,6 +3330,8 @@ class AgentCore:
                         f"Agent not found: {agent_name}.{hint} Omit 'agent' to run as yourself."
                     )
                 }
+            if not requested.enabled:  # kill-switch: can't spawn a disabled agent (#115 flw)
+                return {"error": f"Agent '{agent_name}' is disabled and can't be spawned."}
         else:
             requested = parent_state.get("agent_obj")
         child_agent = self._narrow_agent(requested, parent_state) if requested else None

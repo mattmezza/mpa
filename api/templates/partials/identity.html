@@ -1,281 +1,120 @@
-{# Default-agent identity fragment — shown standalone and embedded in the Agents tab (#115) #}
-<div class="space-y-6">
-  {# Basic identity fields #}
-  <div class="card" x-data="{
-    agentName: {{ agent_name|default('', true)|tojson|forceescape }},
-    idResult: '',
-    idOk: false
-  }">
-    <h2 class="text-base mb-1">Identity</h2>
-    <p class="text-muted text-xs mb-3">The agent's name — how it introduces itself.</p>
+{# Global Voice (STT/TTS) settings — shared by every agent. Embedded in the Agents
+   tab and served standalone at /partials/identity. Per-agent identity/character/
+   accounts now live on the agent row + editor (#115 follow-up). #}
+<div class="card" x-data="{
+  ttsEnabled: {{ tts_enabled|default('true', true)|tojson|forceescape }},
+  sttModel: {{ stt_model|default('base', true)|tojson|forceescape }},
+  ttsVoice: {{ tts_voice|default('en-US-AvaNeural', true)|tojson|forceescape }},
+  backend: {{ backend|default('edge-tts', true)|tojson|forceescape }},
+  kokoroVoice: {{ kokoro_voice|default('af_bella', true)|tojson|forceescape }},
+  previewText: '',
+  previewLang: '',
+  voiceResult: '',
+  voiceOk: false
+}">
+  <h2 class="text-base mb-1">Voice</h2>
+  <p class="text-muted text-xs mb-3">Configure speech-to-text (STT) and text-to-speech (TTS) used for voice messages.</p>
 
-    <div class="space-y-3">
-      <div>
-        <label class="label">Agent name</label>
-        <input type="text" class="input-sm" style="max-width:300px"
-               x-model="agentName" placeholder="Clio">
-      </div>
+  <div class="space-y-3">
+    <div class="flex items-center gap-2">
+      <label class="label mb-0">Enable TTS replies</label>
+      <input type="checkbox" x-model="ttsEnabled"
+             :checked="ttsEnabled === 'true' || ttsEnabled === true">
     </div>
 
-    <div class="flex justify-end mt-3">
-      <button class="btn-primary btn-sm"
-              @click="
-                fetch('/config', {
-                  method: 'PATCH',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
-                  },
-                  body: JSON.stringify({values: {'agent.name': agentName}})
-                })
-                .then(r => { idOk = r.ok; return r.json(); })
-                .then(d => {
-                  idResult = idOk ? 'Identity saved' : (d.detail || 'Error');
-                  if (idOk && window.showToast) { window.showToast('Identity saved'); }
-                  if (idOk && window.updateAdminGreeting) { window.updateAdminGreeting('', agentName); }
-                })
-                .catch(e => { idOk = false; idResult = e.message; })
-              ">
-        Save identity
-      </button>
+    <div>
+      <label class="label">STT model</label>
+      <select class="input-sm" style="max-width:240px" x-model="sttModel">
+        <option value="base">Whisper Base</option>
+        <option value="small">Whisper Small</option>
+        <option value="medium">Whisper Medium</option>
+        <option value="large">Whisper Large</option>
+      </select>
+      <p class="text-muted text-xs mt-1">Larger models are more accurate but slower.</p>
     </div>
-    <template x-if="idResult">
-      <div :class="idOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="idResult"></div>
-    </template>
-  </div>
 
-  {# Character #}
-  <div class="card" x-data="{ charResult: '', charOk: false }">
-    <h2 class="text-base mb-1">Character &amp; tone</h2>
-    <p class="text-muted text-xs mb-3">Defines <em>who</em> the agent is and <em>how</em> it behaves — identity, tone, decision-making style, language rules. Markdown format.</p>
-    <textarea class="textarea" id="char-editor"
-              style="min-height:300px; font-size:0.8rem; line-height:1.5; tab-size:2"
-              @keydown.tab.prevent="
-                const start = $el.selectionStart;
-                const end = $el.selectionEnd;
-                $el.value = $el.value.substring(0, start) + '  ' + $el.value.substring(end);
-                $el.selectionStart = $el.selectionEnd = start + 2;
-              ">{{ character }}</textarea>
-    <div class="flex justify-end mt-3">
-      <button class="btn-primary btn-sm"
-              @click="
-                fetch('/config/character', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
-                  },
-                  body: JSON.stringify({content: document.getElementById('char-editor').value})
-                })
-                .then(r => { charOk = r.ok; return r.json(); })
-                .then(d => { charResult = charOk ? 'Character saved' : (d.detail || 'Error'); })
-                .catch(e => { charOk = false; charResult = e.message; })
-              ">
-        Save character
-      </button>
+    <div>
+      <label class="label">TTS backend</label>
+      <select class="input-sm" style="max-width:240px" x-model="backend">
+        <option value="edge-tts">Edge TTS (cloud)</option>
+        <option value="kokoro">Kokoro 82M (offline, multilingual)</option>
+      </select>
+      <p class="text-muted text-xs mt-1">Kokoro runs on-device (model bundled by default); it falls back to Edge TTS if the model isn't available. Restart after changing.</p>
     </div>
-    <template x-if="charResult">
-      <div :class="charOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="charResult"></div>
-    </template>
-  </div>
 
-  {# Default-identity account bindings (#110) #}
-  <div class="card" x-data="defaultAccounts(
-    {{ available_email_accounts|tojson }},
-    {{ available_calendar_accounts|tojson }},
-    {{ available_contacts_accounts|tojson }},
-    {{ default_email_accounts|tojson }},
-    {{ default_calendar_accounts|tojson }},
-    {{ default_contacts_accounts|tojson }}
-  )">
-    <h2 class="text-base mb-1">Email, calendar &amp; contacts accounts</h2>
-    <p class="text-muted text-xs mb-3">
-      Which accounts the default agent (when no agent is active) may use, and at what level.
-      <strong>None</strong> = no binding. <strong>Read</strong> = read only. <strong>Read &amp; write</strong>
-      = also send / create. Pick one email account as the <strong>sender</strong> identity. Leave
-      everything on <strong>None</strong> to keep the legacy behaviour (the default agent may use any
-      configured account). Add accounts in the Email / Calendar / Contacts tabs.
-    </p>
-
-    <template x-if="availableEmail.length">
-      <div class="mb-3">
-        <label class="label mb-1">Email</label>
-        <template x-for="acc in availableEmail" :key="acc">
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <span class="text-xs break-all" x-text="acc"></span>
-            <div class="flex items-center gap-2 shrink-0">
-              <select class="select input-sm" style="max-width:128px" x-model="emailAccess[acc]">
-                <option value="none">None</option>
-                <option value="read">Read</option>
-                <option value="read_write">Read &amp; write</option>
-              </select>
-              <label class="flex items-center gap-1 text-xs" :class="emailAccess[acc] === 'none' && 'opacity-40'">
-                <input type="radio" name="default-sender" :value="acc" x-model="senderIdentity"
-                       :disabled="emailAccess[acc] === 'none'"> sender
-              </label>
-            </div>
-          </div>
-        </template>
-      </div>
-    </template>
-    <template x-if="availableCalendar.length">
-      <div class="mb-3">
-        <label class="label mb-1">Calendar</label>
-        <template x-for="acc in availableCalendar" :key="acc">
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <span class="text-xs break-all" x-text="acc"></span>
-            <select class="select input-sm" style="max-width:128px" x-model="calAccess[acc]">
-              <option value="none">None</option>
-              <option value="read">Read</option>
-              <option value="read_write">Read &amp; write</option>
-            </select>
-          </div>
-        </template>
-      </div>
-    </template>
-    <template x-if="availableContacts.length">
-      <div>
-        <label class="label mb-1">Contacts</label>
-        <template x-for="acc in availableContacts" :key="acc">
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <span class="text-xs break-all" x-text="acc"></span>
-            <select class="select input-sm" style="max-width:128px" x-model="contactsAccess[acc]">
-              <option value="none">None</option>
-              <option value="read">Read</option>
-              <option value="read_write">Read &amp; write</option>
-            </select>
-          </div>
-        </template>
-      </div>
-    </template>
-    <template x-if="!availableEmail.length && !availableCalendar.length && !availableContacts.length">
-      <p class="text-xs text-muted">No accounts configured yet — add them in the Email / Calendar / Contacts tabs.</p>
-    </template>
-
-    <div class="flex justify-end mt-3">
-      <button class="btn-primary btn-sm" @click="save()">Save accounts</button>
+    {# Edge voice #}
+    <div x-show="backend === 'edge-tts'">
+      <label class="label">TTS voice</label>
+      <input type="text" class="input-sm" style="max-width:260px" x-model="ttsVoice" placeholder="en-US-AvaNeural">
+      <p class="text-muted text-xs mt-1">Use Edge TTS voice names. Example: en-US-AvaNeural.</p>
     </div>
-    <template x-if="result">
-      <div :class="ok ? 'alert-success' : 'alert-error'" class="mt-2" x-text="result"></div>
-    </template>
-  </div>
 
-  {# Voice #}
-  <div class="card" x-data="{
-    ttsEnabled: {{ tts_enabled|default('true', true)|tojson|forceescape }},
-    sttModel: {{ stt_model|default('base', true)|tojson|forceescape }},
-    ttsVoice: {{ tts_voice|default('en-US-AvaNeural', true)|tojson|forceescape }},
-    backend: {{ backend|default('edge-tts', true)|tojson|forceescape }},
-    kokoroVoice: {{ kokoro_voice|default('af_bella', true)|tojson|forceescape }},
-    previewText: '',
-    previewLang: '',
-    voiceResult: '',
-    voiceOk: false
-  }">
-    <h2 class="text-base mb-1">Voice</h2>
-    <p class="text-muted text-xs mb-3">Configure speech-to-text (STT) and text-to-speech (TTS) used for voice messages.</p>
+    {# Kokoro default voice #}
+    <div x-show="backend === 'kokoro'">
+      <label class="label">Default Kokoro voice</label>
+      <select class="input-sm" style="max-width:260px" x-model="kokoroVoice">
+        {% for v in kokoro_voices %}
+        <option value="{{ v }}">{{ v }}</option>
+        {% endfor %}
+      </select>
+      <p class="text-muted text-xs mt-1">Voice prefix sets the default language (af/am = English, ff = French, jf/jm = Japanese, …). Preview needs the Kokoro backend running.</p>
+    </div>
 
-    <div class="space-y-3">
-      <div class="flex items-center gap-2">
-        <label class="label mb-0">Enable TTS replies</label>
-        <input type="checkbox" x-model="ttsEnabled"
-               :checked="ttsEnabled === 'true' || ttsEnabled === true">
-      </div>
-
-      <div>
-        <label class="label">STT model</label>
-        <select class="input-sm" style="max-width:240px" x-model="sttModel">
-          <option value="base">Whisper Base</option>
-          <option value="small">Whisper Small</option>
-          <option value="medium">Whisper Medium</option>
-          <option value="large">Whisper Large</option>
-        </select>
-        <p class="text-muted text-xs mt-1">Larger models are more accurate but slower.</p>
-      </div>
-
-      <div>
-        <label class="label">TTS backend</label>
-        <select class="input-sm" style="max-width:240px" x-model="backend">
-          <option value="edge-tts">Edge TTS (cloud)</option>
-          <option value="kokoro">Kokoro 82M (offline, multilingual)</option>
-        </select>
-        <p class="text-muted text-xs mt-1">Kokoro runs on-device (model bundled by default); it falls back to Edge TTS if the model isn't available. Restart after changing.</p>
-      </div>
-
-      {# Edge voice #}
-      <div x-show="backend === 'edge-tts'">
-        <label class="label">TTS voice</label>
-        <input type="text" class="input-sm" style="max-width:260px" x-model="ttsVoice" placeholder="en-US-AvaNeural">
-        <p class="text-muted text-xs mt-1">Use Edge TTS voice names. Example: en-US-AvaNeural.</p>
-      </div>
-
-      {# Kokoro default voice #}
-      <div x-show="backend === 'kokoro'">
-        <label class="label">Default Kokoro voice</label>
-        <select class="input-sm" style="max-width:260px" x-model="kokoroVoice">
-          {% for v in kokoro_voices %}
-          <option value="{{ v }}">{{ v }}</option>
+    {# Preview — type text, pick a language (Kokoro), hear the selected voice #}
+    <div>
+      <label class="label">Preview</label>
+      <div class="flex items-center gap-2 flex-wrap">
+        <input type="text" class="input-sm" style="max-width:300px" x-model="previewText"
+               placeholder="Type a few words to hear… (blank = sample)">
+        <select x-show="backend === 'kokoro'" class="input-sm" style="max-width:180px"
+                x-model="previewLang" title="Pronunciation language">
+          <option value="">Auto (match voice)</option>
+          {% for code, label in kokoro_languages %}
+          <option value="{{ code }}">{{ label }}</option>
           {% endfor %}
         </select>
-        <p class="text-muted text-xs mt-1">Voice prefix sets the default language (af/am = English, ff = French, jf/jm = Japanese, …). Preview needs the Kokoro backend running.</p>
+        <button type="button" class="btn btn-sm"
+                @click="previewVoice(
+                  backend === 'kokoro' ? kokoroVoice : ttsVoice,
+                  previewText,
+                  backend === 'kokoro' ? previewLang : '',
+                  $event.currentTarget)">▶ Preview</button>
       </div>
-
-      {# Preview — type text, pick a language (Kokoro), hear the selected voice #}
-      <div>
-        <label class="label">Preview</label>
-        <div class="flex items-center gap-2 flex-wrap">
-          <input type="text" class="input-sm" style="max-width:300px" x-model="previewText"
-                 placeholder="Type a few words to hear… (blank = sample)">
-          <select x-show="backend === 'kokoro'" class="input-sm" style="max-width:180px"
-                  x-model="previewLang" title="Pronunciation language">
-            <option value="">Auto (match voice)</option>
-            {% for code, label in kokoro_languages %}
-            <option value="{{ code }}">{{ label }}</option>
-            {% endfor %}
-          </select>
-          <button type="button" class="btn btn-sm"
-                  @click="previewVoice(
-                    backend === 'kokoro' ? kokoroVoice : ttsVoice,
-                    previewText,
-                    backend === 'kokoro' ? previewLang : '',
-                    $event.currentTarget)">▶ Preview</button>
-        </div>
-        <p class="text-muted text-xs mt-1" x-show="backend === 'kokoro'">Language sets pronunciation independently of the voice — e.g. an Italian voice can read English text.</p>
-      </div>
-      {% include "partials/restart_note.html" %}
+      <p class="text-muted text-xs mt-1" x-show="backend === 'kokoro'">Language sets pronunciation independently of the voice — e.g. an Italian voice can read English text.</p>
     </div>
-
-    <div class="flex justify-end mt-3">
-      <button class="btn-primary btn-sm"
-              @click="
-                const vals = {
-                  'voice.tts_enabled': String(ttsEnabled === true || ttsEnabled === 'true'),
-                  'voice.stt_model': sttModel,
-                  'voice.backend': backend,
-                  'voice.tts_voice': ttsVoice,
-                  'voice.kokoro.default_voice': kokoroVoice
-                };
-                fetch('/config', {
-                  method: 'PATCH',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
-                  },
-                  body: JSON.stringify({values: vals})
-                })
-                .then(r => { voiceOk = r.ok; return r.json(); })
-                .then(d => {
-                  voiceResult = voiceOk ? 'Voice settings saved' : (d.detail || 'Error');
-                  if (voiceOk && window.showToast) { window.showToast('Voice settings saved'); }
-                  if (voiceOk && d.restart_required && window.notifyRestartRequired) { notifyRestartRequired(); }
-                })
-                .catch(e => { voiceOk = false; voiceResult = e.message; })
-              ">
-        Save voice
-      </button>
-    </div>
-    <template x-if="voiceResult">
-      <div :class="voiceOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="voiceResult"></div>
-    </template>
+    {% include "partials/restart_note.html" %}
   </div>
+
+  <div class="flex justify-end mt-3">
+    <button class="btn-primary btn-sm"
+            @click="
+              const vals = {
+                'voice.tts_enabled': String(ttsEnabled === true || ttsEnabled === 'true'),
+                'voice.stt_model': sttModel,
+                'voice.backend': backend,
+                'voice.tts_voice': ttsVoice,
+                'voice.kokoro.default_voice': kokoroVoice
+              };
+              fetch('/config', {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + (localStorage.getItem('admin_api_key') || '')
+                },
+                body: JSON.stringify({values: vals})
+              })
+              .then(r => { voiceOk = r.ok; return r.json(); })
+              .then(d => {
+                voiceResult = voiceOk ? 'Voice settings saved' : (d.detail || 'Error');
+                if (voiceOk && window.showToast) { window.showToast('Voice settings saved'); }
+                if (voiceOk && d.restart_required && window.notifyRestartRequired) { notifyRestartRequired(); }
+              })
+              .catch(e => { voiceOk = false; voiceResult = e.message; })
+            ">
+      Save voice
+    </button>
+  </div>
+  <template x-if="voiceResult">
+    <div :class="voiceOk ? 'alert-success' : 'alert-error'" class="mt-2" x-text="voiceResult"></div>
+  </template>
 </div>

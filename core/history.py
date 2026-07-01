@@ -529,6 +529,7 @@ class ConversationHistory:
         and the ``telegram:<slug>`` channel that a per-agent bot's turns,
         session, and binding rows are stored under (#29).
         """
+        await self._ensure_schema()
         old_ch, new_ch = f"telegram:{old}", f"telegram:{new}"
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("UPDATE chat_agent SET agent = ? WHERE agent = ?", (new, old))

@@ -18,7 +18,6 @@ agent:
   timezone: "Europe/Zurich"
   skills_dir: "skills/"
   agents_dir: "agents/"        # optional seed dir — drop agent .md files here to auto-seed (empty by default)
-  active_agent: ""               # slug of the active agent; "" = default identity
 
 channels:
   telegram:

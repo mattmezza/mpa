@@ -20,10 +20,12 @@ An agent is exactly these things:
 - **tool identities** — its own credentials and sessions for the external CLI tools (its own GitHub token, its own browser profile), so each agent acts as a distinct identity (see [Tool identities](#tool-identities));
 - **email, calendar & contacts accounts** — which mail/calendar/contacts accounts it may use, at `read` or `read_write`, with an optional send identity (empty = no access; see [Email, calendar & contacts accounts](#email-calendar--contacts-accounts)).
 
-When **no** other agent is active, the assistant uses the **default agent** — the configured
-`character` (plus name and voice), edited at the top of the **Agents** tab — so first-run behaviour
-is unchanged. The default agent is always present; custom agents are alternatives that replace it
-when activated.
+When **no** other agent is active, the assistant answers as the **default** agent. The default is
+just a normal agent flagged with a per-row `is_default` property — not a reserved slug — so **any**
+agent can be made the default (**Make default** on its card), and the default renames, reassigns and
+deletes like any other agent. Exactly one agent is the default at a time; on first boot one is
+seeded from your `character.md` / config (initial slug `assistant`, freely renamable). Being the
+default is purely routing: the agent keeps its own memory scope, tools and account bindings.
 
 ## Where agents live
 
@@ -34,8 +36,11 @@ Agents mirror the [skills](/docs/skills) pipeline:
 - On first access they are **seeded** from any markdown files in `agents/` (configurable via
   `agent.agents_dir`). No agents ship by default — the directory is empty, so a fresh install
   starts with none; drop your own `.md` files there to auto-seed a gallery.
-- The **active** agent is a single config value, `agent.active_agent`, in the config store
-  (`data/config.db`). Empty = the default identity.
+- Which agent is the **default** is a per-row `is_default` flag; on first boot one agent is
+  seeded from config and flagged. It's not a config key — the flag lives on the row, so
+  reassigning or renaming the default needs no config cascade.
+- Each agent also has an `enabled` flag (the kill-switch, default on). A disabled agent
+  processes nothing — see [Enabling / disabling](#enabling--disabling-an-agent).
 
 ## Markdown format
 
@@ -74,19 +79,30 @@ agent"*). `agent_name` is the name the assistant goes by while this agent is act
 
 ## Managing agents (admin UI)
 
-The **Agents** tab (next to *You*) shows the **default agent** at the top and lists every custom
-agent as a card below, marking the active one. From there you can:
+The **Agents** tab (next to *You*) lists every agent as a card, with the **default** pinned
+first. From there you can:
 
-- **Use** an agent (activates it; applies live to new turns) or revert to **Default**;
+- **Make default** — flag any agent as the default (the one that answers when nothing else
+  routes); the flag moves atomically, applied live to new turns;
+- **Disable / Enable** — the kill-switch (see [below](#enabling--disabling-an-agent));
 - **edit** an agent in the editor — a **guided form** (identity, voice, skill + tool
   checkboxes, secret scope) with a **raw markdown** toggle for power users;
 - **rename** an agent's slug in the editor — the new slug is cascaded to everything that
-  references it (per-chat bindings, private memories, scheduled jobs, the active selection,
-  and the `telegram:<slug>` bot channel), so no association is lost. An agent with its own
-  bot needs an agent restart afterwards so the bot re-registers under the new slug;
+  references it (per-chat bindings, private memories, scheduled jobs, and the `telegram:<slug>`
+  bot channel), so no association is lost. The `is_default` flag rides with the row, so a
+  renamed default stays the default. An agent with its own bot needs an agent restart afterwards;
 - **create** or **delete** agents.
 
 The page is responsive and touch-friendly: cards reflow to a single column at phone width.
+
+### Enabling / disabling an agent
+
+Every agent has an `enabled` flag (default on) — a **kill-switch**. **Disable** it (card badge
+**Off**, dimmed) and it **processes nothing**: any turn that resolves to it is dropped in
+`AgentCore.process` before any model or tool call, so **its Telegram bot goes silent**, it can't
+be spawned as a subagent, and it's hidden from the spawn roster. **Enable** brings it back. The
+switch is live — the running agent re-reads the flag each turn, no restart. (Coupled to Telegram
+today only because that's the sole channel; the gate itself is channel-agnostic.)
 
 ### Seeding your own
 
@@ -127,15 +143,13 @@ snapshotted identity until you send `/new`.
 
 ## Per-chat agents
 
-By default the active agent is global. You can instead bind an agent to a single
-conversation — it overrides the global one **only there**. Resolution runs a ladder in
-`AgentCore._resolve_agent(channel, user_id, chat_id)`:
+You can bind an agent to a single conversation so it answers **only there**, overriding the
+default. Resolution runs a ladder in `AgentCore._resolve_agent(channel, user_id, chat_id)`:
 
 0. a **per-agent bot** — a `telegram:<agent>` channel binds straight to that agent
    (see [Bot-per-agent](#bot-per-agent)),
 1. the per-chat binding for `(channel, user_id, chat_id)`,
-2. the global active agent,
-3. the default identity.
+2. the agent flagged as the default (`is_default`) — or `None` (the config base) if none is.
 
 Bindings live in the `chat_agent` table and work on **any** channel (Telegram, WhatsApp,
 REPL). They are set programmatically — by **bot-per-agent** routing and by Telegram
@@ -250,11 +264,10 @@ contacts_accounts:
 
 ### The default agent
 
-The default agent — active whenever **no** other agent is (the top of the **Agents** tab,
-`agent.character`) — has its own bindings too, set there under *Email, calendar & contacts
-accounts*. When you bind accounts there, the default agent routes and is enforced exactly like any
-agent; leave them all on **None** and it stays **unscoped** (the legacy behaviour: it may use
-any configured account, passing the account name explicitly). Changes apply live, no restart.
+The default is a normal agent, so its account bindings work exactly like any agent's (#110): it
+reaches only the accounts bound to it, at the level you set, editable in its editor under *Email,
+calendar & contacts accounts*. On first boot it inherits the bindings from your config. Changes
+apply live, no restart.
 
 ### Contacts (CardDAV / WebDAV)
 

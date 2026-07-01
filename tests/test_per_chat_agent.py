@@ -79,13 +79,13 @@ async def test_clear_session_system_keeps_messages(tmp_path) -> None:
 # ---- Agent resolution ladder + auto-bind -----------------------------------
 
 
-def _fake_agent(history: ConversationHistory, agents: AgentStore, active: str = ""):
+def _fake_agent(history: ConversationHistory, agents: AgentStore):
     """A stand-in ``self`` carrying just what the agent methods touch, with the
     real ``AgentCore`` methods bound to it — avoids constructing the heavy core."""
     fa: Any = types.SimpleNamespace(
         history=history,
         agents=agents,
-        config=types.SimpleNamespace(agent=types.SimpleNamespace(active_agent=active)),
+        config=types.SimpleNamespace(agent=types.SimpleNamespace()),
     )
     for name in (
         "_load_agent",
@@ -112,20 +112,20 @@ async def test_resolve_agent_ladder(tmp_path) -> None:
     h = ConversationHistory(db_path=str(tmp_path / "h.db"))
     store = await _seed_agents(tmp_path)
 
-    # 3. Default identity when nothing is set.
-    fa = _fake_agent(h, store, active="")
+    # 2 (bottom rung). No default flagged → None (the config base).
+    fa = _fake_agent(h, store)
     assert await fa._resolve_agent("telegram", "u1", "c1") is None
 
-    # 2. Global active agent.
-    fa = _fake_agent(h, store, active="writer")
+    # The flagged default answers when nothing else routes.
+    await store.set_default("writer")
     p = await fa._resolve_agent("telegram", "u1", "c1")
     assert p is not None and p.name == "writer"
 
-    # 1. Per-chat binding wins over global.
+    # 1. Per-chat binding wins over the default.
     await h.set_chat_agent("telegram", "u1", "coach", "c1")
     p = await fa._resolve_agent("telegram", "u1", "c1")
     assert p is not None and p.name == "coach"
-    # A different chat still gets the global agent.
+    # A different chat still gets the default.
     p2 = await fa._resolve_agent("telegram", "u1", "c2")
     assert p2 is not None and p2.name == "writer"
 
@@ -133,17 +133,18 @@ async def test_resolve_agent_ladder(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_resolve_agent_bot_per_agent_channel(tmp_path) -> None:
     # Rung 0 (#29): a "telegram:<name>" channel binds straight to that agent,
-    # outranking the per-chat binding and the global active agent.
+    # outranking the per-chat binding and the default.
     h = ConversationHistory(db_path=str(tmp_path / "h.db"))
     store = await _seed_agents(tmp_path)
     await h.set_chat_agent("telegram:coach", "u1", "writer", "c1")  # ignored by rung 0
-    fa = _fake_agent(h, store, active="writer")
+    await store.set_default("writer")
+    fa = _fake_agent(h, store)
     p = await fa._resolve_agent("telegram:coach", "u1", "c1")
     assert p is not None and p.name == "coach"
 
     # Unknown agent in the channel name → fall through to the ordinary ladder.
     p2 = await fa._resolve_agent("telegram:ghost", "u1", "c2")
-    assert p2 is not None and p2.name == "writer"  # global active agent
+    assert p2 is not None and p2.name == "writer"  # the default
 
 
 @pytest.mark.asyncio
@@ -151,9 +152,10 @@ async def test_resolve_agent_missing_binding_falls_through(tmp_path) -> None:
     h = ConversationHistory(db_path=str(tmp_path / "h.db"))
     store = await _seed_agents(tmp_path)
     await h.set_chat_agent("telegram", "u1", "ghost", "c1")  # not a real agent
-    fa = _fake_agent(h, store, active="writer")
+    await store.set_default("writer")
+    fa = _fake_agent(h, store)
     p = await fa._resolve_agent("telegram", "u1", "c1")
-    assert p is not None and p.name == "writer"  # falls through to global
+    assert p is not None and p.name == "writer"  # falls through to the default
 
 
 @pytest.mark.asyncio

@@ -201,10 +201,12 @@ async def _wizard_step_context(step: str, config_store: ConfigStore) -> dict[str
     elif step == "agent":
         store = await _agent_store_from_config(config_store)
         # Plain dicts so the wizard template (Jinja) can read emoji/role/name.
+        # The current default is offered as the "Default" radio, not a starter card.
         ctx["agents"] = [  # type: ignore[assignment]
-            {"name": p.name, "role": p.role, "emoji": p.emoji} for p in await store.list_agents()
+            {"name": p.name, "role": p.role, "emoji": p.emoji}
+            for p in await store.list_agents()
+            if not p.is_default
         ]
-        ctx["active"] = (await config_store.get("agent.active_agent") or "").strip()
     elif step == "email":
         raw = await config_store.get("email.providers")
         if raw:
@@ -1072,13 +1074,14 @@ def create_admin_app(
         """Telegram chats this agent participates in, for the per-chat settings
         UI (#129). A chat belongs to the agent when it resolves to it: the agent's
         own bot channel (``telegram:<name>``), a chat bound to it, or — when it is
-        the globally-active agent — an unbound default-bot chat. ``kind`` is
-        ``group`` for a negative Telegram id, else ``dm``.
+        the default agent — an unbound default-bot chat. ``kind`` is ``group`` for
+        a negative Telegram id, else ``dm``.
         """
         if not name:
             return []
         history = await _history_from_config(config_store)
-        active = (await config_store.get("agent.active_agent") or "").strip()
+        default = await (await _agent_store_from_config(config_store)).get_default()
+        default_name = default.name if default else ""
         own = f"telegram:{name}"
         out: list[dict] = []
         seen: set[str] = set()
@@ -1087,7 +1090,7 @@ def create_admin_app(
             if ch == own:
                 owner = name
             elif ch == "telegram":
-                owner = c["agent"] or active
+                owner = c["agent"] or default_name
             else:
                 continue  # another agent's bot, or a non-Telegram channel
             if owner != name:
@@ -1182,18 +1185,12 @@ def create_admin_app(
             scheduler_jobs=scheduler_jobs,
         )
 
-    async def _identity_context() -> dict:
-        """Context for the default-agent identity fragment (identity.html).
-
-        Shared by the standalone ``/partials/identity`` route and the merged
-        Agents tab, which renders the default agent above the agent list (#115).
-        """
-        from core.agents import _as_account_list
+    async def _voice_context() -> dict:
+        """Global speech (STT/TTS) settings for the Voice card. Not per-agent —
+        identity/character/accounts now live on the default agent row (#115 flw)."""
         from voice.pipeline import KOKORO_LANGUAGES, KOKORO_VOICES
 
         return {
-            "character": await config_store.get("agent.character") or "",
-            "agent_name": await config_store.get("agent.name") or "",
             "stt_model": await config_store.get("voice.stt_model") or "base",
             "tts_voice": await config_store.get("voice.tts_voice") or "en-US-AvaNeural",
             "tts_enabled": await config_store.get("voice.tts_enabled") or "true",
@@ -1201,30 +1198,22 @@ def create_admin_app(
             "kokoro_voice": await config_store.get("voice.kokoro.default_voice") or "af_bella",
             "kokoro_voices": KOKORO_VOICES,
             "kokoro_languages": KOKORO_LANGUAGES,
-            # Default-agent account bindings (#110): the registry accounts to pick
-            # from, plus what's currently bound to the default agent (no agent).
-            "available_email_accounts": await _email_account_names(config_store),
-            "available_calendar_accounts": [
-                p["name"] for p in await _calendar_providers_context(config_store) if p["name"]
-            ],
-            "available_contacts_accounts": [
-                p["name"] for p in await _contact_providers_context(config_store) if p["name"]
-            ],
-            "default_email_accounts": _as_account_list(
-                await config_store.get("agent.email_accounts") or "", sender=True
-            ),
-            "default_calendar_accounts": _as_account_list(
-                await config_store.get("agent.calendar_accounts") or ""
-            ),
-            "default_contacts_accounts": _as_account_list(
-                await config_store.get("agent.contacts_accounts") or ""
-            ),
+        }
+
+    async def _agents_context() -> dict:
+        """Context for the Agents tab: all agents (the default flagged one pinned
+        first) + the global voice card (#115 flw)."""
+        store = await _agent_store_from_config(config_store)
+        agents = sorted(await store.list_agents(), key=lambda a: (not a.is_default, a.name))
+        return {
+            "agents": agents,
+            **await _voice_context(),
         }
 
     @app.get("/partials/identity", dependencies=[Depends(auth)])
     async def partial_identity() -> HTMLResponse:
-        """Default-agent identity fragment (also embedded in the Agents tab)."""
-        return _render_partial("partials/identity.html", **await _identity_context())
+        """Global Voice settings fragment (also embedded in the Agents tab)."""
+        return _render_partial("partials/identity.html", **await _voice_context())
 
     @app.get("/partials/you", dependencies=[Depends(auth)])
     async def partial_you() -> HTMLResponse:
@@ -1269,17 +1258,9 @@ def create_admin_app(
 
     @app.get("/partials/agents", dependencies=[Depends(auth)])
     async def partial_agents() -> HTMLResponse:
-        """Agents tab partial — the default agent (identity.html) above the list
-        of custom agents + the active-agent selector (#115)."""
-        store = await _agent_store_from_config(config_store)
-        agents = await store.list_agents()
-        active = (await config_store.get("agent.active_agent") or "").strip()
-        return _render_partial(
-            "partials/agents.html",
-            agents=agents,
-            active=active,
-            **await _identity_context(),
-        )
+        """Agents tab partial — the default agent pinned above the custom agents,
+        the active-agent selector, and the global voice card (#115 flw)."""
+        return _render_partial("partials/agents.html", **await _agents_context())
 
     @app.get("/partials/channels", dependencies=[Depends(auth)])
     async def partial_channels() -> HTMLResponse:
@@ -2992,24 +2973,14 @@ def create_admin_app(
     # ── Agents API ───────────────────────────────────────────────────
 
     async def _agents_partial() -> HTMLResponse:
-        store = await _agent_store_from_config(config_store)
-        agents = await store.list_agents()
-        active = (await config_store.get("agent.active_agent") or "").strip()
-        return _render_partial(
-            "partials/agents.html",
-            agents=agents,
-            active=active,
-            **await _identity_context(),
-        )
+        return _render_partial("partials/agents.html", **await _agents_context())
 
     @app.get("/agents", dependencies=[Depends(auth)])
     async def list_agents() -> dict:
         store = await _agent_store_from_config(config_store)
         agents = await store.list_agents()
-        active = (await config_store.get("agent.active_agent") or "").strip()
         return {
             "count": len(agents),
-            "active": active,
             "agents": [_agent_public(p) for p in agents],
         }
 
@@ -3077,6 +3048,44 @@ def create_admin_app(
         await store.upsert(agent)
         return await _agents_partial()
 
+    @app.post("/agents/default", dependencies=[Depends(auth)])
+    async def make_default_agent(request: Request) -> HTMLResponse:
+        """Designate an agent as the fallback default. Any agent can be the default;
+        the ``is_default`` flag moves atomically (#115 flw). Shared with the running
+        agent's store via the same DB, so the change is live."""
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise HTTPException(400, "Missing 'name' in request body")
+        store = await _agent_store_from_config(config_store)
+        if not await store.set_default(name):
+            raise HTTPException(404, f"Agent not found: {name}")
+        return await _agents_partial()
+
+    @app.post("/agents/enabled", dependencies=[Depends(auth)])
+    async def set_agent_enabled(request: Request) -> HTMLResponse:
+        """Kill-switch: turn an agent on/off. Off = it processes nothing (its
+        Telegram bot goes silent). Live via the shared DB — the running agent
+        re-reads the flag every turn (#115 flw)."""
+        content_type = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in content_type:
+            body = await request.form()
+        else:
+            body = await request.json()
+        name = str(body.get("name", "")).strip()
+        if not name:
+            raise HTTPException(400, "Missing 'name' in request body")
+        raw = body.get("enabled")  # JSON bool, or form string "true"/"false"
+        enabled = raw is True or str(raw).strip().lower() in ("true", "1", "on", "yes")
+        store = await _agent_store_from_config(config_store)
+        if not await store.set_enabled(name, enabled):
+            raise HTTPException(404, f"Agent not found: {name}")
+        return await _agents_partial()
+
     @app.post("/agents/delete", dependencies=[Depends(auth)])
     async def delete_agent(request: Request) -> HTMLResponse:
         content_type = request.headers.get("content-type", "")
@@ -3090,27 +3099,17 @@ def create_admin_app(
         store = await _agent_store_from_config(config_store)
         if not await store.delete(name):
             raise HTTPException(404, f"Agent not found: {name}")
-        # If the deleted agent was active, fall back to the default identity.
-        if (await config_store.get("agent.active_agent") or "").strip() == name:
-            await _set_active_agent("")
         return await _agents_partial()
-
-    async def _set_active_agent(name: str) -> None:
-        """Persist the active agent and hot-reload it into the running agent."""
-        await config_store.set("agent.active_agent", name)
-        agent = agent_state.agent
-        if agent:
-            agent.config.agent.active_agent = name
 
     @app.post("/agents/rename", dependencies=[Depends(auth)])
     async def rename_agent(request: Request) -> HTMLResponse:
         """Change an agent's slug, cascading it to every store that keys off it.
 
         The slug is a foreign key without a DB constraint: per-chat bindings,
-        private memory scope, scheduled jobs, the active-agent selection and the
-        ``telegram:<slug>`` bot channel all reference it by value, so each is
-        repointed here (#69). An agent with its own bot needs an agent restart for
-        the bot to re-register under the new slug.
+        private memory scope, scheduled jobs and the ``telegram:<slug>`` bot channel
+        all reference it by value, so each is repointed here (#69). The is_default
+        flag rides with the row, so a renamed default stays the default. An agent
+        with its own bot needs an agent restart for the bot to re-register.
         """
         content_type = request.headers.get("content-type", "")
         if "application/x-www-form-urlencoded" in content_type:
@@ -3144,29 +3143,12 @@ def create_admin_app(
         await MemoryStore(db_path=memory_db).rename_scope(old, new)
         await _get_job_store().rename_agent(old, new)
         await store.rename(old, new)
-        if (await config_store.get("agent.active_agent") or "").strip() == old:
-            await _set_active_agent(new)
         # Re-register live scheduler jobs so a renamed agent's cron/once jobs fire
         # under the new slug + channel immediately, not only after a restart. Bot
         # channels still need a restart (they are created at startup).
         agent = agent_state.agent
         if agent is not None:
             await agent.scheduler.load_jobs()
-        return await _agents_partial()
-
-    @app.post("/agents/activate", dependencies=[Depends(auth)])
-    async def activate_agent(request: Request) -> HTMLResponse:
-        content_type = request.headers.get("content-type", "")
-        if "application/x-www-form-urlencoded" in content_type:
-            body = await request.form()
-        else:
-            body = await request.json()
-        name = str(body.get("name", "")).strip()  # "" = default identity
-        if name:
-            store = await _agent_store_from_config(config_store)
-            if not await store.get(name):
-                raise HTTPException(404, f"Agent not found: {name}")
-        await _set_active_agent(name)
         return await _agents_partial()
 
     # ── Inspect API (active contexts + last-sent LLM payload) ──────────────
@@ -4131,11 +4113,20 @@ async def _skills_store_from_config(config_store: ConfigStore) -> SkillsStore:
 
 
 async def _agent_store_from_config(config_store: ConfigStore):
-    from core.agents import AgentStore
+    from core.agents import AgentStore, default_agent_from_values
 
     db_path = await config_store.get("agent.agents_db_path") or "data/agents.db"
     seed_dir = await config_store.get("agent.agents_dir") or "agents/"
-    return AgentStore(db_path=db_path, seed_dir=seed_dir)
+    # Seed the base ``default`` agent from config if absent (shared DB with the
+    # running agent) so the admin UI always shows it, even before first boot.
+    default_identity = default_agent_from_values(
+        character=await config_store.get("agent.character") or "",
+        agent_name=await config_store.get("agent.name") or "",
+        email_accounts=await config_store.get("agent.email_accounts") or "",
+        calendar_accounts=await config_store.get("agent.calendar_accounts") or "",
+        contacts_accounts=await config_store.get("agent.contacts_accounts") or "",
+    )
+    return AgentStore(db_path=db_path, seed_dir=seed_dir, default_identity=default_identity)
 
 
 async def _history_from_config(config_store: ConfigStore):
