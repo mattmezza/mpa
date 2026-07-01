@@ -91,9 +91,16 @@ async def test_legacy_jobs_persona_column_migrates(tmp_path):
 async def test_legacy_config_keys_migrate(tmp_path):
     store = ConfigStore(db_path=str(tmp_path / "config.db"))
     await store.set("agent.active_persona", "coach")
+    await store.set("agent.personae_dir", "custom/")
+    await store.set("agent.personae_db_path", "custom/personae.db")
     await store.set("accounts.persona_binding_migrated", "true")
     await store.seed_if_empty(yaml_path=str(tmp_path / "nonexistent.yml"))
     assert await store.get("agent.active_agent") == "coach"
     assert await store.get("agent.active_persona") is None
+    # Custom path keys fold too, so a deployment that overrode them still finds its DB.
+    assert await store.get("agent.agents_dir") == "custom/"
+    assert await store.get("agent.agents_db_path") == "custom/personae.db"
+    assert await store.get("agent.personae_dir") is None
+    assert await store.get("agent.personae_db_path") is None
     assert await store.get("accounts.agent_binding_migrated") == "true"
     assert await store.get("accounts.persona_binding_migrated") is None

@@ -2072,7 +2072,7 @@ def create_admin_app(
                     channel=channel_name,
                     job_id=job_id,
                     silent=silent,
-                    agent=agent,
+                    agent_name=agent,
                     origin_user_id=origin_user_id,
                     origin_chat_id=origin_chat_id,
                 )
@@ -2084,7 +2084,7 @@ def create_admin_app(
         elif job_type == "subagent":
             asyncio.create_task(
                 run_subagent_task(
-                    agent=agent,
+                    agent_name=agent,
                     task=task,
                     channel=channel_name,
                     job_id=job_id,

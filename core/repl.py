@@ -362,8 +362,8 @@ async def main() -> None:
             await agent.history.clear("repl", USER_ID, USER_ID)
 
     active = config.agent.active_agent
-    agent = await agent.agents.get(active) if active else None
-    _print_debug_config(config, agent)
+    active_agent = await agent.agents.get(active) if active else None
+    _print_debug_config(config, active_agent)
 
     while True:
         spinner.awaiting_input = True
