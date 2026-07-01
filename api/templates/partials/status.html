@@ -1,14 +1,14 @@
 {# Status bar partial — loaded via HTMX into #status-bar #}
 {% set status_label = status or (running and 'RUNNING' or 'STOPPED') %}
-{% set status_message = 'Your personal assistant bot is up and running.' %}
+{% set status_message = 'Your agents are up and running.' %}
 {% if status_label == 'STARTING' %}
-  {% set status_message = 'Your personal assistant bot is starting.' %}
+  {% set status_message = 'Your agents are starting...' %}
 {% elif status_label == 'RESTARTING' %}
-  {% set status_message = 'Your personal assistant bot is restarting.' %}
+  {% set status_message = 'Your agents are restarting...' %}
 {% elif status_label == 'STOPPING' %}
-  {% set status_message = 'Your personal assistant bot is stopping.' %}
+  {% set status_message = 'Your agents are stopping...' %}
 {% elif status_label == 'STOPPED' %}
-  {% set status_message = 'Your personal assistant bot is stopped.' %}
+  {% set status_message = 'Your agents are stopped.' %}
 {% endif %}
 {% if status_label == 'RUNNING' %}
 <button class="badge-ok" type="button" onclick="openAgentModal()" style="cursor: pointer;">{{ status_label }}</button>
