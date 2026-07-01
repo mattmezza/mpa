@@ -53,8 +53,13 @@ def llm_fallback_key(cfg: Config, provider: str) -> str:
     agent = cfg.agent
     if provider == "openai":
         return agent.openai_api_key or ""
-    if provider == "openrouter" and "openrouter" in (agent.openai_base_url or "").lower():
-        return agent.openai_api_key or ""
+    if provider == "openrouter":
+        # Prefer the dedicated OpenRouter LLM key (#128); fall back to the legacy
+        # "OpenAI-compatible base URL points at openrouter" arrangement.
+        if getattr(agent, "openrouter_api_key", ""):
+            return agent.openrouter_api_key
+        if "openrouter" in (agent.openai_base_url or "").lower():
+            return agent.openai_api_key or ""
     return ""
 
 
