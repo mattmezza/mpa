@@ -72,6 +72,10 @@ class AgentConfig(BaseModel):
     grok_base_url: str = ""
     deepseek_api_key: str = ""
     deepseek_base_url: str = ""
+    # OpenRouter (#128): a provider-agnostic gateway to many models through one
+    # OpenAI-compatible API. Base URL defaults via _DEFAULT_BASE_URLS in core.llm.
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = ""
     model: str = "deepseek-v4-flash"
     thinking_level: str = ""  # "" (off) | "low" | "medium" | "high" — only for reasoning models
     # Hard ceiling on tokens the model may emit per response. The agentic loop

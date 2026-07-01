@@ -66,6 +66,7 @@ _DEFAULT_BASE_URLS = {
     "google": "https://generativelanguage.googleapis.com/v1beta/openai",
     "grok": "https://api.x.ai/v1",
     "deepseek": "https://api.deepseek.com",
+    "openrouter": "https://openrouter.ai/api/v1",  # #128: OpenAI-compatible gateway
 }
 
 _ANTHROPIC_MODEL_ALIASES = {
@@ -315,6 +316,14 @@ class LLMClient:
                 provider,
                 getattr(config, "deepseek_api_key", ""),
                 getattr(config, "deepseek_base_url", ""),
+                thinking_level=thinking,
+            )
+        if provider == "openrouter":
+            # OpenAI-compatible; empty base_url falls back to _DEFAULT_BASE_URLS.
+            return cls(
+                provider,
+                getattr(config, "openrouter_api_key", ""),
+                getattr(config, "openrouter_base_url", ""),
                 thinking_level=thinking,
             )
         return cls("anthropic", getattr(config, "anthropic_api_key", ""), thinking_level=thinking)
