@@ -1243,6 +1243,15 @@ def create_admin_app(
         channel_data = await _channel_list_context(config_store, wacli)
         return _render_partial("partials/channels.html", **channel_data)
 
+    @app.get("/partials/accounts-tabs", dependencies=[Depends(auth)])
+    async def partial_accounts_tabs() -> HTMLResponse:
+        """Accounts tab wrapper — Email + Calendars + Contacts sub-tabs.
+
+        Thin shell; each sub-tab lazy-loads its own partial (/partials/email,
+        /partials/calendars, /partials/contacts) via htmx.
+        """
+        return _render_partial("partials/accounts_tabs.html")
+
     @app.get("/partials/calendars", dependencies=[Depends(auth)])
     async def partial_calendars() -> HTMLResponse:
         """Calendars tab partial."""

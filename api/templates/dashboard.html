@@ -118,17 +118,9 @@
             @click="select('jobs')">
       Jobs
     </button>
-    <button class="tab-link" :class="tab === 'calendars' && 'tab-link-active'"
-            @click="select('calendars')">
-      Calendars
-    </button>
-    <button class="tab-link" :class="tab === 'contacts' && 'tab-link-active'"
-            @click="select('contacts')">
-      Contacts
-    </button>
-    <button class="tab-link" :class="tab === 'email' && 'tab-link-active'"
-            @click="select('email')">
-      Email
+    <button class="tab-link" :class="tab === 'accounts' && 'tab-link-active'"
+            @click="select('accounts')">
+      Accounts
     </button>
     <button class="tab-link" :class="tab === 'secrets' && 'tab-link-active'"
             @click="select('secrets')">
@@ -701,9 +693,7 @@
       permissions: '/partials/permissions',
       skills: '/partials/skills',
       jobs: '/partials/jobs',
-      calendars: '/partials/calendars',
-      contacts: '/partials/contacts',
-      email: '/partials/email',
+      accounts: '/partials/accounts-tabs',
       secrets: '/partials/secrets',
       admin: '/partials/admin',
       inspect: '/partials/inspect-tabs'
@@ -714,14 +704,21 @@
       init() {
         const params = new URLSearchParams(window.location.search);
         let urlTab = params.get('tab');
-        // Legacy: the standalone Logs tab is now Inspect -> Logs. Redirect old
-        // ?tab=logs links to the Inspect wrapper with the Logs sub-tab active.
-        if (urlTab === 'logs') {
+        // Legacy: some standalone tabs moved under wrapper tabs with sub-tabs.
+        // Redirect old ?tab= links to the wrapper + the matching sub-tab.
+        const moved = {
+          logs: ['inspect', 'inspectsub', 'logs'],
+          calendars: ['accounts', 'accountsub', 'calendars'],
+          contacts: ['accounts', 'accountsub', 'contacts'],
+          email: ['accounts', 'accountsub', 'email'],
+        };
+        if (moved[urlTab]) {
+          const [top, subParam, subVal] = moved[urlTab];
           const u = new URL(window.location.href);
-          u.searchParams.set('tab', 'inspect');
-          u.searchParams.set('inspectsub', 'logs');
+          u.searchParams.set('tab', top);
+          u.searchParams.set(subParam, subVal);
           history.replaceState(history.state, '', u);
-          urlTab = 'inspect';
+          urlTab = top;
         }
         const initialTab = (urlTab && tabs[urlTab]) ? urlTab : 'identity';
         this.tab = initialTab;

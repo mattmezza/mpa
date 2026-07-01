@@ -1191,21 +1191,23 @@
     }
     window.emailTab = emailTab;
 
-    // Inspect tab wrapper: Context | Logs sub-tabs, each lazy-loaded via htmx.
-    // Mirrors the active sub-tab in the URL (?inspectsub=) like the top-level
-    // ?tab= param, so links are copy-pasteable.
-    function inspectTabs() {
-      const subs = { context: '/partials/inspect', logs: '/partials/logs' };
-      const allowed = Object.keys(subs);
+    // Reusable wrapper for a top-level tab that hosts lazy-loaded sub-tabs.
+    // opts: { subs: {name: '/partials/...'}, param, storageKey, container, fallback }
+    // Each sub-tab loads its own partial via htmx (so e.g. Logs polling only runs
+    // while shown) and the active sub-tab is mirrored in the URL (?<param>=) like
+    // the top-level ?tab= param, so links are copy-pasteable.
+    function subTabs(opts) {
+      const allowed = Object.keys(opts.subs);
+      const fallback = opts.fallback || allowed[0];
       return {
         sub: null,
         init() {
-          let initial = 'context';
+          let initial = fallback;
           try {
-            const q = new URLSearchParams(window.location.search).get('inspectsub');
+            const q = new URLSearchParams(window.location.search).get(opts.param);
             if (allowed.includes(q)) { initial = q; }
             else {
-              const ls = localStorage.getItem('inspect_sub');
+              const ls = localStorage.getItem(opts.storageKey);
               if (allowed.includes(ls)) { initial = ls; }
             }
           } catch (e) {}
@@ -1216,23 +1218,41 @@
         select(name) {
           if (this.sub === name) { return; }
           this.sub = name;
-          try { localStorage.setItem('inspect_sub', name); } catch (e) {}
+          try { localStorage.setItem(opts.storageKey, name); } catch (e) {}
           this._syncUrl(name);
           this._load(name);
         },
         _syncUrl(name) {
           try {
             const url = new URL(window.location.href);
-            url.searchParams.set('inspectsub', name);
+            url.searchParams.set(opts.param, name);
             history.replaceState(history.state, '', url);
           } catch (e) {}
         },
         _load(name) {
-          if (window.htmx) { htmx.ajax('GET', subs[name], {target: '#inspect-sub', swap: 'innerHTML'}); }
+          if (window.htmx) { htmx.ajax('GET', opts.subs[name], {target: opts.container, swap: 'innerHTML'}); }
         }
       };
     }
+    window.subTabs = subTabs;
+
+    // Inspect tab: Context (payload inspector) | Logs.
+    function inspectTabs() {
+      return subTabs({
+        subs: { context: '/partials/inspect', logs: '/partials/logs' },
+        param: 'inspectsub', storageKey: 'inspect_sub', container: '#inspect-sub', fallback: 'context'
+      });
+    }
     window.inspectTabs = inspectTabs;
+
+    // Accounts tab: Email | Calendars | Contacts.
+    function accountsTabs() {
+      return subTabs({
+        subs: { email: '/partials/email', calendars: '/partials/calendars', contacts: '/partials/contacts' },
+        param: 'accountsub', storageKey: 'accounts_sub', container: '#accounts-sub', fallback: 'email'
+      });
+    }
+    window.accountsTabs = accountsTabs;
 
     // Global: handle 401 by redirecting to auth gate
     document.body.addEventListener('htmx:responseError', function(e) {
