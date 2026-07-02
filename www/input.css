@@ -265,3 +265,10 @@
     opacity: 0.4;
   }
 }
+
+[x-cloak] { display: none !important; }
+
+/* Mobile nav responsive */
+@media (max-width: 767px) {
+  .nav-links { display: none; }
+}
