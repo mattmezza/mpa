@@ -50,14 +50,7 @@ help:
 	@echo "    make docs         Build documentation (static export)"
 	@echo "    make clean        Remove venv and caches"
 	@echo ""
-	@echo "  Website (humux.dev marketing site):"
-	@echo "    make www-dev       Local dev server (port 8080)"
-	@echo "    make www-build     Build production CSS"
-	@echo "    make www-watch     Watch Tailwind CSS changes"
-	@echo "    make www-deploy    Deploy to Cloudflare Pages"
-	@echo "    make www-release name=www-v0.1  Tag & deploy new version"
-	@echo ""
-	@echo "  Release (MPA):"
+	@echo "  Release:"
 	@echo "    make release name=v0.1  Push and create a GitHub release"
 	@echo ""
 
@@ -159,47 +152,21 @@ kokoro:
 		curl -fL $(KOKORO_BASE_URL)/voices-v1.0.bin -o $(KOKORO_DIR)/voices-v1.0.bin
 	@echo "Kokoro ready in $(KOKORO_DIR). Set voice.backend: kokoro and restart the agent."
 
-# Website (www/) — marketing site for humux
-.PHONY: www-dev www-build www-watch www-deploy www-release
+# Remove venv and caches
+clean:
+	rm -rf .venv __pycache__ .pytest_cache .ruff_cache
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-www-dev:
-	cd www && make dev
-
-www-build:
-	cd www && make build
-
-www-watch:
-	cd www && make watch
-
-www-deploy:
-	cd www && make deploy
-
-www-release:
-	@test -n "$(name)" || (echo "Usage: make www-release name=www-v0.1" && exit 1)
-	cd www && git add -A && git commit -m "www: $(name)" || true
-	git tag "$(name)"
-	git push origin "$(name)"
-	@echo "Tag $(name) pushed. GHA workflow www-deploy.yml will build and deploy."
-
-# Also support: make release name=www-v0.1 (legacy)
+# Create a GitHub release and tag (bumps pyproject.toml version to match)
 release:
-	@test -n "$(name)" || (echo "Usage: make release name=v0.x (for mpa) or make www-release name=www-v0.x (for website)" && exit 1); \
-	case "$(name)" in www-*) make www-release name=$(name) ;; *) make mpa-release name=$(name) ;; esac
-
-mpa-release:
-	@test -n "$(name)" || (echo "Usage: make mpa-release name=v0.x" && exit 1)
-	ver=$$(echo "$(name)" | sed 's/^v//'); \
+	@test -n "$(name)" || (echo "Usage: make release name=v0.x" && exit 1)
+	@ver=$$(echo "$(name)" | sed 's/^v//'); \
 	case "$$ver" in *.*.*) ;; *.*) ver="$$ver.0" ;; *) ver="$$ver.0.0" ;; esac; \
 	sed -i.bak -E "s/^version = \".*\"/version = \"$$ver\"/" pyproject.toml && rm -f pyproject.toml.bak; \
 	echo "Set pyproject.toml version to $$ver"
 	@git diff --quiet pyproject.toml || (git add pyproject.toml && git commit -m "chore: bump version to $(name)")
 	git push
 	gh release create "$(name)" --generate-notes --latest
-
-# Remove venv and caches
-clean:
-	rm -rf .venv __pycache__ .pytest_cache .ruff_cache
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # Build minified CSS (production)
 css:
