@@ -19,11 +19,13 @@ help:
 	@echo "    make release name=www-v0.1   Tag, push, trigger GHA deploy"
 	@echo ""
 
+PORT ?= 9090
+
 # Local development — run both in separate terminals or use &
 dev:
-	@echo "Starting dev server at http://localhost:8080"
+	@echo "Starting dev server at http://localhost:$(PORT)"
 	@echo "Run 'make watch' in another terminal for CSS hot-reload"
-	@cd $(WWW_DIR) && python3 -m http.server 8080
+	@cd $(WWW_DIR) && python3 -m http.server $(PORT)
 
 # Watch Tailwind CSS for changes
 watch:
