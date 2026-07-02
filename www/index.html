@@ -36,6 +36,13 @@
 
   <!-- Alpine.js (CDN) -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+  // Fetch latest release version from GitHub (no deploy needed for version bumps)
+  fetch('https://api.github.com/repos/mattmezza/humux/releases/latest')
+    .then(r => r.json())
+    .then(d => { if (d.tag_name) document.getElementById('version-tag').textContent = d.tag_name; })
+    .catch(() => {});
+  </script>
 </head>
 <body>
 
@@ -94,7 +101,7 @@
       <div class="mb-4 inline-flex items-center gap-2 rounded-full border px-4 py-1 text-xs"
         style="border-color: var(--color-accent-dim); background: var(--color-accent-glow); color: var(--color-accent);">
         <span class="inline-block h-1.5 w-1.5 rounded-full" style="background: var(--color-accent);"></span>
-        v0.15 &mdash; Self-hosted &bull; Open source
+        <span id="version-tag">v0.15</span> &mdash; Self-hosted &bull; Open source
       </div>
 
       <h1 class="mx-auto mb-6 max-w-3xl text-4xl font-bold leading-tight sm:text-5xl md:text-6xl" style="color: #eee;">
