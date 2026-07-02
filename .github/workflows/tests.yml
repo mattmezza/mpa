@@ -2,6 +2,9 @@ name: tests
 
 on:
   pull_request:
+    paths:
+      - 'humux/**'
+      - '.github/workflows/tests.yml'
 
 jobs:
   pytest:
@@ -10,6 +13,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
+        working-directory: ./humux
         run: uv sync
       - name: Run tests
+        working-directory: ./humux
         run: uv run pytest -n auto

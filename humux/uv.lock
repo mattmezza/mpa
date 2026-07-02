@@ -697,6 +697,86 @@ wheels = [
 ]
 
 [[package]]
+name = "humux"
+version = "0.15.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "aiosqlite" },
+    { name = "anthropic" },
+    { name = "apscheduler" },
+    { name = "caldav" },
+    { name = "cryptography" },
+    { name = "edge-tts" },
+    { name = "fastapi" },
+    { name = "fastembed" },
+    { name = "faster-whisper" },
+    { name = "httpx" },
+    { name = "jinja2" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "playwright" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "python-multipart" },
+    { name = "python-telegram-bot" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+    { name = "tavily-python" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "vobject" },
+]
+
+[package.optional-dependencies]
+kokoro = [
+    { name = "kokoro-onnx" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiosqlite" },
+    { name = "anthropic" },
+    { name = "apscheduler", specifier = ">=3.10,<4" },
+    { name = "caldav" },
+    { name = "cryptography" },
+    { name = "edge-tts" },
+    { name = "fastapi" },
+    { name = "fastembed" },
+    { name = "faster-whisper" },
+    { name = "httpx" },
+    { name = "jinja2" },
+    { name = "kokoro-onnx", marker = "extra == 'kokoro'", specifier = ">=0.4" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "playwright" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "python-multipart", specifier = ">=0.0.22" },
+    { name = "python-telegram-bot" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+    { name = "tavily-python" },
+    { name = "uvicorn", extras = ["standard"] },
+    { name = "vobject", specifier = ">=0.9.9" },
+]
+provides-extras = ["kokoro"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+]
+
+[[package]]
 name = "icalendar"
 version = "6.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1044,86 +1124,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/21/54/1d71cd143752361c0aebef16ad3f55926a6faf7b112d355745c1f8a25f7f/mmh3-5.2.1-cp314-cp314t-win32.whl", hash = "sha256:29bc3973676ae334412efdd367fcd11d036b7be3efc1ce2407ef8676dabfeb82", size = 41934, upload-time = "2026-03-05T15:55:53.564Z" },
     { url = "https://files.pythonhosted.org/packages/9d/e4/63a2a88f31d93dea03947cccc2a076946857e799ea4f7acdecbf43b324aa/mmh3-5.2.1-cp314-cp314t-win_amd64.whl", hash = "sha256:28cfab66577000b9505a0d068c731aee7ca85cd26d4d63881fab17857e0fe1fb", size = 43036, upload-time = "2026-03-05T15:55:55.252Z" },
     { url = "https://files.pythonhosted.org/packages/a0/0f/59204bf136d1201f8d7884cfbaf7498c5b4674e87a4c693f9bde63741ce1/mmh3-5.2.1-cp314-cp314t-win_arm64.whl", hash = "sha256:dfd51b4c56b673dfbc43d7d27ef857dd91124801e2806c69bb45585ce0fa019b", size = 40391, upload-time = "2026-03-05T15:55:56.697Z" },
-]
-
-[[package]]
-name = "mpa"
-version = "0.14.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "aiosqlite" },
-    { name = "anthropic" },
-    { name = "apscheduler" },
-    { name = "caldav" },
-    { name = "cryptography" },
-    { name = "edge-tts" },
-    { name = "fastapi" },
-    { name = "fastembed" },
-    { name = "faster-whisper" },
-    { name = "httpx" },
-    { name = "jinja2" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "playwright" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "python-multipart" },
-    { name = "python-telegram-bot" },
-    { name = "pyyaml" },
-    { name = "sqlalchemy" },
-    { name = "tavily-python" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "vobject" },
-]
-
-[package.optional-dependencies]
-kokoro = [
-    { name = "kokoro-onnx" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiosqlite" },
-    { name = "anthropic" },
-    { name = "apscheduler", specifier = ">=3.10,<4" },
-    { name = "caldav" },
-    { name = "cryptography" },
-    { name = "edge-tts" },
-    { name = "fastapi" },
-    { name = "fastembed" },
-    { name = "faster-whisper" },
-    { name = "httpx" },
-    { name = "jinja2" },
-    { name = "kokoro-onnx", marker = "extra == 'kokoro'", specifier = ">=0.4" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "playwright" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "python-multipart", specifier = ">=0.0.22" },
-    { name = "python-telegram-bot" },
-    { name = "pyyaml" },
-    { name = "sqlalchemy" },
-    { name = "tavily-python" },
-    { name = "uvicorn", extras = ["standard"] },
-    { name = "vobject", specifier = ">=0.9.9" },
-]
-provides-extras = ["kokoro"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
 ]
 
 [[package]]
