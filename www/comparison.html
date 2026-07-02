@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Comparison — humux vs other AI agents</title>
+  <meta name="description" content="How humux compares to OpenAI Assistants, Home Assistant, n8n, AutoGPT. Self-hosted personal AI vs the alternatives.">
+  <link rel="canonical" href="https://humux.dev/comparison">
+
+  <meta property="og:title" content="Comparison — humux vs other AI agents">
+  <meta property="og:description" content="How humux compares to OpenAI Assistants, Home Assistant, n8n, and AutoGPT.">
+  <meta property="og:url" content="https://humux.dev/comparison">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://humux.dev/assets/images/og-image.png">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Comparison — humux vs other AI agents">
+  <meta name="twitter:description" content="How humux compares to OpenAI Assistants, Home Assistant, n8n, and AutoGPT.">
+
+  <link rel="icon" type="image/svg+xml" href="/assets/images/favicon-32.svg">
+  <link rel="alternate icon" type="image/png" sizes="32x32" href="/assets/images/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/apple-touch-icon.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/assets/css/style.css">
+
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/intersect@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav class="sticky top-0 z-50 border-b border-[var(--color-border)]" style="background: rgba(6,6,6,0.85); backdrop-filter: blur(12px);">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
+      <a href="/" class="flex items-center gap-2 no-underline">
+        <span class="text-sm font-semibold tracking-wider" style="color: var(--color-accent);">humux</span>
+        <span class="text-xs" style="color: var(--color-muted);">/ˈhjuːmʌks/</span>
+      </a>
+      <div class="flex items-center gap-5 text-xs">
+        <a href="/" class="no-underline transition-colors" style="color: var(--color-secondary);">Home</a>
+        <a href="/features" class="no-underline transition-colors" style="color: var(--color-secondary);">Features</a>
+        <a href="/use-cases" class="no-underline transition-colors" style="color: var(--color-secondary);">Use Cases</a>
+        <a href="/comparison" class="font-medium no-underline" style="color: var(--color-accent);">Comparison</a>
+        <a href="https://github.com/mattmezza/mpa" target="_blank" rel="noopener" class="no-underline transition-colors" style="color: var(--color-secondary);">
+          <svg class="inline-block h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+        <a href="https://docs.humux.dev" target="_blank" rel="noopener" class="no-underline transition-colors" style="color: var(--color-secondary);">Docs</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="border-b px-5 py-20 text-center" style="border-color: var(--color-border); background: var(--color-surface);">
+    <span class="tag">Comparison</span>
+    <h1 class="mx-auto mt-4 max-w-3xl text-4xl font-bold leading-tight sm:text-5xl" style="color: #eee;">
+      humux is <span style="color: var(--color-accent);">not</span> a framework.<br>It's a complete personal AI.
+    </h1>
+    <p class="mx-auto mt-4 max-w-xl leading-relaxed" style="color: var(--color-secondary);">
+      Most "AI agent" products are frameworks that require assembly.
+      humux ships as a single container with all integrations built in.
+    </p>
+  </section>
+
+  <!-- Main comparison section -->
+  <section class="px-5 py-16">
+    <div class="mx-auto max-w-6xl">
+
+      <div class="overflow-x-auto rounded-lg border" style="border-color: var(--color-border);">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th class="min-w-[180px]">Feature</th>
+              <th class="min-w-[120px] text-center" style="color: var(--color-accent);">humux</th>
+              <th class="min-w-[120px] text-center" style="color: var(--color-secondary);">OpenAI Assistants</th>
+              <th class="min-w-[120px] text-center" style="color: var(--color-secondary);">Home Assistant</th>
+              <th class="min-w-[120px] text-center" style="color: var(--color-secondary);">n8n</th>
+              <th class="min-w-[120px] text-center" style="color: var(--color-secondary);">AutoGPT</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Self-hosted</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Single container deploy</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Messaging (Telegram &amp; WhatsApp)</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">Partial</td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Email (read, compose, manage)</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Calendar (CalDAV)</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">Partial</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Contacts (CardDAV &amp; Google)</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Persistent memory</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Voice (STT + TTS, offline)</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">Cloud only</td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Markdown skills (no-code)</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Subagents</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">Workflows</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Scheduled tasks / cron</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Web search</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">Via nodes</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Browser automation</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">Via nodes</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Encrypted secrets vault</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">Env vars</td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Granular permissions</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Admin web UI</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">Dashboard</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Multiple LLM providers</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center" style="color: var(--color-warn);">OpenAI only</td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+            </tr>
+            <tr>
+              <td class="font-medium" style="color: #ddd;">Open source license</td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center cross"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+              <td class="text-center check"><svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="mt-4 text-xs text-center" style="color: var(--color-muted);">
+        Comparisons are approximate and reflect core capabilities at time of writing.
+        humux is designed as a personal AI — not a home automation hub or workflow tool.
+      </p>
+
+      <!-- Key differentiators -->
+      <div class="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="feature-card text-center">
+          <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-md" style="background: var(--color-accent-glow);">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--color-accent);"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3 class="mb-1 text-sm font-semibold" style="color: #eee;">Self-contained</h3>
+          <p class="text-xs leading-relaxed" style="color: var(--color-secondary);">One Docker container. No Kubernetes. No external databases. No cloud dependencies.</p>
+        </div>
+        <div class="feature-card text-center">
+          <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-md" style="background: var(--color-accent-glow);">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--color-accent);"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          </div>
+          <h3 class="mb-1 text-sm font-semibold" style="color: #eee;">Multi-agent</h3>
+          <p class="text-xs leading-relaxed" style="color: var(--color-secondary);">Multiple agent identities with per-agent bots, accounts, skills, and permissions. Concurrent, isolated, non-looping.</p>
+        </div>
+        <div class="feature-card text-center">
+          <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-md" style="background: var(--color-accent-glow);">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--color-accent);"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          </div>
+          <h3 class="mb-1 text-sm font-semibold" style="color: #eee;">Privacy-first</h3>
+          <p class="text-xs leading-relaxed" style="color: var(--color-secondary);">Encrypted vault. Local SQLite storage. No telemetry. Per-agent permissions. Offline voice option.</p>
+        </div>
+        <div class="feature-card text-center">
+          <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-md" style="background: var(--color-accent-glow);">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--color-accent);"><path d="M14.7 6.3a1 1 0 00 0 1.4l1.6 1.6a1 1 0 00 1.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+          </div>
+          <h3 class="mb-1 text-sm font-semibold" style="color: #eee;">Extensible</h3>
+          <p class="text-xs leading-relaxed" style="color: var(--color-secondary);">Add capabilities by writing markdown files. No plugin architecture. No code required. Teach your agent new CLI tools.</p>
+        </div>
+      </div>
+
+      <!-- Honest trade-offs -->
+      <section class="mt-20 rounded-lg border p-8" style="border-color: var(--color-border); background: var(--color-surface);">
+        <h2 class="text-lg font-semibold" style="color: #eee;">Honest trade-offs</h2>
+        <p class="mt-2 text-sm leading-relaxed" style="color: var(--color-secondary);">
+          humux is purpose-built as a <strong style="color: #ddd;">personal AI agent</strong>. It does some things differently:
+        </p>
+        <div class="mt-6 grid gap-4 sm:grid-cols-2">
+          <div class="rounded-md px-4 py-3" style="background: var(--color-elevated);">
+            <span class="text-xs font-semibold" style="color: var(--color-accent);">Not a home automation hub</span>
+            <p class="mt-1 text-xs" style="color: var(--color-secondary);">If you need IoT control, camera feeds, or Z-Wave integration, Home Assistant is the right tool. humux focuses on digital productivity.</p>
+          </div>
+          <div class="rounded-md px-4 py-3" style="background: var(--color-elevated);">
+            <span class="text-xs font-semibold" style="color: var(--color-accent);">Not a workflow engine</span>
+            <p class="mt-1 text-xs" style="color: var(--color-secondary);">For complex multi-step integrations between SaaS tools, n8n excels. humux is an AI agent with tool access, not a node-based pipeline builder.</p>
+          </div>
+          <div class="rounded-md px-4 py-3" style="background: var(--color-elevated);">
+            <span class="text-xs font-semibold" style="color: var(--color-accent);">Not a general-purpose framework</span>
+            <p class="mt-1 text-xs" style="color: var(--color-secondary);">AutoGPT and Assistants API let you build custom agent behaviors. humux ships with a complete set of integrations — but you can extend it via markdown skills.</p>
+          </div>
+          <div class="rounded-md px-4 py-3" style="background: var(--color-elevated);">
+            <span class="text-xs font-semibold" style="color: var(--color-accent);">Requires Docker + API keys</span>
+            <p class="mt-1 text-xs" style="color: var(--color-secondary);">humux needs Docker and at least one LLM API key. It's self-hosted but not zero-infrastructure. The trade-off for full data control.</p>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="border-t px-5 py-20 text-center" style="border-color: var(--color-border); background: var(--color-surface);">
+    <div class="mx-auto max-w-xl">
+      <h2 class="text-2xl font-bold" style="color: #eee;">The right tool for personal AI</h2>
+      <p class="mt-3 leading-relaxed" style="color: var(--color-secondary);">
+        If you want a self-hosted AI that handles messaging, email, calendar, and more — all in one container — humux is built for you.
+      </p>
+      <div class="mt-6 flex flex-wrap justify-center gap-3">
+        <a href="/" class="btn-accent no-underline text-sm">Get Started</a>
+        <a href="https://github.com/mattmezza/mpa" target="_blank" rel="noopener" class="btn-ghost no-underline text-sm">Star on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t px-5 py-12" style="border-color: var(--color-border); background: var(--color-base);">
+    <div class="mx-auto max-w-6xl">
+      <div class="flex flex-wrap items-start justify-between gap-8">
+        <div>
+          <span class="text-sm font-semibold" style="color: var(--color-accent);">humux</span>
+          <p class="mt-1 text-xs" style="color: var(--color-muted);">Human Multiplexer &mdash; /ˈhjuːmʌks/</p>
+        </div>
+        <div class="flex flex-wrap gap-10">
+          <div>
+            <span class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-secondary);">Site</span>
+            <ul class="mt-2 space-y-1 text-xs" style="color: var(--color-muted);">
+              <li><a href="/" class="no-underline">Home</a></li>
+              <li><a href="/features" class="no-underline">Features</a></li>
+              <li><a href="/use-cases" class="no-underline">Use Cases</a></li>
+              <li><a href="/comparison" class="no-underline">Comparison</a></li>
+            </ul>
+          </div>
+          <div>
+            <span class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-secondary);">Resources</span>
+            <ul class="mt-2 space-y-1 text-xs" style="color: var(--color-muted);">
+              <li><a href="https://github.com/mattmezza/mpa" target="_blank" rel="noopener" class="no-underline">GitHub</a></li>
+              <li><a href="https://docs.humux.dev" target="_blank" rel="noopener" class="no-underline">Documentation</a></li>
+              <li><a href="https://github.com/mattmezza/mpa/releases" target="_blank" rel="noopener" class="no-underline">Releases</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="mt-10 border-t pt-6 text-center text-xs" style="border-color: var(--color-border); color: var(--color-muted);">
+        &copy; 2026 Matt Mezza. MIT License.
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# Cloudflare Pages redirects
+/docs/*  https://docs.humux.dev/:splat  301
+/github  https://github.com/mattmezza/mpa  301
+/releases  https://github.com/mattmezza/mpa/releases  301
