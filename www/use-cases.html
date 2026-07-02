@@ -28,7 +28,6 @@
   <link rel="stylesheet" href="/assets/css/style.css">
 
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/intersect@3/dist/cdn.min.js"></script>
 </head>
 <body>
 
@@ -66,7 +65,7 @@
   <div class="mx-auto max-w-6xl px-5 py-16 space-y-24">
 
     <!-- Case 1: Solo Dev -->
-    <section x-data="{ revealed: false }" x-intersect="revealed = true" class="section-fade" :class="{ 'revealed': revealed }">
+    <section class="section-fade">
       <div class="grid items-center gap-10 lg:grid-cols-5">
         <div class="lg:col-span-3">
           <span class="tag mb-3">Persona 1</span>
@@ -127,7 +126,7 @@
     </section>
 
     <!-- Case 2: Privacy Advocate -->
-    <section x-data="{ revealed: false }" x-intersect="revealed = true" class="section-fade" :class="{ 'revealed': revealed }">
+    <section class="section-fade">
       <div class="grid items-center gap-10 lg:grid-cols-5">
         <div class="order-last lg:col-span-2 lg:order-first">
           <div class="terminal-window">
@@ -191,7 +190,7 @@
     </section>
 
     <!-- Case 3: Power User -->
-    <section x-data="{ revealed: false }" x-intersect="revealed = true" class="section-fade" :class="{ 'revealed': revealed }">
+    <section class="section-fade">
       <div class="grid items-center gap-10 lg:grid-cols-5">
         <div class="lg:col-span-3">
           <span class="tag mb-3">Persona 3</span>
@@ -258,7 +257,7 @@
     </section>
 
     <!-- Case 4: Team Assistant -->
-    <section x-data="{ revealed: false }" x-intersect="revealed = true" class="section-fade" :class="{ 'revealed': revealed }">
+    <section class="section-fade">
       <div class="grid items-center gap-10 lg:grid-cols-5">
         <div class="order-last lg:col-span-2 lg:order-first">
           <div class="terminal-window">

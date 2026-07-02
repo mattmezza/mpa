@@ -35,7 +35,6 @@
   <link rel="stylesheet" href="/assets/css/style.css">
 
   <!-- Alpine.js (CDN) -->
-  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/intersect@3/dist/cdn.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -105,8 +104,8 @@
       </div>
 
       <!-- Terminal mockup -->
-      <div class="mx-auto mt-12 max-w-xl text-left" x-data="{ visible: false }" x-intersect="visible = true">
-        <div class="terminal-window" :class="{ 'animate-pulse-glow': visible }">
+      <div class="mx-auto mt-12 max-w-xl text-left">
+        <div class="terminal-window animate-pulse-glow">
           <div class="terminal-header">
             <span class="terminal-dot red"></span>
             <span class="terminal-dot yellow"></span>
@@ -114,24 +113,19 @@
             <span class="ml-2 text-xs" style="color: var(--color-muted);">bash &mdash; humux quickstart</span>
           </div>
           <div class="terminal-body">
-            <template x-if="visible">
-              <div>
-                <div><span class="terminal-prompt"></span><span style="color: var(--color-accent);">git clone</span> https://github.com/mattmezza/humux.git</div>
-                <div class="opacity-60">Cloning into 'mpa'... done.</div>
-                <div class="mt-2"><span class="terminal-prompt"></span><span style="color: var(--color-accent);">cd</span> mpa</div>
-                <div class="mt-2"><span class="terminal-prompt"></span><span style="color: var(--color-accent);">cp</span> .env.example .env</div>
-                <div class="mt-2"><span class="terminal-prompt"></span><span style="color: var(--color-accent);">cp</span> config.yml.example config.yml</div>
-                <div class="mt-2"><span class="terminal-prompt"></span><span style="color: var(--color-accent);">docker compose up -d</span></div>
-                <div class="opacity-60">[+] Running 3/3</div>
-                <div class="opacity-60">&nbsp;&nbsp;✔ Container mpa  Started</div>
-                <div class="mt-2 text-xs glow-text" style="color: var(--color-accent);">
-                  &gt; Admin UI at http://localhost:8000
-                </div>
+            <div>
+              <div><span class="terminal-prompt"></span><span style="color: var(--color-accent);">git clone</span> https://github.com/mattmezza/humux.git</div>
+              <div class="opacity-60">Cloning into 'humux'... done.</div>
+              <div class="mt-2"><span class="terminal-prompt"></span><span style="color: var(--color-accent);">cd</span> humux</div>
+              <div class="mt-2"><span class="terminal-prompt"></span><span style="color: var(--color-accent);">cp</span> .env.example .env</div>
+              <div class="mt-2"><span class="terminal-prompt"></span><span style="color: var(--color-accent);">cp</span> config.yml.example config.yml</div>
+              <div class="mt-2"><span class="terminal-prompt"></span><span style="color: var(--color-accent);">docker compose up -d</span></div>
+              <div class="opacity-60">[+] Running 3/3</div>
+              <div class="opacity-60">&nbsp;&nbsp;✔ Container humux  Started</div>
+              <div class="mt-2 text-xs glow-text" style="color: var(--color-accent);">
+                &gt; Admin UI at http://localhost:8000
               </div>
-            </template>
-            <template x-if="!visible">
-              <div><span class="terminal-prompt"></span><span class="opacity-40">_</span></div>
-            </template>
+            </div>
           </div>
         </div>
       </div>
